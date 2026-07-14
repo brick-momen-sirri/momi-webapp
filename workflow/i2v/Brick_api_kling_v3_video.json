@@ -1,0 +1,46 @@
+{
+  "3": {
+    "inputs": {
+      "multi_shot": "1 storyboard",
+      "multi_shot.storyboard_1_prompt": "",
+      "multi_shot.storyboard_1_duration": 5,
+      "generate_audio": false,
+      "model": "kling-v3",
+      "model.resolution": "1080p",
+      "model.aspect_ratio": "16:9",
+      "seed": 0,
+      "start_frame": [
+        "402",
+        0
+      ]
+    },
+    "class_type": "KlingVideoNode",
+    "_meta": {
+      "title": "Kling 3.0 Video"
+    }
+  },
+  "402": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "404": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

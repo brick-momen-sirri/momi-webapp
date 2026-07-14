@@ -1,0 +1,104 @@
+{
+  "352": {
+    "inputs": {
+      "image": "sd_outfit_1.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "353": {
+    "inputs": {
+      "image": "sd_outfit_2.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "354": {
+    "inputs": {
+      "image": "sd_outfit_3.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "356": {
+    "inputs": {
+      "image": "selfie_cartoon_style.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "359": {
+    "inputs": {
+      "model": "Seedance 2.0",
+      "model.prompt": "",
+      "model.resolution": "1080p",
+      "model.ratio": "16:9",
+      "model.duration": 5,
+      "model.generate_audio": true,
+      "model.auto_downscale": false,
+      "model.auto_upscale": 0,
+      "seed": "randomize",
+      "watermark": false,
+      "model.reference_images.image_1": [
+        "356",
+        0
+      ],
+      "model.reference_images.image_2": [
+        "352",
+        0
+      ],
+      "model.reference_images.image_3": [
+        "353",
+        0
+      ],
+      "model.reference_images.image_4": [
+        "354",
+        0
+      ],
+      "model.reference_videos.video_1": [
+        "364",
+        0
+      ]
+    },
+    "class_type": "ByteDance2ReferenceNode",
+    "_meta": {
+      "title": "ByteDance Seedance 2.0 Reference to Video"
+    }
+  },
+  "363": {
+    "inputs": {
+      "project_name": "0000_base",
+      "model_prefix": "Seedance 2.0_r2v",
+      "shot_number": 0,
+      "format": "auto",
+      "codec": "auto",
+      "create_project_dom": "",
+      "video": [
+        "359",
+        0
+      ]
+    },
+    "class_type": "SaveArchVizVideo",
+    "_meta": {
+      "title": "Save Brick Video"
+    }
+  },
+  "364": {
+    "inputs": {
+      "file": "01 (1).mp4",
+      "video-preview": ""
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "Load Video"
+    }
+  }
+}

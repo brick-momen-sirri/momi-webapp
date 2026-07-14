@@ -1,0 +1,416 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #27241f;
+  background: #f5f3ee;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.grain {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(39, 36, 31, 0.12) 1px, transparent 0),
+    linear-gradient(180deg, #f8f6f1 0%, #f0ede6 100%);
+  background-size: 20px 20px, 100% 100%;
+}
+
+.login-background {
+  position: relative;
+  overflow: hidden;
+  background-position: 0 0, center;
+  isolation: isolate;
+  animation: login-background-drift 28s ease-in-out infinite alternate;
+}
+
+.login-background::before {
+  content: "";
+  position: absolute;
+  inset: -24%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(17, 184, 165, 0.22), transparent 30%),
+    radial-gradient(circle at 45% 12%, rgba(99, 102, 241, 0.13), transparent 28%),
+    radial-gradient(circle at 78% 70%, rgba(255, 107, 53, 0.16), transparent 32%),
+    radial-gradient(circle at 62% 88%, rgba(168, 85, 247, 0.11), transparent 30%),
+    conic-gradient(from 120deg at 50% 50%, rgba(17, 184, 165, 0.12), rgba(255, 107, 53, 0.08), rgba(99, 102, 241, 0.11), rgba(17, 184, 165, 0.12));
+  filter: blur(58px) saturate(112%);
+  mix-blend-mode: multiply;
+  opacity: 0.42;
+  transform: translate3d(0, 0, 0);
+  animation: login-aurora-drift 32s ease-in-out infinite alternate;
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  animation: login-card-enter 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-panel {
+  position: relative;
+  overflow: hidden;
+  animation: login-panel-enter 540ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+}
+
+.login-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.login-dark-aurora::before {
+  content: "";
+  position: absolute;
+  inset: -28%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(17, 184, 165, 0.24), transparent 28%),
+    radial-gradient(circle at 78% 24%, rgba(255, 107, 53, 0.16), transparent 30%),
+    radial-gradient(circle at 48% 82%, rgba(99, 102, 241, 0.18), transparent 34%),
+    conic-gradient(from 230deg at 45% 50%, rgba(17, 184, 165, 0.16), rgba(255, 107, 53, 0.08), rgba(245, 243, 238, 0.06), rgba(17, 184, 165, 0.16));
+  filter: blur(46px) saturate(118%);
+  opacity: 0.38;
+  transform: translate3d(0, 0, 0);
+  animation: login-dark-aurora-drift 26s ease-in-out infinite alternate;
+}
+
+.login-dark-aurora::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(39, 36, 31, 0.3), rgba(39, 36, 31, 0.76));
+}
+
+.login-form-panel {
+  animation: login-form-panel-enter 560ms cubic-bezier(0.16, 1, 0.3, 1) 170ms both;
+}
+
+.login-stagger,
+.login-form-item {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: login-item-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-delay-1 {
+  animation-delay: 160ms;
+}
+
+.login-delay-2 {
+  animation-delay: 230ms;
+}
+
+.login-delay-3 {
+  animation-delay: 300ms;
+}
+
+.login-delay-4 {
+  animation-delay: 380ms;
+}
+
+.login-delay-5 {
+  animation-delay: 460ms;
+}
+
+.login-delay-6 {
+  animation-delay: 540ms;
+}
+
+.login-button {
+  box-shadow: 0 10px 24px rgba(255, 107, 53, 0.18);
+  transition:
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    transform 180ms ease;
+}
+
+.login-button:hover:not(:disabled) {
+  filter: brightness(1.03);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(255, 107, 53, 0.24);
+}
+
+.login-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 8px 18px rgba(255, 107, 53, 0.18);
+}
+
+@keyframes login-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes login-form-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes login-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-background-drift {
+  from {
+    background-position: 0 0, center;
+  }
+  to {
+    background-position: 18px 12px, center;
+  }
+}
+
+@keyframes login-aurora-drift {
+  from {
+    transform: translate3d(-18px, -10px, 0) rotate(-2deg) scale(1);
+  }
+  to {
+    transform: translate3d(18px, 12px, 0) rotate(2deg) scale(1.04);
+  }
+}
+
+@keyframes login-dark-aurora-drift {
+  from {
+    transform: translate3d(-12px, 8px, 0) rotate(1deg) scale(1);
+  }
+  to {
+    transform: translate3d(12px, -10px, 0) rotate(-2deg) scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-background,
+  .login-background::before,
+  .login-dark-aurora::before,
+  .login-card,
+  .login-panel,
+  .login-form-panel,
+  .login-stagger,
+  .login-form-item {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .login-button {
+    transition: background-color 120ms ease, opacity 120ms ease;
+  }
+
+  .login-button:hover:not(:disabled),
+  .login-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+html[data-theme="dark"] {
+  color: #f4f1ea;
+  background: #10100f;
+}
+
+html[data-theme="dark"] body {
+  color: #f4f1ea;
+  background: #10100f;
+}
+
+html[data-theme="dark"] .grain {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(245, 243, 238, 0.09) 1px, transparent 0),
+    linear-gradient(180deg, #141412 0%, #0d0d0c 100%);
+}
+
+html[data-theme="dark"] .login-background::before {
+  mix-blend-mode: screen;
+  opacity: 0.24;
+}
+
+html[data-theme="dark"] .login-dark-aurora::before {
+  mix-blend-mode: screen;
+  opacity: 0.42;
+}
+
+html[data-theme="dark"] .login-dark-aurora::after {
+  background: linear-gradient(135deg, rgba(12, 12, 11, 0.2), rgba(12, 12, 11, 0.76));
+}
+
+html[data-theme="dark"] :is(.bg-white, .bg-stone-50) {
+  background-color: #181816 !important;
+}
+
+html[data-theme="dark"] :is(.bg-white\/80, .bg-white\/90, .bg-white\/95) {
+  background-color: rgba(24, 24, 22, 0.88) !important;
+}
+
+html[data-theme="dark"] :is(.bg-stone-100, .bg-mist, .bg-mist\/80, .bg-mist\/70, .bg-mist\/60, .bg-mist\/50, .bg-mist\/40) {
+  background-color: #22211e !important;
+}
+
+html[data-theme="dark"] :is(.bg-stone-300, .disabled\:bg-stone-300:disabled) {
+  background-color: #4a4740 !important;
+}
+
+html[data-theme="dark"] :is(.bg-amber-50) {
+  background-color: rgba(146, 64, 14, 0.18) !important;
+}
+
+html[data-theme="dark"] :is(.bg-teal-50, .bg-emerald-50) {
+  background-color: rgba(20, 184, 166, 0.13) !important;
+}
+
+html[data-theme="dark"] :is(.bg-red-50) {
+  background-color: rgba(127, 29, 29, 0.18) !important;
+}
+
+html[data-theme="dark"] :is(.border-line, .border-stone-100, .border-stone-200, .border-stone-300, .border-stone-400) {
+  border-color: #3a3732 !important;
+}
+
+html[data-theme="dark"] :is(.border-amber-200) {
+  border-color: rgba(245, 158, 11, 0.34) !important;
+}
+
+html[data-theme="dark"] :is(.border-teal-100, .border-emerald-100) {
+  border-color: rgba(20, 184, 166, 0.28) !important;
+}
+
+html[data-theme="dark"] :is(.border-red-100, .border-red-200) {
+  border-color: rgba(248, 113, 113, 0.28) !important;
+}
+
+html[data-theme="dark"] .text-ink {
+  color: #f4f1ea !important;
+}
+
+html[data-theme="dark"] :is(.text-stone-900, .text-stone-800, .text-stone-700, .text-stone-600) {
+  color: #ddd6ca !important;
+}
+
+html[data-theme="dark"] :is(.text-stone-500, .text-stone-400) {
+  color: #aaa196 !important;
+}
+
+html[data-theme="dark"] :is(.text-amber-900, .text-amber-800) {
+  color: #f3c56d !important;
+}
+
+html[data-theme="dark"] :is(.text-teal-800, .text-teal-700, .text-emerald-700) {
+  color: #63d7ca !important;
+}
+
+html[data-theme="dark"] :is(.text-red-700, .text-red-600) {
+  color: #f58c8c !important;
+}
+
+html[data-theme="dark"] :is(input, textarea, select) {
+  background-color: #151513 !important;
+  border-color: #3a3732 !important;
+  color: #f4f1ea !important;
+}
+
+html[data-theme="dark"] :is(input, textarea)::placeholder {
+  color: #8f877d !important;
+}
+
+html[data-theme="dark"] :is(input:disabled, textarea:disabled, select:disabled) {
+  background-color: #23211e !important;
+  color: #8f877d !important;
+}
+
+html[data-theme="dark"] :is(table, thead) {
+  color: #ddd6ca;
+}
+
+html[data-theme="dark"] :is(.hover\:bg-white:hover, .hover\:bg-stone-50:hover, .hover\:bg-mist:hover, .hover\:bg-mist\/70:hover) {
+  background-color: #292723 !important;
+}
+
+html[data-theme="dark"] .hover\:bg-red-50:hover {
+  background-color: rgba(127, 29, 29, 0.22) !important;
+}
+
+html[data-theme="dark"] :is(.shadow-panel, .shadow-card, .shadow-2xl, .shadow-sm) {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34) !important;
+}
+
+html[data-theme="dark"] .theme-toggle {
+  background-color: #1d1c19 !important;
+  border-color: #3a3732 !important;
+  color: #ddd6ca !important;
+}
+
+html[data-theme="dark"] .theme-toggle:hover {
+  color: #11b8a5 !important;
+  border-color: rgba(17, 184, 165, 0.65) !important;
+  background-color: #25231f !important;
+}
+
+html[data-theme="dark"] .workflow-icon-img:not(.workflow-icon-selected) {
+  filter: invert(1) brightness(1.35) saturate(0.25);
+  opacity: 0.76;
+}
+
+html[data-theme="dark"] button:hover .workflow-icon-img:not(.workflow-icon-selected) {
+  filter: invert(1) brightness(1.65) saturate(0.45);
+  opacity: 0.95;
+}
+
+.scrollbar-thin {
+  scrollbar-color: #c9c1b2 transparent;
+  scrollbar-width: thin;
+}
+
+html[data-theme="dark"] .scrollbar-thin {
+  scrollbar-color: #5d574f transparent;
+}

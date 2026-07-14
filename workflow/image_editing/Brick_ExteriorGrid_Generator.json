@@ -1,0 +1,48 @@
+{
+  "1": {
+    "inputs": {
+      "image": "01.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "prompt": "\n  \"task\": \"Create a 1x2 grid of exterior architectural visualization images from the provided reference image.\",\n  \"main_instruction\": \"Use the input image as the main design reference. Preserve the original building identity, massing, proportions, facade logic, architectural language, window rhythm, roof shape, openings, scale, and overall design character. Generate two different camera angles of the same exterior architecture, making the result look like a professional architectural visualization camera study.\",\n  \"grid_config\": {\n    \"layout\": \"1x2\",\n    \"total_images\": 2,\n    \"aspect_ratio\": \"1:1 per image\",\n    \"presentation\": \"clean professional contact sheet\",\n    \"consistency\": \"same building, same design, same environment logic, different camera angles\"\n  },\n  \"quality_style\": {\n    \"render_quality\": \"photorealistic high-end architectural visualization\",\n    \"lighting\": \"natural realistic daylight\",\n    \"atmosphere\": \"clean, calm, elegant, realistic\",\n    \"detail_level\": \"sharp architectural details, realistic scale, clean edges, accurate perspective\",\n    \"camera_feel\": \"professional architectural photography\"\n  },\n  \"preserve_from_reference\": [\n    \"building design\",\n    \"main proportions\",\n    \"facade composition\",\n    \"window and door placement\",\n    \"roof and volume shape\",\n    \"architectural details\",\n    \"overall color mood\",\n    \"site relationship\",\n    \"realistic scale\"\n  ],\n  \"avoid\": [\n    \"do not redesign the building\",\n    \"do not change the architectural style\",\n    \"do not invent a new facade\",\n    \"do not add extra floors\",\n    \"do not change the main massing\",\n    \"do not change the building function\",\n    \"do not exaggerate materials\",\n    \"do not create fantasy architecture\",\n    \"do not add unrealistic details\",\n    \"do not distort perspective\"\n  ],\n  \"shots\": [\n    {\n      \"slot\": 1,\n      \"angle_name\": \"Clean front architectural view\",\n      \"camera_description\": \"Straight or slightly offset front view at human eye level with controlled vertical lines, balanced margins, and a clear full reading of the main facade. Show the entrance, window rhythm, facade proportions, material logic, roof edge, and ground connection while keeping the original building design unchanged.\"\n    },\n    {\n      \"slot\": 2,\n      \"angle_name\": \"Oblique 45-degree corner view\",\n      \"camera_description\": \"Three-quarter exterior view from one building corner at roughly 45 degrees, showing both the primary facade and side volume. Emphasize depth, massing, facade rhythm, window placement, roof shape, and realistic perspective while preserving the exact architectural language and proportions from the reference.\"\n    }\n  ],\n  \"final_output\": \"A professional 1x2 grid showing the same exterior architecture from two different camera angles, with consistent design, realistic lighting, clean composition, and high-end architectural visualization quality.\"\n}",
+      "model": "gpt-image-2",
+      "model.size": "3840x2160",
+      "model.custom_width": 1024,
+      "model.custom_height": 1024,
+      "model.background": "auto",
+      "model.quality": "low",
+      "n": 1,
+      "seed": 2011271999,
+      "model.images.image_1": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "OpenAIGPTImageNodeV2",
+    "_meta": {
+      "title": "OpenAI GPT Image 2"
+    }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": {
+      "title": "Save Image (Advanced)"
+    }
+  }
+}

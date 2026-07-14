@@ -1,0 +1,18 @@
+{
+  "_comment": "Fill these per workflow only when auto-detection is not enough. Keys must match GET /api/models id values.",
+  "_example": {
+    "workflow_model_id": {
+      "_comment": "Node IDs are ComfyUI prompt node IDs. The backend writes into node.inputs for each listed ID.",
+      "promptNodeIds": ["12"],
+      "imageInputNodeIds": ["23"],
+      "startFrameNodeIds": ["24"],
+      "endFrameNodeIds": ["25"],
+      "videoInputNodeIds": ["26"],
+      "widthNodeIds": ["30"],
+      "heightNodeIds": ["30"],
+      "seedNodeIds": ["31"],
+      "outputPathNodeIds": ["40"],
+      "projectNameNodeIds": ["41"]
+    }
+  }
+}

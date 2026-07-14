@@ -1,0 +1,61 @@
+{
+  "1": {
+    "inputs": {
+      "model": "Seedance 2.0",
+      "model.prompt": "",
+      "model.resolution": "1080p",
+      "model.ratio": "16:9",
+      "model.duration": 7,
+      "model.generate_audio": true,
+      "seed": 498214648,
+      "watermark": false,
+      "first_frame_asset_id": "",
+      "last_frame_asset_id": "",
+      "first_frame": [
+        "53",
+        0
+      ],
+      "last_frame": [
+        "54",
+        0
+      ]
+    },
+    "class_type": "ByteDance2FirstLastFrameNode",
+    "_meta": {
+      "title": "ByteDance Seedance 2.0 First-Last-Frame to Video"
+    }
+  },
+  "53": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "54": {
+    "inputs": {
+      "image": "00.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "55": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

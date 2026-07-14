@@ -1,0 +1,48 @@
+{
+  "359": {
+    "inputs": {
+      "model": "Seedance 2.0",
+      "model.prompt": "",
+      "model.resolution": "1080p",
+      "model.ratio": "16:9",
+      "model.duration": 5,
+      "model.generate_audio": true,
+      "model.auto_downscale": false,
+      "model.auto_upscale": 0,
+      "seed": 98158438,
+      "watermark": false,
+      "model.reference_images.image_1": [
+        "375",
+        0
+      ]
+    },
+    "class_type": "ByteDance2ReferenceNode",
+    "_meta": {
+      "title": "ByteDance Seedance 2.0 Reference to Video"
+    }
+  },
+  "375": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "377": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "359",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "29": {
+    "inputs": {
+      "prompt": "",
+      "negative_prompt": "",
+      "resolution": "1080p",
+      "aspect_ratio": "16:9",
+      "duration": 6,
+      "seed": 0,
+      "model": "veo-3.1-generate",
+      "generate_audio": false,
+      "first_frame": [
+        "51",
+        0
+      ],
+      "last_frame": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "Veo3FirstLastFrameNode",
+    "_meta": {
+      "title": "Google Veo 3 First-Last-Frame to Video"
+    }
+  },
+  "49": {
+    "inputs": {
+      "image": "00.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "51": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "55": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

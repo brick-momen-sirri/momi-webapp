@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+backend/dist/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Runtime state and generated backend data
+backend/data/
+
+# Logs
+*.log
+*.err
+*.err.log
+*.out.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test and tooling output
+coverage/
+.nyc_output/
+.cache/
+.vite/
+.turbo/
+
+# Hosting/tool state
+.vercel/
+.netlify/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

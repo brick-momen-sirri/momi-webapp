@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Momi">
+  <rect width="64" height="64" rx="16" fill="#27241f"/>
+  <path
+    d="M16 46V19.5c0-2.3 2.9-3.3 4.3-1.5L32 34.5 43.7 18c1.4-1.8 4.3-.8 4.3 1.5V46"
+    fill="none"
+    stroke="#f5f3ee"
+    stroke-width="5.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M24.5 50.5h15"
+    fill="none"
+    stroke="#11b8a5"
+    stroke-width="3"
+    stroke-linecap="round"
+  />
+</svg>

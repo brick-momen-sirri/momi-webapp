@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/momi-icon.svg" />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("momi_theme_v1");
+          if (theme === "dark" || theme === "light") {
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.style.colorScheme = theme;
+          }
+        } catch {
+          // Theme boot is best-effort.
+        }
+      })();
+    </script>
+    <title>Momi AI Generation Manager</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

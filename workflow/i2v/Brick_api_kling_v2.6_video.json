@@ -1,0 +1,43 @@
+{
+  "398": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "401": {
+    "inputs": {
+      "model_name": "kling-v2-6",
+      "prompt": "",
+      "mode": "pro",
+      "duration": 5,
+      "generate_audio": false,
+      "start_frame": [
+        "398",
+        0
+      ]
+    },
+    "class_type": "KlingImageToVideoWithAudio",
+    "_meta": {
+      "title": "Kling 2.6 Image(First Frame) to Video with Audio"
+    }
+  },
+  "403": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "401",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "1": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "12": {
+    "inputs": {
+      "prompt": "",
+      "duration": 5,
+      "generate_audio": false,
+      "model": "kling-v3",
+      "model.resolution": "1080p",
+      "seed": 0,
+      "first_frame": [
+        "1",
+        0
+      ],
+      "end_frame": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "KlingFirstLastFrameNode",
+    "_meta": {
+      "title": "Kling 3.0 First-Last-Frame to Video"
+    }
+  },
+  "13": {
+    "inputs": {
+      "image": "00.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "41": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

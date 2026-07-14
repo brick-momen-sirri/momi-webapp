@@ -1,0 +1,48 @@
+{
+  "1": {
+    "inputs": {
+      "prompt": "",
+      "aspect_ratio": "16:9",
+      "resolution": "1080p",
+      "negative_prompt": 8,
+      "duration_seconds": true,
+      "enhance_prompt": true,
+      "person_generation": "ALLOW",
+      "seed": 0,
+      "model": "veo-3.1-generate",
+      "generate_audio": false,
+      "image": [
+        "393",
+        0
+      ]
+    },
+    "class_type": "Veo3VideoGenerationNode",
+    "_meta": {
+      "title": "Google Veo 3 Video Generation"
+    }
+  },
+  "393": {
+    "inputs": {
+      "image": "00 (1).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "395": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}
