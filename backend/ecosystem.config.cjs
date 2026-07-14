@@ -8,7 +8,6 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       restart_delay: 5000,
-      max_memory_restart: "2500M",
       env: {
         NODE_ENV: "production",
         HOST: "127.0.0.1",

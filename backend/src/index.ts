@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import crypto from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -95,10 +96,11 @@ app.get("/api/runpod-input", async (req, res) => {
 
   try {
     await fs.access(input.filePath);
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Content-Type", contentTypeFromFilePath(input.filePath));
-    res.setHeader("Content-Disposition", `inline; filename="${path.basename(input.filePath).replace(/"/g, "")}"`);
-    res.sendFile(input.filePath);
+    await streamLocalFile(req, res, input.filePath, {
+      cacheControl: "no-store",
+      contentType: contentTypeFromFilePath(input.filePath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(input.filePath))}"`,
+    });
   } catch {
     res.status(404).json({ error: "RunPod input file not found." });
   }
@@ -879,7 +881,7 @@ app.get("/api/media", async (req, res) => {
   const user = getRequestUser(req);
   const rawPath = typeof req.query.path === "string" ? req.query.path : "";
   const resolvedPath = path.resolve(rawPath);
-  const allowedRoots = [brickProjectsRoot, localProjectsRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
+  const allowedRoots = [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
     .map((root) => path.resolve(root).toLowerCase());
 
   if (!allowedRoots.some((root) => resolvedPath.toLowerCase().startsWith(root))) {
@@ -896,7 +898,10 @@ app.get("/api/media", async (req, res) => {
 
   try {
     await fs.access(resolvedPath);
-    res.sendFile(resolvedPath);
+    await streamLocalFile(req, res, resolvedPath, {
+      contentType: contentTypeFromFilePath(resolvedPath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+    });
   } catch {
     res.status(404).json({ error: "Media file not found" });
   }
@@ -918,9 +923,11 @@ app.get("/api/jobs/:jobId/result-file", async (req, res) => {
       try {
         await fs.access(localPath);
         const contentType = contentTypeFromFilePath(localPath);
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${downloadFileName(job, absoluteUrl, contentType)}"`);
-        return res.sendFile(localPath);
+        await streamLocalFile(req, res, localPath, {
+          contentType,
+          disposition: `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
+        });
+        return;
       } catch {
         return res.status(404).json({ error: "Result file not found" });
       }
@@ -960,9 +967,11 @@ app.get("/api/jobs/:jobId/result-media", async (req, res) => {
       try {
         await fs.access(localPath);
         const contentType = contentTypeFromFilePath(localPath);
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", `inline; filename="${downloadFileName(job, absoluteUrl, contentType)}"`);
-        return res.sendFile(localPath);
+        await streamLocalFile(req, res, localPath, {
+          contentType,
+          disposition: `inline; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
+        });
+        return;
       } catch {
         return res.status(404).json({ error: "Result file not found" });
       }
@@ -1601,6 +1610,91 @@ function sendUpstreamBody(upstream: Response, res: express.Response) {
   Readable.from(upstream.body as unknown as AsyncIterable<Uint8Array>).on("error", (error) => {
     res.destroy(error);
   }).pipe(res);
+}
+
+async function streamLocalFile(
+  req: express.Request,
+  res: express.Response,
+  filePath: string,
+  options: { contentType: string; disposition?: string; cacheControl?: string },
+) {
+  const stat = await fs.stat(filePath);
+  if (!stat.isFile()) {
+    throw new Error("Media file not found");
+  }
+
+  const fileSize = stat.size;
+  const range = parseByteRange(req.headers.range, fileSize);
+  if (range === "unsatisfiable") {
+    res.status(416);
+    res.setHeader("Content-Range", `bytes */${fileSize}`);
+    res.end();
+    return;
+  }
+
+  const start = range?.start ?? 0;
+  const end = range?.end ?? Math.max(0, fileSize - 1);
+  const contentLength = fileSize === 0 ? 0 : end - start + 1;
+
+  if (range) {
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+  }
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", options.contentType);
+  res.setHeader("Content-Length", String(contentLength));
+  res.setHeader("Cache-Control", options.cacheControl ?? "private, max-age=3600");
+  if (options.disposition) {
+    res.setHeader("Content-Disposition", options.disposition);
+  }
+
+  if (fileSize === 0) {
+    res.end();
+    return;
+  }
+
+  const stream = createReadStream(filePath, { start, end, highWaterMark: 64 * 1024 });
+  const closeStream = () => stream.destroy();
+  req.on("aborted", closeStream);
+  res.on("close", closeStream);
+  stream.on("error", (error) => {
+    res.destroy(error);
+  });
+  stream.pipe(res);
+}
+
+function parseByteRange(rangeHeader: string | undefined, fileSize: number): { start: number; end: number } | "unsatisfiable" | undefined {
+  if (!rangeHeader) return undefined;
+  const match = rangeHeader.match(/^bytes=(\d*)-(\d*)(?:,.*)?$/);
+  if (!match) return undefined;
+  if (fileSize <= 0) return "unsatisfiable";
+
+  const [, rawStart, rawEnd] = match;
+  if (!rawStart && !rawEnd) return undefined;
+
+  if (!rawStart) {
+    const suffixLength = Number(rawEnd);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return "unsatisfiable";
+    return {
+      start: Math.max(fileSize - Math.floor(suffixLength), 0),
+      end: fileSize - 1,
+    };
+  }
+
+  const start = Number(rawStart);
+  const end = rawEnd ? Number(rawEnd) : fileSize - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= fileSize) {
+    return "unsatisfiable";
+  }
+
+  return {
+    start: Math.floor(start),
+    end: Math.min(Math.floor(end), fileSize - 1),
+  };
+}
+
+function safeHeaderFileName(value: string) {
+  return value.replace(/["\r\n]/g, "_");
 }
 
 function contentTypeFromFilePath(filePath: string) {

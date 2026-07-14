@@ -41,6 +41,11 @@ export function getRequestUser(req: Request) {
 }
 
 export function extractAuthToken(req: Request) {
+  const queryToken = req.query.access_token;
+  if (typeof queryToken === "string" && queryToken.trim()) {
+    return queryToken.trim();
+  }
+
   const header = req.header("authorization") ?? "";
   const bearer = header.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if (bearer) return bearer;

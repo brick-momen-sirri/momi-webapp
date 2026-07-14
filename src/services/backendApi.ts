@@ -683,12 +683,12 @@ export async function permanentlyDeleteBackendJob(jobId: string) {
 
 export function backendResultFileUrl(jobId: string, index = 0) {
   const suffix = index > 0 ? `?${new URLSearchParams({ index: String(index) }).toString()}` : "";
-  return `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/result-file${suffix}`;
+  return withMediaAccessToken(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/result-file${suffix}`);
 }
 
 export function backendResultMediaUrl(jobId: string, index = 0) {
   const params = new URLSearchParams({ index: String(index) });
-  return `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/result-media?${params.toString()}`;
+  return withMediaAccessToken(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/result-media?${params.toString()}`);
 }
 
 export async function fetchBackendClipboardImage() {
@@ -936,6 +936,12 @@ function formatDuration(durationMs: number) {
 }
 
 function resolveMediaUrl(url: string) {
-  if (url.startsWith("/api/")) return `${API_BASE}${url}`;
+  if (url.startsWith("/api/")) return withMediaAccessToken(`${API_BASE}${url}`);
   return url;
+}
+
+function withMediaAccessToken(url: string) {
+  const token = getStoredAuthToken();
+  if (!token || url.includes("access_token=")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`;
 }
