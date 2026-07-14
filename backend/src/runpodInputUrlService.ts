@@ -7,6 +7,7 @@ import {
   runpodInputBaseUrl,
   runpodInputTokenSecret,
   runpodInputUrlTtlMs,
+  uploadedMediaRoot,
 } from "./config.js";
 
 export type RunpodInputKind = "image" | "video";
@@ -91,7 +92,7 @@ function safeEqual(left: string, right: string) {
 
 function isAllowedRunpodInputPath(filePath: string) {
   const resolvedPath = path.resolve(filePath);
-  return [brickProjectsRoot, localProjectsRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
+  return [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
     .map((root) => path.resolve(root))
     .some((root) => isPathInsideRoot(resolvedPath, root));
 }

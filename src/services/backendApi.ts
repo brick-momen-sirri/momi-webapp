@@ -617,6 +617,31 @@ export async function createBackendJob(payload: {
   return mapJob(data.job);
 }
 
+export async function uploadBackendMedia(media: Blob, options: { projectId: string; kind: "image" | "video"; name?: string }) {
+  const search = new URLSearchParams({
+    projectId: options.projectId,
+    kind: options.kind,
+  });
+  if (options.name) search.set("name", options.name);
+
+  const headers = new Headers();
+  if (media.type) headers.set("Content-Type", media.type);
+  const token = getStoredAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${API_BASE}/api/media/upload?${search.toString()}`, {
+    method: "POST",
+    headers,
+    body: media,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessageFromResponse(res));
+  }
+  const data = await res.json() as { url: string };
+  return data.url;
+}
+
 export async function renameBackendJob(projectId: string, jobId: string, title: string) {
   const data = await api<{ job: BackendJob }>(
     `/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}`,

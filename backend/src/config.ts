@@ -36,6 +36,7 @@ export const workflowRoots = process.env.WORKFLOW_ROOTS
 
 export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(comfyRoot, "output", "projects");
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");
+export const uploadedMediaRoot = process.env.UPLOADED_MEDIA_ROOT ?? path.join(localProjectsRoot, "_uploads");
 export const workflowMappingsPath = path.join(backendRoot, "config", "workflow-mappings.json");
 export const jobsStorePath = path.join(backendRoot, "data", "jobs.json");
 export const archivedItemsStorePath = path.join(backendRoot, "data", "archived-items.json");
@@ -68,6 +69,10 @@ export const runpodInputTokenSecret = (process.env.RUNPOD_INPUT_URL_SECRET ?? ru
 export const runpodInputUrlTtlMs = positiveNumber(process.env.RUNPOD_INPUT_URL_TTL_MS, runpodTimeoutMs + 15 * 60_000);
 export const runpodInlineMediaMaxBytes = positiveNumber(process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES, 12 * 1024 * 1024);
 export const runpodRequestBodyMaxBytes = positiveNumber(process.env.RUNPOD_REQUEST_BODY_MAX_BYTES, 19 * 1024 * 1024);
+export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX_BYTES, 1024 * 1024 * 1024);
+export const mediaUploadMaxBytes = positiveNumber(process.env.MEDIA_UPLOAD_MAX_BYTES, 1024 * 1024 * 1024);
+export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "5mb";
+export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 
 export function validateRuntimeConfigForStartup() {
   if (generationBackend !== "runpod") return;

@@ -9,8 +9,10 @@ import {
   generationBackend,
   jobsStorePath,
   localProjectsRoot,
+  runpodOutputMaxBytes,
   runpodInlineMediaMaxBytes,
   runpodInputBaseUrl,
+  uploadedMediaRoot,
 } from "./config.js";
 import { estimateFallbackCreditUsage, estimateWorkflowCredits } from "./creditEstimator.js";
 import { syncServerlessCreditUsage } from "./creditTrackerSyncService.js";
@@ -34,6 +36,8 @@ import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlServ
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
 import { ensureJobFolders, readJsonFile, safeSegment, saveJobMetadata, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
+import { logMemory } from "./memoryLogger.js";
+import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
 import {
   detectWorkflowLoadImageNames,
   detectWorkflowLoadVideoNames,
@@ -85,7 +89,9 @@ export function getJobs() {
 export async function getJobsWithExistingMedia(options: { archived?: boolean } = {}) {
   await reconcileActualCreditsForStoredJobs();
   const archived = Boolean(options.archived);
+  logMemory("before-media-scan");
   const mediaJobs = archived ? [] : await scanExistingMediaJobs();
+  logMemory("after-media-scan");
   const backendResultPaths = new Set(
     jobs.flatMap((job) => [...job.resultUrls, ...job.thumbnailUrls])
       .map(mediaFilePathFromUrl)
@@ -481,6 +487,7 @@ function dispatchRunpodJobs() {
 }
 
 async function runRunpodJob(job: Job) {
+  logMemory("job-start", job.id);
   const project = getProject(job.projectId);
   const model = getWorkflowModel(job.modelId);
   if (!project || !model) {
@@ -522,11 +529,13 @@ async function runRunpodJob(job: Job) {
     job.status = "running";
     await persistJobs();
 
+    logMemory("before-runpod-request", job.id);
     const result = await runComfyWorkflowOnRunpod({
       workflow,
       images: runpodImages.images,
       videos: runpodVideo?.videos ?? [],
     });
+    logMemory("after-runpod-request", job.id);
     job.runpodJobId = result.jobId;
     job.runpodStatus = result.status;
 
@@ -543,7 +552,9 @@ async function runRunpodJob(job: Job) {
     }
     job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
 
+    logMemory("before-runpod-download", job.id);
     const artifacts = await persistServerlessArtifacts({ project, job, model, media, selectedMedia });
+    logMemory("after-runpod-download", job.id);
     job.resultUrls = artifacts.resultUrls;
     job.thumbnailUrls = artifacts.thumbnailUrls;
     job.fileName = artifacts.selectedArtifacts[0]?.fileName ?? selectedMedia[0]?.filename;
@@ -565,6 +576,7 @@ async function runRunpodJob(job: Job) {
     job.status = "completed";
     job.completedAt = new Date().toISOString();
     await incrementProjectJobCount(job.projectId);
+    logMemory("job-finished", job.id);
   } catch (error) {
     if (job.status !== "canceled") {
       job.status = "failed";
@@ -583,6 +595,7 @@ async function runRunpodJob(job: Job) {
         job.creditsUsed = 0;
       }
     }
+    logMemory("job-failed", job.id);
   } finally {
     await persistJobs();
     await saveJobMetadata(job, project);
@@ -715,8 +728,13 @@ async function persistResultMedia(resultUrls: string[], outputFolder: string, jo
       const contentType = response.headers.get("content-type") ?? "";
       const extension = resultExtension(url, contentType);
       const filePath = path.join(outputFolder, `${jobId}_${String(index + 1).padStart(2, "0")}${extension}`);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      await fs.writeFile(filePath, buffer);
+      const contentLength = Number(response.headers.get("content-length") ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > runpodOutputMaxBytes) {
+        response.body?.cancel().catch(() => undefined);
+        persistedUrls.push(resultUrl);
+        continue;
+      }
+      await writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes);
       persistedUrls.push(`/api/media?path=${encodeURIComponent(filePath)}`);
     } catch {
       persistedUrls.push(resultUrl);
@@ -1000,14 +1018,15 @@ function localMediaFilePathFromUrl(value: string) {
 
 function isAllowedLocalMediaPath(filePath: string) {
   const resolvedPath = path.resolve(filePath).toLowerCase();
-  return [brickProjectsRoot, localProjectsRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
+  return [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
     .map((root) => path.resolve(root).toLowerCase())
     .some((root) => resolvedPath.startsWith(root));
 }
 
 async function readMediaFileAsDataUrl(filePath: string, kind: "image" | "video") {
+  const stat = await fs.stat(filePath);
+  assertRunpodInlineMediaSize(stat.size, kind, filePath);
   const buffer = await fs.readFile(filePath);
-  assertRunpodInlineMediaSize(buffer.length, kind, filePath);
   return `data:${mimeTypeFromMediaPath(filePath, kind)};base64,${buffer.toString("base64")}`;
 }
 

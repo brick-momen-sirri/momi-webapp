@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -8,11 +9,15 @@ import {
   comfyRoot,
   generationBackend,
   HOST,
+  jsonBodyLimit,
   localComfyEnabled,
   localProjectsRoot,
+  mediaUploadMaxBytes,
+  memoryLogIntervalMs,
   PORT,
   runpodPollIntervalMs,
   runpodTimeoutMs,
+  uploadedMediaRoot,
   validateRuntimeConfigForStartup,
 } from "./config.js";
 import {
@@ -68,11 +73,14 @@ import type { Job, Project, User } from "./types.js";
 import { getWorkflowModel, getWorkflowModels, loadWorkflowModels } from "./workflowService.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { assertMetadataHealth } from "./metadataHealthService.js";
+import { logMemory, startMemoryLogging } from "./memoryLogger.js";
+import { safeSegment } from "./storageService.js";
+import { writeStreamAtomically } from "./streamingMediaService.js";
 
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: jsonBodyLimit }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "momi-animation-backend", time: new Date().toISOString() });
@@ -791,6 +799,51 @@ app.post("/api/prompt/improve", async (req, res) => {
   }
 });
 
+app.post("/api/media/upload", async (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    if (isDemoAccount(user)) {
+      return res.status(403).json({ error: "Demo accounts are view-only and cannot upload media." });
+    }
+
+    const projectId = getQueryValue(req.query.projectId);
+    const project = getProject(projectId);
+    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canCreateJobInProject(user, project)) return res.status(403).json({ error: "Project editor access required." });
+
+    const kind = getQueryValue(req.query.kind) === "video" ? "video" : "image";
+    const contentType = String(req.headers["content-type"] ?? "");
+    if (!isAllowedUploadContentType(kind, contentType)) {
+      return res.status(415).json({ error: `Expected an ${kind} upload body.` });
+    }
+
+    const contentLength = Number(req.headers["content-length"] ?? 0);
+    if (Number.isFinite(contentLength) && contentLength > mediaUploadMaxBytes) {
+      return res.status(413).json({ error: `Upload is larger than the ${formatBytes(mediaUploadMaxBytes)} limit.` });
+    }
+
+    const fileName = uploadedMediaFileName(getQueryValue(req.query.name), kind, contentType);
+    const uploadId = `${Date.now()}-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const filePath = path.join(uploadedMediaRoot, safeSegment(project.id), safeSegment(user.id), `${uploadId}-${fileName}`);
+    const { bytesWritten } = await writeStreamAtomically(req, filePath, mediaUploadMaxBytes, requestAbortSignal(req));
+    if (bytesWritten <= 0) {
+      await fs.rm(filePath, { force: true }).catch(() => undefined);
+      return res.status(400).json({ error: "Upload body was empty." });
+    }
+
+    res.status(201).json({
+      url: mediaUrl(filePath),
+      name: fileName,
+      kind,
+      bytes: bytesWritten,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not upload media.";
+    const status = message.includes("maximum allowed size") || message.includes("larger than") ? 413 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
 app.get("/api/jobs", async (req, res) => {
   try {
     const user = getRequestUser(req);
@@ -1054,6 +1107,8 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 async function boot() {
   validateRuntimeConfigForStartup();
+  startMemoryLogging(memoryLogIntervalMs);
+  logMemory("boot-start");
   await Promise.all([
     loadAuthData(),
     loadWorkflowModels(),
@@ -1065,6 +1120,7 @@ async function boot() {
   app.listen(PORT, HOST, () => {
     console.log(`Momi backend listening on http://${HOST}:${PORT}`);
     console.log(`Generation backend: ${generationBackend}`);
+    logMemory("boot-listening");
   });
 }
 
@@ -1565,6 +1621,42 @@ function contentTypeFromExtension(extension: string) {
   return "application/octet-stream";
 }
 
+function requestAbortSignal(req: express.Request) {
+  const controller = new AbortController();
+  req.on("aborted", () => controller.abort());
+  return controller.signal;
+}
+
+function isAllowedUploadContentType(kind: "image" | "video", contentType: string) {
+  const lower = contentType.toLowerCase();
+  if (kind === "image") {
+    return lower.startsWith("image/") || lower === "application/octet-stream";
+  }
+  return lower.startsWith("video/") || lower === "application/octet-stream" || lower.includes("quicktime");
+}
+
+function uploadedMediaFileName(rawName: string, kind: "image" | "video", contentType: string) {
+  const parsed = path.parse(rawName || `${kind}-upload`);
+  const baseName = safeSegment(parsed.name || `${kind}-upload`);
+  const extension = cleanMediaExtension(parsed.ext) || extensionFromContentType(contentType) || (kind === "image" ? ".png" : ".mp4");
+  return `${baseName}${extension}`;
+}
+
+function cleanMediaExtension(extension: string) {
+  const cleaned = extension.toLowerCase().replace(/[^.a-z0-9]/g, "");
+  if (!cleaned || cleaned === ".") return "";
+  return cleaned.startsWith(".") ? cleaned : `.${cleaned}`;
+}
+
+function mediaUrl(filePath: string) {
+  return `/api/media?path=${encodeURIComponent(filePath)}`;
+}
+
+function formatBytes(value: number) {
+  const mib = value / (1024 * 1024);
+  return `${mib >= 1 ? mib.toFixed(1) : (value / 1024).toFixed(1)} ${mib >= 1 ? "MiB" : "KiB"}`;
+}
+
 function downloadFileName(job: Job, url: URL, contentType: string) {
   const urlFileName = url.searchParams.get("filename") || path.basename(url.searchParams.get("path") || url.pathname);
   const extension = path.extname(urlFileName) || extensionFromContentType(contentType);
@@ -1595,7 +1687,7 @@ function mediaFilePathFromUrl(url: URL) {
 
 function isAllowedMediaPath(filePath: string, options: { allowTemp?: boolean } = {}) {
   const resolvedPath = path.resolve(filePath).toLowerCase();
-  const roots = [brickProjectsRoot, localProjectsRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")];
+  const roots = [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")];
   if (options.allowTemp) {
     roots.push(path.join(comfyRoot, "temp"));
     roots.push("C:\\Comfy_pool\\instances");

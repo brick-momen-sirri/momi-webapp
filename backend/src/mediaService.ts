@@ -28,7 +28,7 @@ type ScanTarget = {
   root: string;
 };
 let mediaCache: { createdAt: number; jobs: Job[] } | undefined;
-const MEDIA_SCAN_CACHE_MS = 15_000;
+const MEDIA_SCAN_CACHE_MS = Math.max(15_000, Number(process.env.MEDIA_SCAN_CACHE_MS ?? 60_000) || 60_000);
 
 export async function scanExistingMediaJobs() {
   if (mediaCache && Date.now() - mediaCache.createdAt < MEDIA_SCAN_CACHE_MS) {

@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getUserById } from "./authService.js";
+import { runpodOutputMaxBytes } from "./config.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
 import { relativePathFromOutputRoot, resolveProjectOutputRoot } from "./projectMetadataService.js";
 import { assertManifestRecordSafe, ensureJobFolders, fallbackProjectFolder, readJsonFile, safeSegment, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache } from "./mediaService.js";
+import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
 import type { Job, Project, Resolution, WorkflowModel } from "./types.js";
 
@@ -41,9 +43,10 @@ type PersistServerlessArtifactsInput = {
   fetchImpl?: typeof fetch;
 };
 
-type MediaBytes = {
-  buffer: Buffer;
+type MediaSource = {
   contentType: string;
+  writeTo: (filePath: string) => Promise<void>;
+  cancel?: () => Promise<void>;
 };
 
 type BrickProjectFolders = {
@@ -110,12 +113,13 @@ async function persistOneArtifact(
   },
 ): Promise<PersistedServerlessArtifact> {
   const assetType: AssetType = media.isVideo ? "video" : "image";
+  let mediaSource: MediaSource | undefined;
 
   try {
-    const bytes = await readMediaBytes(media.url, context.fetchImpl);
-    const extension = resultExtension(media, bytes.contentType, assetType);
+    mediaSource = await openMediaSource(media.url, context.fetchImpl);
+    const extension = resultExtension(media, mediaSource.contentType, assetType);
     const target = await reserveArtifactTarget(context.project, context.job, context.model, context.folders, assetType, extension);
-    await fs.writeFile(target.filePath, bytes.buffer);
+    await mediaSource.writeTo(target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
 
     const jobFileName = `${safeSegment(context.job.id)}_${String(index + 1).padStart(2, "0")}_${path.basename(target.filePath)}`;
@@ -152,6 +156,7 @@ async function persistOneArtifact(
       manifestRecord,
     };
   } catch (error) {
+    await mediaSource?.cancel?.().catch(() => undefined);
     return {
       media: safeMediaRecord(media),
       assetType,
@@ -182,9 +187,9 @@ async function ensureBrickProjectFolders(project: Project, folderId?: string | n
   return folders;
 }
 
-async function readMediaBytes(value: string, fetchImpl: typeof fetch): Promise<MediaBytes> {
+async function openMediaSource(value: string, fetchImpl: typeof fetch): Promise<MediaSource> {
   if (value.startsWith("data:")) {
-    return readDataUrl(value);
+    return dataUrlMediaSource(value);
   }
 
   if (!/^https?:\/\//i.test(value)) {
@@ -196,13 +201,20 @@ async function readMediaBytes(value: string, fetchImpl: typeof fetch): Promise<M
     throw new Error(`Could not download RunPod output media: ${response.status} ${response.statusText}`);
   }
 
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > runpodOutputMaxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`RunPod output is ${formatBytes(contentLength)}, above the ${formatBytes(runpodOutputMaxBytes)} limit.`);
+  }
+
   return {
-    buffer: Buffer.from(await response.arrayBuffer()),
     contentType: response.headers.get("content-type") ?? "",
+    writeTo: (filePath) => writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes).then(() => undefined),
+    cancel: () => response.body?.cancel().then(() => undefined) ?? Promise.resolve(),
   };
 }
 
-function readDataUrl(value: string): MediaBytes {
+function dataUrlMediaSource(value: string): MediaSource {
   const commaIndex = value.indexOf(",");
   if (commaIndex < 0 || !value.startsWith("data:")) {
     throw new Error("Unsupported RunPod output data URL.");
@@ -212,11 +224,29 @@ function readDataUrl(value: string): MediaBytes {
   const isBase64 = header.endsWith(";base64");
   const contentType = (isBase64 ? header.slice(0, -";base64".length) : header).split(";")[0];
   const payload = value.slice(commaIndex + 1);
+  const byteLength = isBase64 ? estimateBase64Bytes(payload) : Buffer.byteLength(decodeURIComponent(payload), "utf8");
+  if (byteLength > runpodOutputMaxBytes) {
+    throw new Error(`Embedded RunPod output is ${formatBytes(byteLength)}, above the ${formatBytes(runpodOutputMaxBytes)} limit.`);
+  }
 
   return {
-    buffer: isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8"),
     contentType,
+    writeTo: async (filePath) => {
+      const buffer = isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8");
+      await fs.writeFile(filePath, buffer);
+    },
   };
+}
+
+function estimateBase64Bytes(base64: string) {
+  const clean = base64.replace(/\s/g, "");
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+}
+
+function formatBytes(value: number) {
+  const mib = value / (1024 * 1024);
+  return `${mib >= 1 ? mib.toFixed(1) : (value / 1024).toFixed(1)} ${mib >= 1 ? "MiB" : "KiB"}`;
 }
 
 async function reserveArtifactTarget(

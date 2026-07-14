@@ -55,6 +55,7 @@ import {
   updateBackendProfile,
   updateBackendProject,
   updateBackendUser,
+  uploadBackendMedia,
 } from "./services/backendApi";
 import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, UploadedVideo, WorkflowOptions } from "./types";
 import { estimateModelCreditLabel, estimateModelCredits } from "./utils/creditEstimator";
@@ -490,10 +491,19 @@ function App() {
           images
             .slice(0, requiredImages)
             .filter(Boolean)
-            .map((image) => image.croppedUrl ?? image.url)
-            .map(urlToDataUrl),
+            .map((image) => uploadJobMediaUrl(image.croppedUrl ?? image.url, {
+              projectId: selectedProjectId,
+              kind: "image",
+              name: image.name,
+            })),
         );
-        const inputVideo = selectedModel.requiresVideo && video ? await urlToDataUrl(video.url) : undefined;
+        const inputVideo = selectedModel.requiresVideo && video
+          ? await uploadJobMediaUrl(video.url, {
+            projectId: selectedProjectId,
+            kind: "video",
+            name: video.name,
+          })
+          : undefined;
         const backendJob = await createBackendJob({
           projectId: selectedProjectId,
           targetFolderId: targetFolderId || null,
@@ -1657,16 +1667,19 @@ function workflowOptionsWithSaveNumber(options: WorkflowOptions | undefined, sav
   };
 }
 
-async function urlToDataUrl(url: string) {
-  if (url.startsWith("data:")) return url;
-  if (!url.startsWith("blob:")) return url;
-  const blob = await fetch(url).then((response) => response.blob());
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read media."));
-    reader.readAsDataURL(blob);
-  });
+async function uploadJobMediaUrl(
+  url: string,
+  options: { projectId: string; kind: "image" | "video"; name?: string },
+) {
+  if (!url.startsWith("blob:") && !url.startsWith("data:")) return url;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not read ${options.kind} before upload.`);
+  }
+
+  const blob = await response.blob();
+  return uploadBackendMedia(blob, options);
 }
 
 function readPersistedGenerationSettings(): PersistedGenerationSettings {
