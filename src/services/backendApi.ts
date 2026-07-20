@@ -584,6 +584,17 @@ export async function fetchBackendRuntime() {
   return api<BackendRuntime>("/api/runtime");
 }
 
+export type BackendSnapshot = {
+  credits: { creditsLeft: number | null; creditsUsed?: number; currency?: string; updatedAt?: string; source: string } | null;
+  monthlyUsage: BackendMonthlyUsage;
+  runtime: BackendRuntime;
+  podStatus: PodStatusResponse | null;
+};
+
+export async function fetchBackendSnapshot() {
+  return api<BackendSnapshot>("/api/snapshot");
+}
+
 export async function fetchPodStatus() {
   const data = await api<{ status: PodStatusResponse }>("/api/pods/status");
   return data.status;

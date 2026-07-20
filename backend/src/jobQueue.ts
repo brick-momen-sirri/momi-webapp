@@ -1516,7 +1516,25 @@ async function persistArchivedMediaJobs() {
   await writeJsonFile(archivedItemsStorePath, archivedMediaJobs);
 }
 
-async function reconcileActualCreditsForStoredJobs() {
+// Every /api/jobs poll used to trigger this Credit Tracker round-trip. With
+// ~100 clients polling, that was dozens of reconciles per second; throttle so
+// it runs at most once per window regardless of poll volume.
+const reconcileThrottleMs = 30_000;
+let lastReconcileAt = 0;
+let reconcileInFlight: Promise<void> | undefined;
+
+function reconcileActualCreditsForStoredJobs() {
+  if (reconcileInFlight) return reconcileInFlight;
+  if (Date.now() - lastReconcileAt < reconcileThrottleMs) return Promise.resolve();
+
+  reconcileInFlight = runCreditReconcile().finally(() => {
+    lastReconcileAt = Date.now();
+    reconcileInFlight = undefined;
+  });
+  return reconcileInFlight;
+}
+
+async function runCreditReconcile() {
   const promptIds = jobs
     .map((job) => job.comfyPromptId)
     .filter((value): value is string => Boolean(value));

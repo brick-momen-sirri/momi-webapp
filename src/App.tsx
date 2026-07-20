@@ -38,6 +38,7 @@ import {
   fetchBackendMonthlyUsage,
   fetchBackendProjects,
   fetchBackendRuntime,
+  fetchBackendSnapshot,
   fetchBackendUsers,
   fetchComfyServers,
   fetchCurrentAccount,
@@ -317,29 +318,36 @@ function App() {
     }
 
     void loadBackendData();
+    let tick = 0;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
+      tick += 1;
       void fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs)).then((page) => {
         setBackendAvailable(true);
         applyBackendJobsPage(page);
       }).catch(() => setBackendAvailable(false));
-      void fetchBackendCredits().then((credits) => {
-        if (typeof credits.creditsLeft === "number") setBackendCreditsRemaining(Math.floor(credits.creditsLeft));
+      // One round-trip for the small, frequently-identical values instead of
+      // four separate fetches per tick.
+      void fetchBackendSnapshot().then((snapshot) => {
+        if (snapshot.credits && typeof snapshot.credits.creditsLeft === "number") {
+          setBackendCreditsRemaining(Math.floor(snapshot.credits.creditsLeft));
+        }
+        setMonthlyUsageByUser(mapMonthlyUsageByUser(snapshot.monthlyUsage.users));
+        setBackendRuntime(snapshot.runtime);
+        if (!snapshot.runtime.localComfyEnabled) setComfyServers([]);
+        if (snapshot.runtime.localComfyEnabled) void fetchComfyServers().then(setComfyServers).catch(() => undefined);
+        if (snapshot.podStatus) setPodStatus(snapshot.podStatus);
       }).catch(() => undefined);
-      void fetchBackendMonthlyUsage().then((usage) => setMonthlyUsageByUser(mapMonthlyUsageByUser(usage.users))).catch(() => undefined);
-      void fetchBackendRuntime().then((runtime) => {
-        setBackendRuntime(runtime);
-        if (!runtime.localComfyEnabled) setComfyServers([]);
-        if (runtime.localComfyEnabled) void fetchComfyServers().then(setComfyServers).catch(() => undefined);
-      }).catch(() => undefined);
-      void fetchPodStatus().then(setPodStatus).catch(() => undefined);
-      void fetchBackendUsers().then(setWorkspaceAccounts).catch(() => undefined);
-      void fetchBackendProjects().then((backendProjects) => {
-        setProjects(backendProjects);
-        setSelectedProjectId((current) =>
-          current === ALL_PROJECTS_ID || backendProjects.some((project) => project.id === current) ? current : ALL_PROJECTS_ID,
-        );
-      }).catch(() => undefined);
+      // Users and projects change rarely; refresh them every few ticks.
+      if (tick % 3 === 0) {
+        void fetchBackendUsers().then(setWorkspaceAccounts).catch(() => undefined);
+        void fetchBackendProjects().then((backendProjects) => {
+          setProjects(backendProjects);
+          setSelectedProjectId((current) =>
+            current === ALL_PROJECTS_ID || backendProjects.some((project) => project.id === current) ? current : ALL_PROJECTS_ID,
+          );
+        }).catch(() => undefined);
+      }
     }, 12000);
 
     return () => {

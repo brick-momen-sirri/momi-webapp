@@ -171,13 +171,62 @@ app.get("/api/auth/me", (req, res) => {
   res.json({ user: getRequestUser(req) });
 });
 
-app.get("/api/runtime", (_req, res) => {
-  res.json({
+function runtimeInfo() {
+  return {
     generationBackend,
     localComfyEnabled,
     runpodConfigured: Boolean(process.env.RUNPOD_ENDPOINT_ID && process.env.RUNPOD_API_KEY && process.env.COMFY_ORG_API_KEY),
     runpodPollIntervalMs,
     runpodTimeoutMs,
+  };
+}
+
+function monthlyUsageForUser(currentUser: User) {
+  const { startAt, endAt, month } = currentMonthRange();
+  const users = new Map<string, { userId: string; creditsSpent: number; jobsCompleted: number }>();
+
+  for (const job of getJobs()) {
+    if (!canAccessJob(currentUser, job)) continue;
+    const finishedAt = new Date(job.completedAt ?? job.createdAt).getTime();
+    if (job.status !== "completed" || !Number.isFinite(finishedAt)) continue;
+    if (finishedAt < startAt.getTime() || finishedAt >= endAt.getTime()) continue;
+
+    const current = users.get(job.userId) ?? {
+      userId: job.userId,
+      creditsSpent: 0,
+      jobsCompleted: 0,
+    };
+    current.creditsSpent = roundCredits(current.creditsSpent + creditsSpentForJob(job));
+    current.jobsCompleted += 1;
+    users.set(job.userId, current);
+  }
+
+  return {
+    month,
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+    users: Array.from(users.values()).sort((a, b) => b.creditsSpent - a.creditsSpent),
+  };
+}
+
+app.get("/api/runtime", (_req, res) => {
+  res.json(runtimeInfo());
+});
+
+// Aggregates the small, parameterless values the client polls on every tick so
+// they arrive in one round-trip instead of four. Jobs stay on their own
+// endpoint (pagination/filtering + heavier payload).
+app.get("/api/snapshot", async (req, res) => {
+  const currentUser = getRequestUser(req);
+  const [credits, podStatus] = await Promise.all([
+    getCredits().catch(() => null),
+    getPodStatus().catch(() => null),
+  ]);
+  res.json({
+    credits,
+    monthlyUsage: monthlyUsageForUser(currentUser),
+    runtime: runtimeInfo(),
+    podStatus,
   });
 });
 
@@ -607,32 +656,7 @@ app.get("/api/credits", async (_req, res) => {
 });
 
 app.get("/api/usage/monthly", (req, res) => {
-  const currentUser = getRequestUser(req);
-  const { startAt, endAt, month } = currentMonthRange();
-  const users = new Map<string, { userId: string; creditsSpent: number; jobsCompleted: number }>();
-
-  for (const job of getJobs()) {
-    if (!canAccessJob(currentUser, job)) continue;
-    const finishedAt = new Date(job.completedAt ?? job.createdAt).getTime();
-    if (job.status !== "completed" || !Number.isFinite(finishedAt)) continue;
-    if (finishedAt < startAt.getTime() || finishedAt >= endAt.getTime()) continue;
-
-    const current = users.get(job.userId) ?? {
-      userId: job.userId,
-      creditsSpent: 0,
-      jobsCompleted: 0,
-    };
-    current.creditsSpent = roundCredits(current.creditsSpent + creditsSpentForJob(job));
-    current.jobsCompleted += 1;
-    users.set(job.userId, current);
-  }
-
-  res.json({
-    month,
-    startAt: startAt.toISOString(),
-    endAt: endAt.toISOString(),
-    users: Array.from(users.values()).sort((a, b) => b.creditsSpent - a.creditsSpent),
-  });
+  res.json(monthlyUsageForUser(getRequestUser(req)));
 });
 
 app.get("/api/credits/dashboard", (req, res) => {
