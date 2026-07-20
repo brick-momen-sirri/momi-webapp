@@ -22,6 +22,67 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
   }
 }
 
+// Like readJsonFile, but for critical stores (the job list): if the main file
+// exists yet fails to parse, fall back to the ".bak" that writeJsonFile keeps
+// before each replace, instead of silently returning an empty list and losing
+// the entire history. Returns the fallback only when nothing parseable exists.
+export async function readJsonFileWithBackup<T>(filePath: string, fallback: T): Promise<T> {
+  for (const candidate of [filePath, `${filePath}.bak`]) {
+    let raw: string;
+    try {
+      raw = await fs.readFile(candidate, "utf8");
+    } catch {
+      continue; // Missing file: try the next candidate.
+    }
+    try {
+      const parsed = JSON.parse(raw) as T;
+      if (candidate !== filePath) {
+        console.warn(`Recovered ${path.basename(filePath)} from backup ${path.basename(candidate)}.`);
+      }
+      return parsed;
+    } catch (error) {
+      console.error(
+        `Could not parse ${path.basename(candidate)}: ${error instanceof Error ? error.message : String(error)}.`
+        + " Trying the next backup...",
+      );
+    }
+  }
+  return fallback;
+}
+
+// Keep a daily timestamped copy of a store (one per day, pruned after
+// retentionDays) so a lost/corrupt main file and .bak are still recoverable to
+// a recent point in time. Best-effort: failures are logged, never thrown.
+export async function snapshotJsonStore(filePath: string, retentionDays = 7) {
+  try {
+    await fs.access(filePath);
+  } catch {
+    return; // Nothing to snapshot yet.
+  }
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const day = new Date().toISOString().slice(0, 10);
+  const snapshotPath = path.join(dir, `${base}.${day}.snapshot`);
+  try {
+    await fs.copyFile(filePath, snapshotPath);
+    const entries = await fs.readdir(dir);
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith(`${base}.`) && name.endsWith(".snapshot"))
+        .map(async (name) => {
+          const full = path.join(dir, name);
+          const stat = await fs.stat(full).catch(() => undefined);
+          if (stat && stat.mtimeMs < cutoff) {
+            await fs.rm(full, { force: true }).catch(() => undefined);
+          }
+        }),
+    );
+  } catch (error) {
+    console.warn(`Could not snapshot ${base}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function writeJsonFile(filePath: string, data: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   assertNoEmbeddedMedia(data, path.basename(filePath));

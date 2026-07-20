@@ -55,7 +55,7 @@ import {
 import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
 import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
-import { ensureJobFolders, readJsonFile, safeSegment, saveJobMetadata, writeJsonFile } from "./storageService.js";
+import { ensureJobFolders, readJsonFileWithBackup, safeSegment, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
 import { moveResultFiles } from "./resultMoveService.js";
@@ -78,8 +78,11 @@ let resultMoveQueue = Promise.resolve();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 
 export async function loadJobs() {
+  // Take a point-in-time snapshot before mutating, and recover from .bak if the
+  // main store is corrupt, so a bad file can't silently wipe job history.
+  await snapshotJsonStore(jobsStorePath);
   let changed = false;
-  jobs = (await readJsonFile<Job[]>(jobsStorePath, [])).map((job) => {
+  jobs = (await readJsonFileWithBackup<Job[]>(jobsStorePath, [])).map((job) => {
     const normalized: Job = {
       ...job,
       userId: typeof job.userId === "string" && job.userId.trim() ? job.userId : "usr_momen",
@@ -101,7 +104,7 @@ export async function loadJobs() {
   if (changed) {
     await persistJobs();
   }
-  archivedMediaJobs = await readJsonFile<Job[]>(archivedItemsStorePath, []);
+  archivedMediaJobs = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
   return jobs;
 }
 

@@ -7,7 +7,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "tsx --test src/projectMetadataService.test.ts src/resultMoveService.test.ts src/runpodInputUrlService.test.ts src/runpodDebugLogger.test.ts src/runpodActivityTracker.test.ts src/runpodComfyService.test.ts src/runpodService.test.ts src/runpodVideoPreprocessService.test.ts src/seedancePromptWorkflowService.test.ts src/klingPromptWorkflowService.test.ts src/serverlessArtifactService.test.ts src/mediaResolutionService.test.ts src/creditTrackerSyncService.test.ts src/creditUsageAccounting.test.ts src/workflowService.test.ts src/jobQueue.test.ts src/creditEstimator.test.ts src/podStatusService.test.ts"
+    "test": "tsx --test src/projectMetadataService.test.ts src/resultMoveService.test.ts src/runpodInputUrlService.test.ts src/runpodDebugLogger.test.ts src/runpodActivityTracker.test.ts src/runpodComfyService.test.ts src/runpodService.test.ts src/runpodVideoPreprocessService.test.ts src/seedancePromptWorkflowService.test.ts src/klingPromptWorkflowService.test.ts src/serverlessArtifactService.test.ts src/mediaResolutionService.test.ts src/creditTrackerSyncService.test.ts src/creditUsageAccounting.test.ts src/storageService.test.ts src/workflowService.test.ts src/jobQueue.test.ts src/creditEstimator.test.ts src/podStatusService.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
