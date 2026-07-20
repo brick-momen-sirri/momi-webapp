@@ -13,18 +13,29 @@ import test, { after } from "node:test";
 const tempDir = mkdtempSync(path.join(os.tmpdir(), "momi-jobstore-it-"));
 const jobsJsonPath = path.join(tempDir, "jobs.json");
 const sqlitePath = path.join(tempDir, "jobs.sqlite");
+const archivedJsonPath = path.join(tempDir, "archived-items.json");
+const archivedSqlitePath = path.join(tempDir, "archived-items.sqlite");
 
 process.env.GENERATION_BACKEND = "runpod";
 process.env.JOB_STORE_DRIVER = "sqlite";
 process.env.JOBS_STORE_PATH = jobsJsonPath;
 process.env.JOBS_SQLITE_PATH = sqlitePath;
-process.env.JOBS_ARCHIVED_PATH = path.join(tempDir, "archived-items.json");
+process.env.JOBS_ARCHIVED_PATH = archivedJsonPath;
+process.env.JOBS_ARCHIVED_SQLITE_PATH = archivedSqlitePath;
 
 writeFileSync(
   jobsJsonPath,
   JSON.stringify([
     { id: "job_done", projectId: "prj_1", userId: "usr_1", status: "completed", createdAt: "2026-07-20T00:00:00.000Z", resultUrls: [], thumbnailUrls: [] },
     { id: "job_running", projectId: "prj_1", userId: "usr_1", status: "running", createdAt: "2026-07-20T00:01:00.000Z", resultUrls: [], thumbnailUrls: [] },
+  ]),
+  "utf8",
+);
+
+writeFileSync(
+  archivedJsonPath,
+  JSON.stringify([
+    { id: "job_archived", projectId: "prj_1", userId: "usr_1", status: "completed", source: "existing_project_media", createdAt: "2026-07-19T00:00:00.000Z", resultUrls: [], thumbnailUrls: [] },
   ]),
   "utf8",
 );
@@ -69,4 +80,13 @@ test("subsequent loadJobs reads from SQLite rather than the JSON file", async ()
   const loaded = jobQueue.getJobs();
   assert.equal(loaded.length, 2);
   assert.equal(loaded.find((job) => job.id === "job_running")?.status, "failed");
+});
+
+test("loadJobs also migrates archived-items.json into its own SQLite store", async () => {
+  // loadJobs (called above) seeds the archived store from archived-items.json.
+  const store = openSqliteJobStore(archivedSqlitePath, "archived_jobs");
+  const rows = store.loadAll();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "job_archived");
+  store.close();
 });

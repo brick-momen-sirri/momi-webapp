@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { getHistory, queuePrompt, toViewUrl, uploadImage, uploadInputFile } from "./comfyClient.js";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
+  archivedItemsSqlitePath,
   archivedItemsStorePath,
   brickProjectsRoot,
   comfyRoot,
@@ -79,6 +80,7 @@ let dispatching = false;
 let activeRunpodJobs = 0;
 let resultMoveQueue = Promise.resolve();
 let sqliteStore: SqliteJobStore | undefined;
+let archivedStore: SqliteJobStore | undefined;
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 
 export async function loadJobs() {
@@ -108,8 +110,26 @@ export async function loadJobs() {
     persistJobs().catch(() => undefined);
     await flushPersistedJobs();
   }
-  archivedMediaJobs = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
+  archivedMediaJobs = await loadRawArchivedJobs();
   return jobs;
+}
+
+// Reads the archived-items list from the configured store, seeding the SQLite
+// store once from archived-items.json if it is still empty.
+async function loadRawArchivedJobs(): Promise<Job[]> {
+  if (jobStoreDriver === "sqlite") {
+    archivedStore = openSqliteJobStore(archivedItemsSqlitePath, "archived_jobs");
+    const existing = archivedStore.loadAll();
+    if (existing.length > 0) return existing;
+
+    const legacy = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
+    if (legacy.length) {
+      archivedStore.replaceAll(legacy);
+      console.log(`Migrated ${legacy.length} archived items from archived-items.json into SQLite.`);
+    }
+    return legacy;
+  }
+  return readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
 }
 
 // Reads the raw job list from the configured store. For the SQLite driver, the
@@ -1550,9 +1570,15 @@ export async function flushPersistedJobs() {
 export function closeJobStore() {
   sqliteStore?.close();
   sqliteStore = undefined;
+  archivedStore?.close();
+  archivedStore = undefined;
 }
 
 async function persistArchivedMediaJobs() {
+  if (archivedStore) {
+    archivedStore.replaceAll(archivedMediaJobs);
+    return;
+  }
   await writeJsonFile(archivedItemsStorePath, archivedMediaJobs);
 }
 

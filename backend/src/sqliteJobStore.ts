@@ -28,13 +28,19 @@ export type SqliteJobStore = {
 
 type JobRow = { data: string };
 
-export function openSqliteJobStore(dbPath: string): SqliteJobStore {
+// `table` lets a second logical store (archived items) reuse this code. It is
+// a hardcoded identifier from config, never user input, but is validated to
+// keep the SQL string interpolation safe.
+export function openSqliteJobStore(dbPath: string, table = "jobs"): SqliteJobStore {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(table)) {
+    throw new Error(`Invalid SQLite table name: ${table}`);
+  }
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
+    CREATE TABLE IF NOT EXISTS ${table} (
       id TEXT PRIMARY KEY,
       seq INTEGER NOT NULL,
       status TEXT,
@@ -46,22 +52,22 @@ export function openSqliteJobStore(dbPath: string): SqliteJobStore {
       credits_used REAL,
       data TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_jobs_seq ON jobs(seq);
-    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id);
-    CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
-    CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_${table}_seq ON ${table}(seq);
+    CREATE INDEX IF NOT EXISTS idx_${table}_status ON ${table}(status);
+    CREATE INDEX IF NOT EXISTS idx_${table}_project ON ${table}(project_id);
+    CREATE INDEX IF NOT EXISTS idx_${table}_user ON ${table}(user_id);
+    CREATE INDEX IF NOT EXISTS idx_${table}_created ON ${table}(created_at);
   `);
 
   // seq is a stable, monotonically increasing insertion key (higher = newer),
   // assigned once per job and never rewritten, so a prepend doesn't touch
   // existing rows. loadAll returns newest-first (matching the in-memory array,
   // which createJob prepends to).
-  const selectAll = db.prepare<[], JobRow>("SELECT data FROM jobs ORDER BY seq DESC");
-  const selectIdSeq = db.prepare<[], { id: string; seq: number }>("SELECT id, seq FROM jobs");
-  const countStmt = db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM jobs");
+  const selectAll = db.prepare<[], JobRow>(`SELECT data FROM ${table} ORDER BY seq DESC`);
+  const selectIdSeq = db.prepare<[], { id: string; seq: number }>(`SELECT id, seq FROM ${table}`);
+  const countStmt = db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
   const upsert = db.prepare(`
-    INSERT INTO jobs (id, seq, status, project_id, user_id, created_at, completed_at, comfy_prompt_id, credits_used, data)
+    INSERT INTO ${table} (id, seq, status, project_id, user_id, created_at, completed_at, comfy_prompt_id, credits_used, data)
     VALUES (@id, @seq, @status, @project_id, @user_id, @created_at, @completed_at, @comfy_prompt_id, @credits_used, @data)
     ON CONFLICT(id) DO UPDATE SET
       status = excluded.status,
@@ -73,7 +79,7 @@ export function openSqliteJobStore(dbPath: string): SqliteJobStore {
       credits_used = excluded.credits_used,
       data = excluded.data
   `);
-  const deleteById = db.prepare<[string]>("DELETE FROM jobs WHERE id = ?");
+  const deleteById = db.prepare<[string]>(`DELETE FROM ${table} WHERE id = ?`);
 
   // Last-synced state, seeded from the DB on open. Hashes start empty, so the
   // first sync after boot rewrites row data once (seq is preserved); every

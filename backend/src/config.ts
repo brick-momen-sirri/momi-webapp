@@ -58,6 +58,7 @@ export const jobStoreDriver: "json" | "sqlite" =
   (process.env.JOB_STORE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
 export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "jobs.sqlite");
 export const archivedItemsStorePath = process.env.JOBS_ARCHIVED_PATH?.trim() || path.join(backendRoot, "data", "archived-items.json");
+export const archivedItemsSqlitePath = process.env.JOBS_ARCHIVED_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "archived-items.sqlite");
 export const projectsStorePath = path.join(backendRoot, "data", "projects.json");
 export const usersStorePath = path.join(backendRoot, "data", "users.json");
 export const sessionsStorePath = path.join(backendRoot, "data", "sessions.json");
