@@ -51,6 +51,12 @@ export const klingPromptSkillPath =
   path.join(workspaceRoot, "workflow", "prompt_generation", "Kling_image_to_video_skill.md");
 export const klingPromptOpenAIModel = process.env.KLING_PROMPT_OPENAI_MODEL?.trim() ?? "gpt5.5-pro";
 export const jobsStorePath = path.join(backendRoot, "data", "jobs.json");
+// Opt-in SQLite job store. Defaults to the JSON file store; set
+// JOB_STORE_DRIVER=sqlite to use SQLite (jobs are migrated from jobs.json on
+// first boot). Scoped to the main job list for now; archived items stay JSON.
+export const jobStoreDriver: "json" | "sqlite" =
+  (process.env.JOB_STORE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
+export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "jobs.sqlite");
 export const archivedItemsStorePath = path.join(backendRoot, "data", "archived-items.json");
 export const projectsStorePath = path.join(backendRoot, "data", "projects.json");
 export const usersStorePath = path.join(backendRoot, "data", "users.json");

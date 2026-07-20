@@ -8,6 +8,8 @@ import {
   comfyRoot,
   creditBalanceDeltaAccountingEnabled,
   generationBackend,
+  jobStoreDriver,
+  jobsSqlitePath,
   jobsStorePath,
   localProjectsRoot,
   runpodOutputMaxBytes,
@@ -54,6 +56,7 @@ import {
 } from "./runpodActivityTracker.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
 import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
+import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
 import { ensureJobFolders, readJsonFileWithBackup, safeSegment, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
@@ -75,14 +78,12 @@ let archivedMediaJobs: Job[] = [];
 let dispatching = false;
 let activeRunpodJobs = 0;
 let resultMoveQueue = Promise.resolve();
+let sqliteStore: SqliteJobStore | undefined;
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 
 export async function loadJobs() {
-  // Take a point-in-time snapshot before mutating, and recover from .bak if the
-  // main store is corrupt, so a bad file can't silently wipe job history.
-  await snapshotJsonStore(jobsStorePath);
   let changed = false;
-  jobs = (await readJsonFileWithBackup<Job[]>(jobsStorePath, [])).map((job) => {
+  jobs = (await loadRawJobs()).map((job) => {
     const normalized: Job = {
       ...job,
       userId: typeof job.userId === "string" && job.userId.trim() ? job.userId : "usr_momen",
@@ -106,6 +107,28 @@ export async function loadJobs() {
   }
   archivedMediaJobs = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
   return jobs;
+}
+
+// Reads the raw job list from the configured store. For the SQLite driver, the
+// store is opened here and seeded once from jobs.json if it is still empty.
+async function loadRawJobs(): Promise<Job[]> {
+  if (jobStoreDriver === "sqlite") {
+    sqliteStore = openSqliteJobStore(jobsSqlitePath);
+    const existing = sqliteStore.loadAll();
+    if (existing.length > 0) return existing;
+
+    const legacy = await readJsonFileWithBackup<Job[]>(jobsStorePath, []);
+    if (legacy.length) {
+      sqliteStore.replaceAll(legacy);
+      console.log(`Migrated ${legacy.length} jobs from jobs.json into SQLite at ${jobsSqlitePath}.`);
+    }
+    return legacy;
+  }
+
+  // Take a point-in-time snapshot before mutating, and recover from .bak if the
+  // main store is corrupt, so a bad file can't silently wipe job history.
+  await snapshotJsonStore(jobsStorePath);
+  return readJsonFileWithBackup<Job[]>(jobsStorePath, []);
 }
 
 export function getJobs() {
@@ -1499,7 +1522,11 @@ async function runPersistFlush() {
   if (!flush) return;
   pendingPersist = undefined;
   try {
-    await writeJsonFile(jobsStorePath, jobs);
+    if (sqliteStore) {
+      sqliteStore.replaceAll(jobs);
+    } else {
+      await writeJsonFile(jobsStorePath, jobs);
+    }
     flush.resolve();
   } catch (error) {
     flush.reject(error);
