@@ -81,6 +81,7 @@ type PersistedGenerationSettings = {
   imageOutputCount?: 1 | 2;
   nanoBananaOutputCount?: 1 | 2;
   selectedNanoBananaAspectRatio?: string;
+  imageToVideo16By9Cropping?: boolean;
 };
 
 function App() {
@@ -113,7 +114,7 @@ function App() {
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
   const [saveNumber, setSaveNumber] = useState(normalizeSaveNumber(initialSettings.saveNumber));
   const [imageOutputCount, setImageOutputCount] = useState<1 | 2>(initialSettings.imageOutputCount ?? initialSettings.nanoBananaOutputCount ?? 1);
-  const [enableImageToVideo16By9Cropping, setEnableImageToVideo16By9Cropping] = useState(true);
+  const [enableImageToVideo16By9Cropping, setEnableImageToVideo16By9Cropping] = useState(initialSettings.imageToVideo16By9Cropping ?? true);
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [video, setVideo] = useState<UploadedVideo | undefined>();
   const [favoriteJobIds, setFavoriteJobIds] = useState(readFavoriteJobIds);
@@ -234,8 +235,9 @@ function App() {
       prompt,
       saveNumber,
       imageOutputCount,
+      imageToVideo16By9Cropping: enableImageToVideo16By9Cropping,
     });
-  }, [imageOutputCount, prompt, saveNumber, selectedDurationSeconds, selectedModelId, selectedNanoBananaAspectRatio, selectedProjectId, selectedResolution, targetFolderId]);
+  }, [enableImageToVideo16By9Cropping, imageOutputCount, prompt, saveNumber, selectedDurationSeconds, selectedModelId, selectedNanoBananaAspectRatio, selectedProjectId, selectedResolution, targetFolderId]);
 
   useEffect(() => {
     writeFavoriteJobIds(favoriteJobIds);
@@ -1823,6 +1825,7 @@ function readPersistedGenerationSettings(): PersistedGenerationSettings {
       imageOutputCount: parsed.imageOutputCount === 2 || parsed.nanoBananaOutputCount === 2 ? 2 : 1,
       nanoBananaOutputCount: parsed.nanoBananaOutputCount === 2 ? 2 : undefined,
       selectedNanoBananaAspectRatio: normalizeNanoBananaAspectRatio(parsed.selectedNanoBananaAspectRatio),
+      imageToVideo16By9Cropping: typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };
   } catch {
     return {};

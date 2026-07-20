@@ -70,6 +70,7 @@ import {
   updateProject,
 } from "./projectService.js";
 import { getPodStatus } from "./podStatusService.js";
+import { httpErrorCode, httpStatusFromError } from "./httpError.js";
 import { resolveRunpodInputToken } from "./runpodInputUrlService.js";
 import { describeImageWithRunpod } from "./runpodService.js";
 import { runKlingPromptWorkflow } from "./klingPromptWorkflowService.js";
@@ -786,8 +787,7 @@ app.post("/api/prompt/describe-image", async (req, res) => {
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not describe image.";
-    const status = message.includes("RUNPOD_API_KEY") ? 500 : 502;
-    res.status(status).json({ error: message });
+    res.status(httpStatusFromError(error, 502)).json({ error: message });
   }
 });
 
@@ -808,8 +808,7 @@ app.post("/api/prompt/seedance-workflow", async (req, res) => {
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not generate Seedance prompt.";
-    const status = promptWorkflowErrorStatus(message);
-    res.status(status).json({ error: message });
+    res.status(httpStatusFromError(error, 502)).json({ error: message });
   }
 });
 
@@ -832,8 +831,7 @@ app.post("/api/prompt/kling-workflow", async (req, res) => {
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not generate Kling prompt.";
-    const status = promptWorkflowErrorStatus(message);
-    res.status(status).json({ error: message });
+    res.status(httpStatusFromError(error, 502)).json({ error: message });
   }
 });
 
@@ -868,18 +866,15 @@ app.post("/api/prompt/improve", async (req, res) => {
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not improve prompt.";
-    if (
-      message.includes("Prompt helper RunPod endpoint is not configured") ||
-      message.includes("RunPod response did not include output text")
-    ) {
+    const errorCode = httpErrorCode(error);
+    if (errorCode === "prompt_helper_not_configured" || errorCode === "prompt_helper_no_text") {
       return res.json({
         text: improveTextPromptLocally(prompt),
         model: "local-text-prompt-fallback",
         warning: message,
       });
     }
-    const status = message.includes("RUNPOD_API_KEY") ? 500 : 502;
-    res.status(status).json({ error: message });
+    res.status(httpStatusFromError(error, 502)).json({ error: message });
   }
 });
 
@@ -1998,25 +1993,4 @@ function improveTextPromptLocally(prompt: string) {
 
   const cleaned = currentPrompt.replace(/[.。]+$/g, "");
   return `${cleaned}, with clear subject preservation, natural realistic details, consistent lighting, clean edges, and no unwanted changes to the surrounding scene.`;
-}
-
-function promptWorkflowErrorStatus(message: string) {
-  if (
-    message.startsWith("Write the initial Seedance idea") ||
-    message.startsWith("Write the initial Kling image-to-video idea") ||
-    message.startsWith("Upload at least one reference image")
-  ) {
-    return 400;
-  }
-
-  if (
-    message.includes("is not configured") ||
-    message.includes("RUNPOD_API_KEY") ||
-    message.includes("COMFY_ORG_API_KEY") ||
-    message.includes("workflow JSON")
-  ) {
-    return 500;
-  }
-
-  return 502;
 }

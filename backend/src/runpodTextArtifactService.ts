@@ -1,3 +1,5 @@
+import { runpodTextOutputMaxBytes } from "./config.js";
+
 export type RunpodTextArtifact = {
   text: string;
   filename?: string;
@@ -48,7 +50,6 @@ const candidateContainerKeys = new Set([
   "ui",
   "string",
 ]);
-const textOutputMaxBytes = Math.max(1024, Number(process.env.RUNPOD_TEXT_OUTPUT_MAX_BYTES ?? 1024 * 1024) || 1024 * 1024);
 
 export async function extractRunpodTextArtifacts(output: unknown, fetchImpl: typeof fetch = fetch): Promise<RunpodTextArtifact[]> {
   const collectedCandidates = collectTextCandidates(output);
@@ -195,13 +196,13 @@ async function readTextCandidate(candidate: TextCandidate, fetchImpl: typeof fet
   }
 
   const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > textOutputMaxBytes) {
+  if (Number.isFinite(contentLength) && contentLength > runpodTextOutputMaxBytes) {
     await response.body?.cancel().catch(() => undefined);
     throw new Error("RunPod text artifact is larger than the configured text limit.");
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.byteLength > textOutputMaxBytes) {
+  if (buffer.byteLength > runpodTextOutputMaxBytes) {
     throw new Error("RunPod text artifact is larger than the configured text limit.");
   }
 
@@ -218,7 +219,7 @@ function readTextDataUrl(value: string) {
   const buffer = isBase64
     ? Buffer.from(payload, "base64")
     : Buffer.from(decodeURIComponent(payload), "utf8");
-  if (buffer.byteLength > textOutputMaxBytes) {
+  if (buffer.byteLength > runpodTextOutputMaxBytes) {
     throw new Error("RunPod text artifact is larger than the configured text limit.");
   }
   return buffer.toString("utf8");

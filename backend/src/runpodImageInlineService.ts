@@ -88,10 +88,8 @@ async function compressImageForInlineJson(buffer: Buffer, maxBytes: number, sour
     longestSide *= 0.72;
   }
 
-  if (best && best.byteLength <= maxBytes) {
-    return { buffer: best, mimeType, extension };
-  }
-
+  // Every candidate that fit maxBytes returned inside the loop, so `best` can
+  // only be over budget here; it is kept for the error's compressed-size hint.
   throwRunpodInlineImageTooLarge(buffer.byteLength, maxBytes, source, best?.byteLength);
 }
 

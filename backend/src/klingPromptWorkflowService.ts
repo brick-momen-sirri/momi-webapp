@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { klingPromptOpenAIModel, klingPromptSkillPath, klingPromptWorkflowPath } from "./config.js";
+import { BackendHttpError } from "./httpError.js";
 import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 import { runComfyWorkflowOnRunpod, type RunpodComfyImageInput } from "./runpodComfyService.js";
 import { describeImageWithRunpod } from "./runpodService.js";
@@ -38,12 +39,12 @@ export async function runKlingPromptWorkflow({
 }: RunKlingPromptWorkflowInput): Promise<KlingPromptWorkflowResult> {
   const cleanPrompt = prompt.trim();
   if (!cleanPrompt) {
-    throw new Error("Write the initial Kling image-to-video idea first.");
+    throw new BackendHttpError("Write the initial Kling image-to-video idea first.", { statusCode: 400 });
   }
 
   const images = imagesBase64.map((image, index) => klingPromptImageInput(image, index));
   if (!images.length) {
-    throw new Error("Upload at least one reference image before generating a Kling prompt.");
+    throw new BackendHttpError("Upload at least one reference image before generating a Kling prompt.", { statusCode: 400 });
   }
 
   const skillInstructions = await loadKlingSkillInstructions();
@@ -105,13 +106,13 @@ export function prepareKlingPromptWorkflow(
   options: { prompt: string; imageNames: string[]; cameraPrompt?: string; model?: string; skillInstructions: string },
 ) {
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) {
-    throw new Error("Kling prompt workflow JSON must be a ComfyUI API prompt object.");
+    throw new BackendHttpError("Kling prompt workflow JSON must be a ComfyUI API prompt object.", { statusCode: 500 });
   }
 
   const prompt = cloneJson(workflow as Record<string, any>);
   const chatEntry = Object.entries(prompt).find(([, node]) => nodeClassType(node) === "openaichatnode");
   if (!chatEntry) {
-    throw new Error("Kling prompt workflow is missing an OpenAIChatNode.");
+    throw new BackendHttpError("Kling prompt workflow is missing an OpenAIChatNode.", { statusCode: 500 });
   }
 
   const [chatNodeId, chatNode] = chatEntry;
@@ -221,7 +222,7 @@ async function loadKlingSkillInstructions() {
   const raw = await fs.readFile(klingPromptSkillPath, "utf8");
   const instructions = stripSkillFrontmatter(raw).trim();
   if (!instructions) {
-    throw new Error("Kling prompt skill file is empty.");
+    throw new BackendHttpError("Kling prompt skill file is empty.", { statusCode: 500 });
   }
 
   cachedKlingSkillInstructions = instructions;

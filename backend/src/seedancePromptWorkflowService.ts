@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { BackendHttpError } from "./httpError.js";
 import { seedancePromptOpenAIModel, seedancePromptWorkflowPath } from "./config.js";
 import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 import { runComfyWorkflowOnRunpod, type RunpodComfyImageInput } from "./runpodComfyService.js";
@@ -34,12 +35,12 @@ export async function runSeedancePromptWorkflow({
 }: RunSeedancePromptWorkflowInput): Promise<SeedancePromptWorkflowResult> {
   const cleanPrompt = prompt.trim();
   if (!cleanPrompt) {
-    throw new Error("Write the initial Seedance idea first.");
+    throw new BackendHttpError("Write the initial Seedance idea first.", { statusCode: 400 });
   }
 
   const images = imagesBase64.map((image, index) => seedancePromptImageInput(image, index));
   if (!images.length) {
-    throw new Error("Upload at least one reference image before generating a Seedance prompt.");
+    throw new BackendHttpError("Upload at least one reference image before generating a Seedance prompt.", { statusCode: 400 });
   }
 
   const sourceWorkflow = JSON.parse(await fs.readFile(seedancePromptWorkflowPath, "utf8"));
@@ -100,13 +101,13 @@ export function prepareSeedancePromptWorkflow(
   options: { prompt: string; imageNames: string[]; model?: string },
 ) {
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) {
-    throw new Error("Seedance prompt workflow JSON must be a ComfyUI API prompt object.");
+    throw new BackendHttpError("Seedance prompt workflow JSON must be a ComfyUI API prompt object.", { statusCode: 500 });
   }
 
   const prompt = cloneJson(workflow as Record<string, any>);
   const chatEntry = Object.entries(prompt).find(([, node]) => nodeClassType(node) === "openaichatnode");
   if (!chatEntry) {
-    throw new Error("Seedance prompt workflow is missing an OpenAIChatNode.");
+    throw new BackendHttpError("Seedance prompt workflow is missing an OpenAIChatNode.", { statusCode: 500 });
   }
 
   const [chatNodeId, chatNode] = chatEntry;
@@ -211,7 +212,7 @@ function isSeedancePromptSaveNode(node: any) {
 
 function seedanceSkillInstructions(workflow: unknown) {
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) {
-    throw new Error("Seedance prompt workflow JSON must be a ComfyUI API prompt object.");
+    throw new BackendHttpError("Seedance prompt workflow JSON must be a ComfyUI API prompt object.", { statusCode: 500 });
   }
 
   const configEntry = Object.values(workflow as Record<string, any>)
@@ -220,7 +221,7 @@ function seedanceSkillInstructions(workflow: unknown) {
     ? configEntry.inputs.instructions.trim()
     : "";
   if (!instructions) {
-    throw new Error("Seedance prompt workflow is missing its prompt-writing instructions.");
+    throw new BackendHttpError("Seedance prompt workflow is missing its prompt-writing instructions.", { statusCode: 500 });
   }
   return instructions;
 }

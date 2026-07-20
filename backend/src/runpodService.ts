@@ -7,6 +7,7 @@ import {
   logRunpodRequest,
   logRunpodResponse,
 } from "./runpodDebugLogger.js";
+import { BackendHttpError } from "./httpError.js";
 import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 
 type DescribeImageParams = {
@@ -46,11 +47,17 @@ export async function describeImageWithRunpod({
 }: DescribeImageParams) {
   const apiKey = process.env.PROMPT_RUNPOD_API_KEY ?? process.env.RUNPOD_PROMPT_API_KEY ?? process.env.RUNPOD_API_KEY;
   if (!apiKey) {
-    throw new Error("RUNPOD_API_KEY is not configured on the backend.");
+    throw new BackendHttpError("RUNPOD_API_KEY is not configured on the backend.", {
+      statusCode: 500,
+      code: "runpod_api_key_missing",
+    });
   }
   const endpointUrl = promptRunpodEndpointUrl();
   if (!endpointUrl) {
-    throw new Error("Prompt helper RunPod endpoint is not configured. Set PROMPT_RUNPOD_ENDPOINT_ID or PROMPT_RUNPOD_ENDPOINT_URL.");
+    throw new BackendHttpError(
+      "Prompt helper RunPod endpoint is not configured. Set PROMPT_RUNPOD_ENDPOINT_ID or PROMPT_RUNPOD_ENDPOINT_URL.",
+      { statusCode: 500, code: "prompt_helper_not_configured" },
+    );
   }
 
   const payload = {
@@ -100,7 +107,10 @@ export async function describeImageWithRunpod({
       ?? await extractOutputText(data)
       ?? combinedTextArtifactContent(textArtifacts);
     if (!text?.trim()) {
-      throw new Error("RunPod response did not include output text.");
+      throw new BackendHttpError("RunPod response did not include output text.", {
+        statusCode: 502,
+        code: "prompt_helper_no_text",
+      });
     }
 
     return {

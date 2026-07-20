@@ -1,6 +1,7 @@
 import "./env.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { BackendHttpError } from "./httpError.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const backendRoot = path.resolve(here, "..");
@@ -86,6 +87,7 @@ export const runpodInlineImageAutoCompress = !["0", "false", "no", "off"].includ
 export const runpodInlineImageMaxDimension = positiveNumber(process.env.RUNPOD_INLINE_IMAGE_MAX_DIMENSION, 4096);
 export const runpodInlineImageMinQuality = boundedNumber(process.env.RUNPOD_INLINE_IMAGE_MIN_QUALITY, 55, 20, 95);
 export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX_BYTES, 1024 * 1024 * 1024);
+export const runpodTextOutputMaxBytes = Math.max(1024, positiveNumber(process.env.RUNPOD_TEXT_OUTPUT_MAX_BYTES, 1024 * 1024));
 export const runpodDebug = ["1", "true", "yes", "on"].includes(String(process.env.RUNPOD_DEBUG ?? "").trim().toLowerCase());
 export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "exclusive"].includes(
   String(process.env.CREDIT_BALANCE_DELTA_ACCOUNTING ?? "").trim().toLowerCase(),
@@ -109,7 +111,10 @@ export function validateRuntimeConfigForStartup() {
 export function assertRunpodConfig() {
   const missing = missingRunpodEnvVars();
   if (missing.length) {
-    throw new Error(`RunPod serverless generation is not configured. Missing env vars: ${missing.join(", ")}.`);
+    throw new BackendHttpError(`RunPod serverless generation is not configured. Missing env vars: ${missing.join(", ")}.`, {
+      statusCode: 500,
+      code: "runpod_not_configured",
+    });
   }
 }
 
