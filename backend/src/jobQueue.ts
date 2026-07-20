@@ -158,6 +158,18 @@ export async function getJobFromAnySource(id: string, options: { archived?: bool
   return (await getJobsWithExistingMedia({ archived: options.archived })).find((job) => job.id === id);
 }
 
+let acceptingNewWork = true;
+
+// Stop pulling queued jobs into the dispatchers so in-flight work can drain
+// during a graceful shutdown. Already-running jobs are unaffected.
+export function pauseJobDispatch() {
+  acceptingNewWork = false;
+}
+
+export function activeRunpodJobCount() {
+  return activeRunpodJobs;
+}
+
 export function getQueueSnapshot() {
   const queuedJobs = jobs.filter((job) => job.status === "queued");
   const sendingJobs = jobs.filter((job) => job.status === "sending");
@@ -556,7 +568,7 @@ function serializeResultMove<T>(operation: () => Promise<T>) {
 }
 
 async function dispatchQueue() {
-  if (dispatching) return;
+  if (dispatching || !acceptingNewWork) return;
   dispatching = true;
 
   try {
@@ -583,7 +595,7 @@ async function dispatchQueue() {
 }
 
 function dispatchRunpodJobs() {
-  while (activeRunpodJobs < runpodJobConcurrency) {
+  while (acceptingNewWork && activeRunpodJobs < runpodJobConcurrency) {
     const next = jobs.find((job) => job.status === "queued");
     if (!next) return;
 
@@ -1453,8 +1465,51 @@ async function ensureWorkerProjectFolder(serverUrl: string, projectFolderName: s
   }
 }
 
-async function persistJobs() {
-  await writeJsonFile(jobsStorePath, jobs);
+// Job status transitions and concurrent jobs would otherwise rewrite the whole
+// jobs file many times per second. Coalesce rapid writes into one: callers keep
+// awaiting persistJobs() (the in-memory array is the source of truth for reads),
+// but the disk write is debounced and de-duplicated.
+const persistDebounceMs = 500;
+let persistTimer: NodeJS.Timeout | undefined;
+let pendingPersist: { promise: Promise<void>; resolve: () => void; reject: (error: unknown) => void } | undefined;
+
+function persistJobs(): Promise<void> {
+  if (!pendingPersist) {
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    pendingPersist = { promise, resolve, reject };
+  }
+  if (!persistTimer) {
+    persistTimer = setTimeout(() => void runPersistFlush(), persistDebounceMs);
+    persistTimer.unref?.();
+  }
+  return pendingPersist.promise;
+}
+
+async function runPersistFlush() {
+  persistTimer = undefined;
+  const flush = pendingPersist;
+  if (!flush) return;
+  pendingPersist = undefined;
+  try {
+    await writeJsonFile(jobsStorePath, jobs);
+    flush.resolve();
+  } catch (error) {
+    flush.reject(error);
+  }
+}
+
+// Flush any pending job write immediately (used on graceful shutdown).
+export async function flushPersistedJobs() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = undefined;
+  }
+  await runPersistFlush();
 }
 
 async function persistArchivedMediaJobs() {

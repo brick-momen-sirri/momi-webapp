@@ -8,6 +8,12 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       restart_delay: 5000,
+      // Give the graceful-shutdown handler time to drain in-flight RunPod jobs
+      // and flush job state before PM2 sends SIGKILL (default is only 1600ms).
+      kill_timeout: 32000,
+      // Safety net: recycle the process if it leaks past this. Image encoding
+      // and large in-memory job history are the likely growth sources.
+      max_memory_restart: "1500M",
       env: {
         NODE_ENV: "production",
         HOST: "127.0.0.1",
@@ -17,6 +23,9 @@ module.exports = {
         MEDIA_SCAN_CACHE_MS: "60000",
         MEDIA_UPLOAD_MAX_BYTES: String(1024 * 1024 * 1024),
         RUNPOD_OUTPUT_MAX_BYTES: String(1024 * 1024 * 1024),
+        // Let sharp image encoding use more libuv threads so it doesn't starve
+        // file streaming under concurrent load.
+        UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || "12",
       },
     },
   ],

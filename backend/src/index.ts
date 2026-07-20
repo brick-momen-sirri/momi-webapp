@@ -42,15 +42,19 @@ import { getCredits } from "./creditService.js";
 import { creditAccountingSource, creditsSpentForAccounting, isCountedCreditUsage } from "./creditUsageAccounting.js";
 import { getCreditTrackerProjectStats, type CreditTrackerProjectStats } from "./creditUsageService.js";
 import {
+  activeRunpodJobCount,
   archiveJob,
   cancelJob,
   createJob,
+  flushPersistedJobs,
   getJob,
   getJobFromAnySource,
   getJobs,
   getJobsWithExistingMedia,
+  getQueueSnapshot,
   loadJobs,
   moveJobResult,
+  pauseJobDispatch,
   permanentlyDeleteArchivedJob,
   recoverRemoteResultMedia,
   renameJob,
@@ -91,9 +95,38 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: jsonBodyLimit }));
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "momi-animation-backend", time: new Date().toISOString() });
+app.get("/api/health", async (_req, res) => {
+  const queue = getQueueSnapshot();
+  const memory = process.memoryUsage();
+  const outputDiskFreeBytes = await freeDiskBytes(brickProjectsRoot);
+  res.json({
+    ok: true,
+    service: "momi-animation-backend",
+    time: new Date().toISOString(),
+    generationBackend,
+    uptimeSeconds: Math.round(process.uptime()),
+    queue: {
+      queued: queue.queued,
+      active: queue.active,
+      runpodActive: queue.runpodActive,
+      capacity: queue.capacity,
+    },
+    memory: {
+      rssMiB: Math.round(memory.rss / 1024 / 1024),
+      heapUsedMiB: Math.round(memory.heapUsed / 1024 / 1024),
+    },
+    outputDiskFreeBytes,
+  });
 });
+
+async function freeDiskBytes(targetPath: string) {
+  try {
+    const stats = await fs.statfs(targetPath);
+    return stats.bavail * stats.bsize;
+  } catch {
+    return null;
+  }
+}
 
 app.get("/api/runpod-input", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
@@ -1273,11 +1306,13 @@ async function boot() {
     localComfyEnabled ? refreshServers() : Promise.resolve([]),
   ]);
   await assertMetadataHealth();
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`Momi backend listening on http://${HOST}:${PORT}`);
     console.log(`Generation backend: ${generationBackend}`);
     logMemory("boot-listening");
   });
+
+  installGracefulShutdown(server);
 
   if (resultRecoveryIntervalMs > 0) {
     // Re-download completed results that are still remote-only (failed or
@@ -1288,6 +1323,45 @@ async function boot() {
       void recoverRemoteResultMedia().catch(() => undefined);
     }, resultRecoveryIntervalMs).unref();
   }
+}
+
+let shuttingDown = false;
+
+function installGracefulShutdown(server: import("node:http").Server) {
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}, shutting down gracefully...`);
+
+    // Stop pulling new queued jobs into the dispatchers, and stop accepting new
+    // HTTP connections; in-flight requests and RunPod jobs keep running.
+    pauseJobDispatch();
+    server.close(() => console.log("HTTP server closed."));
+
+    const deadline = Date.now() + 25_000;
+    const finish = async () => {
+      while (activeRunpodJobCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      try {
+        await flushPersistedJobs();
+        console.log("Pending job state flushed.");
+      } catch (error) {
+        console.error("Failed to flush job state on shutdown:", error);
+      }
+      process.exit(0);
+    };
+    void finish();
+
+    // Hard cap so a stuck job can't block the process forever.
+    setTimeout(() => {
+      console.warn("Graceful shutdown timed out; forcing exit.");
+      process.exit(0);
+    }, 30_000).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 void boot().catch((error) => {
