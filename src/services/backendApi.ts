@@ -684,6 +684,11 @@ export async function moveBackendJobResult(projectId: string, jobId: string, des
   return mapJob(data.job);
 }
 
+export async function retryBackendJob(jobId: string) {
+  const data = await api<{ job: BackendJob }>(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+  return mapJob(data.job);
+}
+
 export async function archiveBackendJob(jobId: string) {
   const data = await api<{ job: BackendJob }>(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { method: "POST" });
   return mapJob(data.job);

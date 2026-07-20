@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Calendar, Check, ChevronDown, ChevronUp, Film, Hash, Images, Pencil, UserRound, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Calendar, Check, ChevronDown, ChevronUp, Film, Hash, Images, Loader2, Pencil, UserRound, X } from "lucide-react";
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
@@ -17,6 +17,7 @@ type JobCardProps = {
   onDownload: (job: Job) => void;
   onCopyImage: (job: Job) => void;
   onReuseSettings: (job: Job) => void;
+  onRetry: (job: Job) => void;
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
@@ -36,6 +37,7 @@ export function JobCard({
   onDownload,
   onCopyImage,
   onReuseSettings,
+  onRetry,
   onToggleFavorite,
   onMove,
   onArchive,
@@ -207,6 +209,7 @@ export function JobCard({
           onDownload={onDownload}
           onCopyImage={onCopyImage}
           onReuseSettings={onReuseSettings}
+          onRetry={onRetry}
           onToggleFavorite={onToggleFavorite}
           onMove={onMove}
           onArchive={onArchive}
@@ -288,6 +291,8 @@ export function JobCard({
           </div>
         </section>
 
+        {IN_FLIGHT_STATUSES.includes(job.status) ? <InFlightProgress job={job} /> : null}
+
         <section className="result-section mt-4 flex justify-center">
           <div className="w-full max-w-5xl">
           <JobPreview job={job} />
@@ -300,6 +305,14 @@ export function JobCard({
   );
 }
 
+const IN_FLIGHT_STATUSES: Job["status"][] = ["queued", "sending", "running"];
+
+const inFlightLabels: Record<string, string> = {
+  queued: "Waiting in queue",
+  sending: "Sending to backend",
+  running: "Generating",
+};
+
 function StatusBadge({ status }: { status: Job["status"] }) {
   const classes = {
     queued: "bg-stone-100 text-stone-700",
@@ -311,8 +324,37 @@ function StatusBadge({ status }: { status: Job["status"] }) {
   }[status];
 
   return (
-    <span className={`rounded-full px-2 py-1 text-[11px] font-bold capitalize ${classes}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold capitalize ${classes}`}>
+      {IN_FLIGHT_STATUSES.includes(status) ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       {status}
     </span>
   );
+}
+
+function InFlightProgress({ job }: { job: Job }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const startText = job.startedAt ?? job.createdAt;
+  const startMs = startText ? new Date(startText).getTime() : Number.NaN;
+  const elapsedMs = Number.isFinite(startMs) ? Math.max(0, now - startMs) : 0;
+  const label = inFlightLabels[job.status] ?? "Working";
+
+  return (
+    <div className="mt-3 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs font-semibold text-blue-700">
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+      <span>{label}</span>
+      <span className="ml-auto tabular-nums text-blue-600">{formatElapsed(elapsedMs)} elapsed</span>
+    </div>
+  );
+}
+
+function formatElapsed(ms: number) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

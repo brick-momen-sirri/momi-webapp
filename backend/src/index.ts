@@ -1119,6 +1119,41 @@ app.post("/api/jobs", async (req, res) => {
   }
 });
 
+app.post("/api/jobs/:jobId/retry", async (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    if (isDemoAccount(user)) {
+      return res.status(403).json({ error: "Demo accounts are view-only and cannot generate tasks." });
+    }
+    const previous = getJob(req.params.jobId);
+    if (!previous || !canAccessJob(user, previous)) return res.status(404).json({ error: "Job not found" });
+    if (previous.status !== "failed" && previous.status !== "canceled") {
+      return res.status(409).json({ error: "Only failed or canceled jobs can be retried." });
+    }
+    const project = getProject(previous.projectId);
+    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canCreateJobInProject(user, project)) return res.status(403).json({ error: "Project editor access required." });
+
+    // Requeue from the stored spec. Input media are already externalized to
+    // local files, so they pass through createJob unchanged (no re-upload).
+    const job = await createJob({
+      projectId: previous.projectId,
+      targetFolderId: previous.folderId ?? null,
+      modelId: previous.modelId,
+      prompt: previous.prompt,
+      resolution: previous.resolution,
+      durationSeconds: previous.durationSeconds,
+      inputImages: previous.inputImages,
+      inputVideo: previous.inputVideo,
+      workflowOptions: previous.workflowOptions,
+      userId: user.id,
+    });
+    res.status(201).json({ job });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Could not retry job" });
+  }
+});
+
 function isSeedanceModel(model: { id: string; name: string; category: string; workflowPath: string }) {
   return `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("seedance");
 }

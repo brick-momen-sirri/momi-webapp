@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, Info, Loader2, X } from "lucide-react";
 import { AccountPanel } from "./components/AccountPanel";
 import { defaultArchVizGridOptions } from "./components/ArchVizGridControls";
 import { AuthScreen } from "./components/AuthScreen";
 import { ComfyPoolManager } from "./components/ComfyPoolManager";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { CreditUsageDashboard } from "./components/CreditUsageDashboard";
 import { DownloadImageChoiceModal, type ImageDownloadFormat } from "./components/DownloadImageChoiceModal";
 import { JobFeed } from "./components/JobFeed";
@@ -48,6 +49,7 @@ import {
   resetBackendUserPassword,
   renameBackendProjectFolder,
   restoreBackendJob,
+  retryBackendJob,
   runComfyPoolAction,
   updateBackendJobSaveNumber,
   setBackendUserActive,
@@ -69,6 +71,17 @@ const ALL_PROJECTS_ID = "all";
 const GENERATION_SETTINGS_STORAGE_KEY = "momi_generation_settings_v1";
 const FAVORITE_JOB_IDS_STORAGE_KEY = "momi_favorite_job_ids_v1";
 const THEME_STORAGE_KEY = "momi_theme_v1";
+
+type ToastType = "success" | "error" | "info";
+type ToastItem = { id: number; type: ToastType; message: string };
+
+type ConfirmDialogState = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  tone?: "danger" | "default";
+  onConfirm: () => void;
+};
 
 type PersistedGenerationSettings = {
   selectedModelId?: string;
@@ -119,9 +132,11 @@ function App() {
   const [video, setVideo] = useState<UploadedVideo | undefined>();
   const [favoriteJobIds, setFavoriteJobIds] = useState(readFavoriteJobIds);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [toast, setToast] = useState("");
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
   const [theme, setTheme] = useState<ThemeMode>(readPersistedTheme);
   const [downloadChoiceJob, setDownloadChoiceJob] = useState<Job | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -333,9 +348,20 @@ function App() {
     };
   }, [account, selectedFolderId, selectedProjectId, showArchivedJobs]);
 
-  function showToast(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2600);
+  function showToast(message: string, type: ToastType = "success") {
+    const id = (toastIdRef.current += 1);
+    // Keep the most recent few so a burst of actions doesn't clobber earlier
+    // messages the way the old single-slot toast did.
+    setToasts((current) => [...current, { id, type, message }].slice(-4));
+    // Errors stay long enough to read (and can be dismissed); transient
+    // success/info messages clear on their own.
+    if (type !== "error") {
+      window.setTimeout(() => dismissToast(id), type === "info" ? 3200 : 2600);
+    }
+  }
+
+  function dismissToast(id: number) {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
   }
 
   function applyBackendJobsPage(page: BackendJobsPage, reset = false) {
@@ -412,7 +438,7 @@ function App() {
 
     setAccount(account);
     setWorkspaceAccounts((current) => mergeUsers([account], current));
-    showToast(result.error);
+    showToast(result.error, "error");
   }
 
   async function handleChangePassword(currentPassword: string, newPassword: string, confirmPassword: string): Promise<AuthResult> {
@@ -488,15 +514,15 @@ function App() {
 
   async function handleGenerate() {
     if (!account) {
-      showToast("Sign in before generating.");
+      showToast("Sign in before generating.", "error");
       return;
     }
     if (disabledReason) {
-      showToast(disabledReason);
+      showToast(disabledReason, "error");
       return;
     }
     if (selectedProjectId === ALL_PROJECTS_ID || !selectedProject) {
-      showToast("Please select a specific project before generating.");
+      showToast("Please select a specific project before generating.", "error");
       return;
     }
 
@@ -562,7 +588,7 @@ function App() {
       showToast("Local preview job created.");
     } catch (error) {
       setBackendAvailable(false);
-      showToast(error instanceof Error ? `Backend unavailable: ${error.message}` : "Backend unavailable. Could not send job.");
+      showToast(error instanceof Error ? `Backend unavailable: ${error.message}` : "Backend unavailable. Could not send job.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -575,7 +601,7 @@ function App() {
       setSelectedProjectId(created.id);
       showToast("Project created.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not create project.");
+      showToast(error instanceof Error ? error.message : "Could not create project.", "error");
     }
   }
 
@@ -585,7 +611,7 @@ function App() {
       setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       showToast("Project saved.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not update project.");
+      showToast(error instanceof Error ? error.message : "Could not update project.", "error");
     }
   }
 
@@ -623,7 +649,7 @@ function App() {
       setTargetFolderId(folderId);
       showToast("Folder created.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not create folder.");
+      showToast(error instanceof Error ? error.message : "Could not create folder.", "error");
     }
   }
 
@@ -652,18 +678,24 @@ function App() {
       )));
       showToast("Folder renamed.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not rename folder.");
+      showToast(error instanceof Error ? error.message : "Could not rename folder.", "error");
     }
   }
 
-  async function handleDeleteProjectFolder(projectId: string, folderId: string) {
+  function handleDeleteProjectFolder(projectId: string, folderId: string) {
     const project = projects.find((item) => item.id === projectId);
     const folder = project?.folders?.find((item) => item.folderId === folderId);
     if (!folder) return;
-    if (!window.confirm(`Delete empty folder "${folder.name}"? Folders with media cannot be deleted.`)) {
-      return;
-    }
+    setConfirmDialog({
+      title: "Delete folder",
+      message: `Delete empty folder "${folder.name}"? Folders with media cannot be deleted.`,
+      confirmLabel: "Delete folder",
+      tone: "danger",
+      onConfirm: () => void performDeleteProjectFolder(projectId, folderId),
+    });
+  }
 
+  async function performDeleteProjectFolder(projectId: string, folderId: string) {
     try {
       if (backendAvailable) {
         const result = await deleteBackendProjectFolder(projectId, folderId);
@@ -683,7 +715,7 @@ function App() {
       }
       showToast("Folder deleted.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not delete folder.");
+      showToast(error instanceof Error ? error.message : "Could not delete folder.", "error");
     }
   }
 
@@ -701,7 +733,7 @@ function App() {
       showToast(page.jobs.length ? `Loaded ${page.jobs.length} more jobs.` : "No more jobs to load.");
     } catch {
       setBackendAvailable(false);
-      showToast("Could not load more jobs from the backend.");
+      showToast("Could not load more jobs from the backend.", "error");
     } finally {
       setIsLoadingMoreJobs(false);
     }
@@ -718,7 +750,7 @@ function App() {
       const download = imageFormat ? await convertImageBlobForDownload(blob, imageFormat) : blob;
       downloadBlob(download, downloadNameForJob(job, download, resultIndex));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not download result.");
+      showToast(error instanceof Error ? error.message : "Could not download result.", "error");
     }
   }
 
@@ -726,24 +758,24 @@ function App() {
     try {
       const blob = await fetchResultBlob(job);
       if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
-        showToast("Clipboard image copy is not available in this browser.");
+        showToast("Clipboard image copy is not available in this browser.", "error");
         return;
       }
       const imageBlob = await clipboardCompatibleImageBlob(blob);
       await navigator.clipboard.write([new ClipboardItem({ [imageBlob.type]: imageBlob })]);
       showToast("Copied image.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not copy image.");
+      showToast(error instanceof Error ? error.message : "Could not copy image.", "error");
     }
   }
 
   async function handleReuseJobSettings(job: Job) {
     if (!canReuseJobSettings(job, models)) {
-      showToast("This result does not have reusable settings saved.");
+      showToast("This result does not have reusable settings saved.", "info");
       return;
     }
 
-    showToast("Loading saved settings...");
+    showToast("Loading saved settings...", "info");
 
     const restored = new Set<string>();
     const reusableModel = findReusableModel(job, models);
@@ -830,14 +862,14 @@ function App() {
   async function handleMoveJobResult(job: Job, destinationFolderId: string | null) {
     const project = projects.find((item) => item.id === job.projectId);
     if (!project) {
-      showToast("Project not found.");
+      showToast("Project not found.", "error");
       return false;
     }
     const destinationFolder = destinationFolderId
       ? project.folders?.find((folder) => folder.folderId === destinationFolderId && !folder.archived)
       : undefined;
     if (destinationFolderId && !destinationFolder) {
-      showToast("Destination folder not found.");
+      showToast("Destination folder not found.", "error");
       return false;
     }
 
@@ -866,8 +898,24 @@ function App() {
         setBackendJobsTotal((current) => current + 1);
         setBackendJobsOffset((current) => current + 1);
       }
-      showToast(error instanceof Error ? error.message : "Could not move result.");
+      showToast(error instanceof Error ? error.message : "Could not move result.", "error");
       return false;
+    }
+  }
+
+  async function handleRetryJob(job: Job) {
+    if (!backendAvailable) {
+      showToast("Retry is only available while the backend is connected.", "error");
+      return;
+    }
+    try {
+      const newJob = await retryBackendJob(job.id);
+      setJobs((current) => mergeJobs([newJob], current));
+      setBackendJobsTotal((current) => current + 1);
+      setBackendJobsOffset((current) => current + 1);
+      showToast("Job requeued with the same settings.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not retry job.", "error");
     }
   }
 
@@ -883,7 +931,7 @@ function App() {
     } catch (error) {
       setJobs(previousJobs);
       setBackendJobsTotal((current) => current + 1);
-      showToast(error instanceof Error ? error.message : "Could not archive result.");
+      showToast(error instanceof Error ? error.message : "Could not archive result.", "error");
     }
   }
 
@@ -899,14 +947,21 @@ function App() {
     } catch (error) {
       setJobs(previousJobs);
       setBackendJobsTotal((current) => current + 1);
-      showToast(error instanceof Error ? error.message : "Could not restore result.");
+      showToast(error instanceof Error ? error.message : "Could not restore result.", "error");
     }
   }
 
-  async function handlePermanentlyDeleteJob(job: Job) {
-    if (!window.confirm("Delete this archived item permanently from the app archive? The media files on disk are left untouched.")) {
-      return;
-    }
+  function handlePermanentlyDeleteJob(job: Job) {
+    setConfirmDialog({
+      title: "Delete archived item",
+      message: "Delete this archived item permanently from the app archive? The media files on disk are left untouched.",
+      confirmLabel: "Delete permanently",
+      tone: "danger",
+      onConfirm: () => void performPermanentlyDeleteJob(job),
+    });
+  }
+
+  async function performPermanentlyDeleteJob(job: Job) {
     const previousJobs = jobs;
     setJobs((current) => current.filter((item) => item.id !== job.id));
     setBackendJobsTotal((current) => Math.max(0, current - 1));
@@ -918,7 +973,7 @@ function App() {
     } catch (error) {
       setJobs(previousJobs);
       setBackendJobsTotal((current) => current + 1);
-      showToast(error instanceof Error ? error.message : "Could not delete archived item.");
+      showToast(error instanceof Error ? error.message : "Could not delete archived item.", "error");
     }
   }
 
@@ -926,7 +981,7 @@ function App() {
     try {
       const nextSaveNumber = normalizeRequiredSaveNumber(value);
       if (!nextSaveNumber) {
-        showToast("Shot/camera number is required.");
+        showToast("Shot/camera number is required.", "error");
         return;
       }
       const fallbackWorkflowOptions = workflowOptionsWithSaveNumber(job.workflowOptions, nextSaveNumber);
@@ -940,7 +995,7 @@ function App() {
       )));
       showToast("Shot/camera updated.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not update shot/camera.");
+      showToast(error instanceof Error ? error.message : "Could not update shot/camera.", "error");
     }
   }
 
@@ -1021,6 +1076,7 @@ function App() {
             onDownload={handleDownloadJobResult}
             onCopyImage={handleCopyJobImage}
             onReuseSettings={handleReuseJobSettings}
+            onRetry={handleRetryJob}
             canReuseSettings={(job) => canReuseJobSettings(job, models)}
             onToggleFavorite={handleToggleFavorite}
             onMove={handleMoveJobResult}
@@ -1092,7 +1148,21 @@ function App() {
           onClose={() => setDownloadChoiceJob(null)}
         />
       ) : null}
-      {toast ? <Toast message={toast} onDismiss={() => setToast("")} /> : null}
+      {confirmDialog ? (
+        <ConfirmModal
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          tone={confirmDialog.tone}
+          onConfirm={() => {
+            const action = confirmDialog.onConfirm;
+            setConfirmDialog(null);
+            action();
+          }}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      ) : null}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
@@ -2014,15 +2084,37 @@ function roundCredits(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
+  if (!toasts.length) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 z-[1100] flex w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-white px-4 py-3 text-sm font-semibold text-ink shadow-2xl">
-      <CheckCircle2 className="h-5 w-5 shrink-0 text-accent" />
-      <span className="min-w-0 flex-1">{message}</span>
+    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[1100] flex w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 flex-col gap-2">
+      {toasts.map((toast) => (
+        <Toast key={toast.id} toast={toast} onDismiss={() => onDismiss(toast.id)} />
+      ))}
+    </div>
+  );
+}
+
+const toastStyles: Record<ToastType, { container: string; icon: typeof CheckCircle2; iconClass: string }> = {
+  success: { container: "border-line bg-white text-ink", icon: CheckCircle2, iconClass: "text-accent" },
+  error: { container: "border-red-200 bg-red-50 text-red-800", icon: AlertCircle, iconClass: "text-red-600" },
+  info: { container: "border-blue-200 bg-blue-50 text-blue-800", icon: Info, iconClass: "text-blue-600" },
+};
+
+function Toast({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
+  const style = toastStyles[toast.type];
+  const Icon = style.icon;
+  return (
+    <div
+      role={toast.type === "error" ? "alert" : "status"}
+      className={`pointer-events-auto flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-semibold shadow-2xl ${style.container}`}
+    >
+      <Icon className={`h-5 w-5 shrink-0 ${style.iconClass}`} />
+      <span className="min-w-0 flex-1">{toast.message}</span>
       <button
         type="button"
         onClick={onDismiss}
-        className="flex h-7 w-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-100"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-current opacity-60 transition hover:opacity-100"
         title="Dismiss"
       >
         <X className="h-4 w-4" />
