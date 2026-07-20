@@ -1,0 +1,96 @@
+{
+  "3": {
+    "inputs": {
+      "prompt": "",
+      "persist_context": false,
+      "model": "gpt5.5-pro",
+      "images": [
+        "9",
+        0
+      ],
+      "advanced_options": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "OpenAIChatNode",
+    "_meta": {
+      "title": "OpenAI ChatGPT"
+    }
+  },
+  "4": {
+    "inputs": {
+      "truncation": "auto",
+      "max_output_tokens": 1024,
+      "instructions": "Kling image-to-video prompt skill instructions are injected by the backend."
+    },
+    "class_type": "OpenAIChatConfig",
+    "_meta": {
+      "title": "OpenAI ChatGPT Advanced Options"
+    }
+  },
+  "6": {
+    "inputs": {
+      "folder_name": "kling_prompt_outputs",
+      "filename_prefix": "kling_prompt",
+      "images": [
+        "7",
+        0
+      ],
+      "texts": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "SaveImageTextDataSetToFolder",
+    "_meta": {
+      "title": "Save Kling Prompt"
+    }
+  },
+  "7": {
+    "inputs": {
+      "image": "kling_prompt_ref_1.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Reference Image 1"
+    }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "kling_prompt_outputs/kling_prompt_preview",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Reference Preview"
+    }
+  },
+  "9": {
+    "inputs": {
+      "images.image0": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": {
+      "title": "Batch Reference Images"
+    }
+  },
+  "10": {
+    "inputs": {
+      "source": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview Generated Kling Prompt"
+    }
+  }
+}

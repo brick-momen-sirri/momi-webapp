@@ -16,11 +16,15 @@ type LeftSettingsPanelProps = {
   selectedProject?: Project;
   targetFolderId: string;
   selectedResolution: string;
+  allowSeedance4K: boolean;
+  selectedNanoBananaAspectRatio: string;
   selectedDurationSeconds: number;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
   saveNumber: string;
   imageOutputCount: 1 | 2;
+  enable16By9Cropping: boolean;
+  show16By9CropToggle: boolean;
   images: UploadedImage[];
   video?: UploadedVideo;
   creditsRemaining: number;
@@ -28,12 +32,14 @@ type LeftSettingsPanelProps = {
   isSubmitting: boolean;
   onModelChange: (modelId: string) => void;
   onResolutionChange: (resolution: string) => void;
+  onNanoBananaAspectRatioChange: (aspectRatio: string) => void;
   onDurationChange: (seconds: number) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
   onTargetFolderChange: (folderId: string) => void;
   onSaveNumberChange: (value: string) => void;
   onImageOutputCountChange: (value: 1 | 2) => void;
+  onEnable16By9CroppingChange: (enabled: boolean) => void;
   onImagesChange: (images: UploadedImage[]) => void;
   onVideoChange: (video: UploadedVideo | undefined) => void;
   onGenerate: () => void;
@@ -45,11 +51,15 @@ export function LeftSettingsPanel({
   selectedProject,
   targetFolderId,
   selectedResolution,
+  allowSeedance4K,
+  selectedNanoBananaAspectRatio,
   selectedDurationSeconds,
   prompt,
   archVizGridOptions,
   saveNumber,
   imageOutputCount,
+  enable16By9Cropping,
+  show16By9CropToggle,
   images,
   video,
   creditsRemaining,
@@ -57,18 +67,24 @@ export function LeftSettingsPanel({
   isSubmitting,
   onModelChange,
   onResolutionChange,
+  onNanoBananaAspectRatioChange,
   onDurationChange,
   onPromptChange,
   onArchVizGridOptionsChange,
   onTargetFolderChange,
   onSaveNumberChange,
   onImageOutputCountChange,
+  onEnable16By9CroppingChange,
   onImagesChange,
   onVideoChange,
   onGenerate,
 }: LeftSettingsPanelProps) {
   const showResolution = selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel);
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
+  const use16By9Cropping = !show16By9CropToggle || enable16By9Cropping;
+  const promptImages = use16By9Cropping
+    ? images
+    : images.map((image) => image ? { ...image, croppedUrl: undefined } : image);
   const activeFolders = (selectedProject?.folders ?? []).filter((folder) => !folder.archived);
   const targetFolder = activeFolders.find((folder) => folder.folderId === targetFolderId);
 
@@ -80,6 +96,9 @@ export function LeftSettingsPanel({
           selectedModel={selectedModel}
           value={selectedResolution}
           onChange={onResolutionChange}
+          allowSeedance4K={allowSeedance4K}
+          aspectRatio={selectedNanoBananaAspectRatio}
+          onAspectRatioChange={onNanoBananaAspectRatioChange}
           imageOutputCount={imageOutputCount}
           onImageOutputCountChange={onImageOutputCountChange}
         />
@@ -96,6 +115,9 @@ export function LeftSettingsPanel({
         requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
         imageSlotCount={selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)}
         requiresLandscape={Boolean(selectedModel.requiresLandscape)}
+        enable16By9Cropping={enable16By9Cropping}
+        show16By9CropToggle={show16By9CropToggle}
+        onEnable16By9CroppingChange={onEnable16By9CroppingChange}
         textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
       />
       {selectedModel.requiresVideo ? (
@@ -104,7 +126,7 @@ export function LeftSettingsPanel({
       {showArchVizGridControls ? (
         <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
       ) : (
-        <PromptBox value={prompt} onChange={onPromptChange} images={images} selectedModel={selectedModel} />
+        <PromptBox value={prompt} onChange={onPromptChange} images={promptImages} selectedModel={selectedModel} />
       )}
 
       <SaveNumberControl

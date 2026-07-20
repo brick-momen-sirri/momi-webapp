@@ -28,20 +28,47 @@ type ScanTarget = {
   root: string;
 };
 let mediaCache: { createdAt: number; jobs: Job[] } | undefined;
+let mediaScanVersion = 0;
+let mediaScanInFlight: { version: number; promise: Promise<Job[]> } | undefined;
 const MEDIA_SCAN_CACHE_MS = Math.max(15_000, Number(process.env.MEDIA_SCAN_CACHE_MS ?? 60_000) || 60_000);
+const MEDIA_METADATA_CONCURRENCY = boundedPositiveInteger(process.env.MEDIA_METADATA_CONCURRENCY, 32, 128);
+let activeMediaMetadataReads = 0;
+const mediaMetadataWaiters: Array<() => void> = [];
 
 export async function scanExistingMediaJobs() {
   if (mediaCache && Date.now() - mediaCache.createdAt < MEDIA_SCAN_CACHE_MS) {
     return mediaCache.jobs;
   }
+
+  if (mediaScanInFlight?.version === mediaScanVersion) {
+    return mediaScanInFlight.promise;
+  }
+
+  const version = mediaScanVersion;
+  const promise = scanExistingMediaJobsUncached(version);
+  mediaScanInFlight = { version, promise };
+
+  try {
+    return await promise;
+  } finally {
+    if (mediaScanInFlight?.promise === promise) {
+      mediaScanInFlight = undefined;
+    }
+  }
+}
+
+async function scanExistingMediaJobsUncached(version: number) {
   const projects = getProjects();
   const jobs = (await Promise.all(projects.map(scanProjectMedia))).flat();
   const sortedJobs = jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  mediaCache = { createdAt: Date.now(), jobs: sortedJobs };
+  if (version === mediaScanVersion) {
+    mediaCache = { createdAt: Date.now(), jobs: sortedJobs };
+  }
   return sortedJobs;
 }
 
 export function invalidateMediaCache() {
+  mediaScanVersion += 1;
   mediaCache = undefined;
 }
 
@@ -73,11 +100,47 @@ async function scanMediaTarget(project: Project, target: ScanTarget, manifest: M
 
   return (
     await Promise.all([
-      ...images.map((filePath) => mediaJob(project, target, filePath, "image", manifest)),
-      ...videos.map((filePath) => mediaJob(project, target, filePath, "video", manifest)),
-      ...sequences.map((sequence) => sequenceJob(project, target, sequence, manifest)),
+      ...images.map((filePath) => withMediaMetadataSlot(() => mediaJob(project, target, filePath, "image", manifest))),
+      ...videos.map((filePath) => withMediaMetadataSlot(() => mediaJob(project, target, filePath, "video", manifest))),
+      ...sequences.map((sequence) => withMediaMetadataSlot(() => sequenceJob(project, target, sequence, manifest))),
     ])
   ).flat();
+}
+
+async function withMediaMetadataSlot<T>(operation: () => Promise<T>) {
+  const release = await acquireMediaMetadataSlot();
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+function acquireMediaMetadataSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const start = () => {
+      activeMediaMetadataReads += 1;
+      let released = false;
+      resolve(() => {
+        if (released) return;
+        released = true;
+        activeMediaMetadataReads = Math.max(0, activeMediaMetadataReads - 1);
+        mediaMetadataWaiters.shift()?.();
+      });
+    };
+
+    if (activeMediaMetadataReads < MEDIA_METADATA_CONCURRENCY) {
+      start();
+    } else {
+      mediaMetadataWaiters.push(start);
+    }
+  });
+}
+
+function boundedPositiveInteger(value: string | undefined, fallback: number, maximum: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(maximum, Math.max(1, Math.floor(parsed)));
 }
 
 async function scanFiles(root: string, extensions: Set<string>): Promise<string[]> {
@@ -230,6 +293,10 @@ async function readManifest(project: Project, folders: ProjectFolder[]): Promise
         }
         continue;
       }
+      if (record.event === "job.moved") {
+        applyManifestMove(records, record);
+        continue;
+      }
       const folderId = manifestFolderId(record);
       if (folderId && !foldersById.has(folderId)) {
         continue;
@@ -250,6 +317,36 @@ async function readManifest(project: Project, folders: ProjectFolder[]): Promise
     return { records, jobTitles, jobSaveNumbers };
   }
   return { records, jobTitles, jobSaveNumbers };
+}
+
+function applyManifestMove(records: Map<string, ManifestRecord>, event: ManifestRecord) {
+  const files = Array.isArray(event.files) ? event.files : [];
+  const destinationFolderId = stringField(event.destinationFolderId) || null;
+  for (const value of files) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const file = value as Record<string, unknown>;
+    const from = stringField(file.from);
+    const to = stringField(file.to);
+    if (!from || !to) continue;
+
+    const fromPath = path.resolve(from);
+    const toPath = path.resolve(to);
+    for (const [recordPath, original] of Array.from(records.entries())) {
+      const relative = path.relative(fromPath, path.resolve(recordPath));
+      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      const movedPath = relative ? path.join(toPath, relative) : toPath;
+      const toRelativePath = stringField(file.toRelativePath);
+      records.set(normalizePath(movedPath), {
+        ...original,
+        folder_id: destinationFolderId,
+        folderId: destinationFolderId,
+        file_path: movedPath,
+        relativePath: relative
+          ? path.join(toRelativePath, relative).replaceAll("\\", "/")
+          : toRelativePath || original.relativePath,
+      });
+    }
+  }
 }
 
 function sanitizeManifestRecord(record: ManifestRecord) {

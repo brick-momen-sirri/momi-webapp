@@ -1,8 +1,10 @@
 import { Archive, Copy, Download, RefreshCw, RotateCcw, Star, Trash2 } from "lucide-react";
-import type { Job } from "../types";
+import type { Job, Project } from "../types";
+import { MoveResultMenu } from "./MoveResultMenu";
 
 type JobActionsProps = {
   job: Job;
+  project?: Project;
   isFavorite: boolean;
   canReuseSettings: boolean;
   archiveView: boolean;
@@ -10,6 +12,7 @@ type JobActionsProps = {
   onCopyImage: (job: Job) => void;
   onReuseSettings: (job: Job) => void;
   onToggleFavorite: (job: Job) => void;
+  onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
   onRestore: (job: Job) => void;
   onDeletePermanently: (job: Job) => void;
@@ -17,6 +20,7 @@ type JobActionsProps = {
 
 export function JobActions({
   job,
+  project,
   isFavorite,
   canReuseSettings,
   archiveView,
@@ -24,6 +28,7 @@ export function JobActions({
   onCopyImage,
   onReuseSettings,
   onToggleFavorite,
+  onMove,
   onArchive,
   onRestore,
   onDeletePermanently,
@@ -39,7 +44,7 @@ export function JobActions({
         className={`flex h-8 w-8 items-center justify-center rounded-md border border-line transition ${
           result ? "text-stone-600 hover:bg-stone-50" : "cursor-not-allowed text-stone-300"
         }`}
-        title="Download image"
+        title={job.outputType === "video" || job.outputType === "sequence" ? "Download result" : "Download image"}
       >
         <Download className="h-3.5 w-3.5" />
       </button>
@@ -89,6 +94,7 @@ export function JobActions({
         </>
       ) : (
         <>
+          <MoveResultMenu job={job} project={project} onMove={onMove} />
           <button
             type="button"
             onClick={() => onToggleFavorite(job)}

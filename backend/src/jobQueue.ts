@@ -6,6 +6,7 @@ import {
   archivedItemsStorePath,
   brickProjectsRoot,
   comfyRoot,
+  creditBalanceDeltaAccountingEnabled,
   generationBackend,
   jobsStorePath,
   localProjectsRoot,
@@ -15,7 +16,14 @@ import {
   uploadedMediaRoot,
 } from "./config.js";
 import { estimateFallbackCreditUsage, estimateWorkflowCredits } from "./creditEstimator.js";
+import { getCredits } from "./creditService.js";
 import { syncServerlessCreditUsage } from "./creditTrackerSyncService.js";
+import {
+  balanceDeltaCredits,
+  COMPANY_BALANCE_DELTA_SOURCE,
+  creditsSpentForAccounting,
+  isCountedCreditUsage,
+} from "./creditUsageAccounting.js";
 import { getActualCreditsByPromptIds } from "./creditUsageService.js";
 import { detectMediaResolution } from "./mediaResolutionService.js";
 import { incrementProjectJobCount, getProject } from "./projectService.js";
@@ -25,6 +33,7 @@ import {
   folderDisplayName,
   loadProjectFolders,
   validateDisplayName,
+  withProjectMutationLock,
 } from "./projectMetadataService.js";
 import {
   RunpodComfyError,
@@ -32,11 +41,24 @@ import {
   type RunpodComfyImageInput,
   type RunpodMediaResult,
 } from "./runpodComfyService.js";
+import {
+  parseImageDataUrl,
+  prepareRunpodInlineImageInput,
+  runpodInlineImageByteBudget,
+} from "./runpodImageInlineService.js";
+import {
+  beginRunpodBillableOperation,
+  hasExclusiveRunpodActivityWindow,
+  runpodActivityBaseline,
+  type RunpodActivityBaseline,
+} from "./runpodActivityTracker.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
+import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
 import { ensureJobFolders, readJsonFile, safeSegment, saveJobMetadata, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
+import { moveResultFiles } from "./resultMoveService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
 import {
   detectWorkflowLoadImageNames,
@@ -46,12 +68,13 @@ import {
   loadWorkflowPrompt,
   saveWorkflowSnapshot,
 } from "./workflowService.js";
-import type { CreateJobRequest, Job, Project, WorkflowModel } from "./types.js";
+import type { CreateJobRequest, CreditBalanceSnapshot, Job, Project, WorkflowModel } from "./types.js";
 
 let jobs: Job[] = [];
 let archivedMediaJobs: Job[] = [];
 let dispatching = false;
 let activeRunpodJobs = 0;
+let resultMoveQueue = Promise.resolve();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 
 export async function loadJobs() {
@@ -446,6 +469,92 @@ export async function updateJobSaveNumber(projectId: string, jobId: string, valu
   return { ...existingJob, workflowOptions };
 }
 
+export async function moveJobResult(
+  projectId: string,
+  jobId: string,
+  destinationFolderId: string | null,
+  userId: string,
+) {
+  return serializeResultMove(async () => {
+    const project = getProject(projectId);
+    if (!project) return undefined;
+
+    return withProjectMutationLock(project, async () => {
+      const job = getJob(jobId);
+      if (!job || job.projectId !== projectId) return undefined;
+      if (job.source === "existing_project_media") {
+        throw new Error("Only generated results with saved job metadata can be moved.");
+      }
+
+      const folders = await loadProjectFolders(project);
+      const originalJob: Job = {
+        ...job,
+        resultUrls: [...job.resultUrls],
+        thumbnailUrls: [...job.thumbnailUrls],
+      };
+      const move = await moveResultFiles({ project, job, destinationFolderId, folders });
+      Object.assign(job, move.job);
+
+      try {
+        await saveJobMetadata(job, project);
+        await persistJobs();
+      } catch (error) {
+        let rollbackError: unknown;
+        try {
+          await move.rollback();
+        } catch (caughtRollbackError) {
+          rollbackError = caughtRollbackError;
+        }
+        Object.assign(job, originalJob);
+        await saveJobMetadata(job, project).catch(() => undefined);
+        await persistJobs().catch(() => undefined);
+        if (rollbackError) {
+          throw new Error(
+            `Could not persist result move: ${error instanceof Error ? error.message : "metadata write failed"}. `
+            + `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : "filesystem operation failed"}`,
+          );
+        }
+        throw error;
+      }
+
+      invalidateMediaCache();
+      const moveRecord = {
+        event: "job.moved",
+        projectId,
+        jobId,
+        oldFolderId: originalJob.folderId ?? null,
+        oldFolderName: originalJob.folderName ?? "Root",
+        destinationFolderId,
+        destinationFolderName: job.folderName ?? "Root",
+        files: move.fileMoves.map((file) => ({
+          from: file.from,
+          to: file.to,
+          fromRelativePath: file.fromRelativePath,
+          toRelativePath: file.toRelativePath,
+        })),
+        changedBy: userId,
+      };
+      const auditWrites = await Promise.allSettled([
+        appendManifestEvent(project, moveRecord),
+        appendAudit(project.folderPath, moveRecord),
+      ]);
+      for (const auditWrite of auditWrites) {
+        if (auditWrite.status === "rejected") {
+          console.warn(`Could not record result move audit for ${jobId}: ${auditWrite.reason instanceof Error ? auditWrite.reason.message : "unknown error"}`);
+        }
+      }
+
+      return job;
+    });
+  });
+}
+
+function serializeResultMove<T>(operation: () => Promise<T>) {
+  const result = resultMoveQueue.then(operation, operation);
+  resultMoveQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 async function dispatchQueue() {
   if (dispatching) return;
   dispatching = true;
@@ -497,15 +606,22 @@ async function runRunpodJob(job: Job) {
     return;
   }
 
+  const endBillableOperation = beginRunpodBillableOperation();
+  const activityBaseline = runpodActivityBaseline();
   try {
     job.status = "sending";
     job.startedAt = new Date().toISOString();
     await persistJobs();
 
+    job.creditBalanceBefore = await captureCreditBalanceSnapshot();
+    if (job.creditBalanceBefore) {
+      await persistJobs();
+    }
+
     const folders = await ensureJobFolders(project, job.id);
     const projectFolderName = path.basename(project.folderPath);
     const runpodImages = await materializeRunpodInputImages(job, model);
-    const runpodVideo = await materializeRunpodInputVideo(job, model);
+    const runpodVideo = await materializeRunpodInputVideo(job, model, folders.input);
     const workflow = await loadWorkflowForRunpod(
       model,
       {
@@ -538,6 +654,9 @@ async function runRunpodJob(job: Job) {
     logMemory("after-runpod-request", job.id);
     job.runpodJobId = result.jobId;
     job.runpodStatus = result.status;
+    job.generatedPrompt = result.generatedText;
+    job.textArtifacts = result.textArtifacts;
+    await captureRunpodPostBalance(job, activityBaseline);
 
     const media = result.media;
     const selectedMedia = preferredResultMedia(media);
@@ -547,9 +666,7 @@ async function runRunpodJob(job: Job) {
 
     const creditUsage = result.creditUsage ?? estimateFallbackCreditUsage(model, workflow, job.durationSeconds, job.resolution);
     job.creditUsage = creditUsage;
-    if (creditUsage) {
-      job.creditsUsed = creditUsage.total_estimated_credits;
-    }
+    applyAccountingCreditsToJob(job);
     job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
 
     logMemory("before-runpod-download", job.id);
@@ -560,7 +677,7 @@ async function runRunpodJob(job: Job) {
     job.fileName = artifacts.selectedArtifacts[0]?.fileName ?? selectedMedia[0]?.filename;
     job.outputResolution = artifacts.outputResolution;
 
-    if (creditUsage) {
+    if (isCountedCreditUsage(creditUsage)) {
       const syncResult = await syncServerlessCreditUsage({
         project,
         job,
@@ -581,25 +698,76 @@ async function runRunpodJob(job: Job) {
     if (job.status !== "canceled") {
       job.status = "failed";
       job.completedAt = new Date().toISOString();
+      await captureRunpodPostBalance(job, activityBaseline);
       if (error instanceof RunpodComfyError) {
+        job.runpodJobId = error.jobId ?? job.runpodJobId;
         job.runpodStatus = error.status;
         job.errorMessage = error.message;
         if (error.creditUsage) {
           job.creditUsage = error.creditUsage;
-          job.creditsUsed = error.creditUsage.total_estimated_credits;
+          applyAccountingCreditsToJob(job);
         } else {
-          job.creditsUsed = 0;
+          applyAccountingCreditsToJob(job);
         }
       } else {
         job.errorMessage = error instanceof Error ? error.message : "Unknown RunPod job error";
-        job.creditsUsed = 0;
+        applyAccountingCreditsToJob(job);
       }
     }
     logMemory("job-failed", job.id);
   } finally {
+    endBillableOperation();
     await persistJobs();
     await saveJobMetadata(job, project);
   }
+}
+
+async function captureCreditBalanceSnapshot(): Promise<CreditBalanceSnapshot | undefined> {
+  try {
+    const credits = await getCredits();
+    if (typeof credits.creditsLeft !== "number" || !Number.isFinite(credits.creditsLeft)) return undefined;
+    return {
+      creditsLeft: credits.creditsLeft,
+      source: credits.source,
+      capturedAt: credits.updatedAt && Number.isFinite(new Date(credits.updatedAt).getTime())
+        ? credits.updatedAt
+        : new Date().toISOString(),
+    };
+  } catch (error) {
+    console.warn(`Could not capture credit balance snapshot: ${error instanceof Error ? error.message : "unknown error"}`);
+    return undefined;
+  }
+}
+
+async function captureRunpodPostBalance(job: Job, activityBaseline: RunpodActivityBaseline) {
+  if (job.creditBalanceAfter) return;
+  const snapshot = await captureCreditBalanceSnapshot();
+  if (!snapshot) return;
+
+  job.creditBalanceAfter = snapshot;
+  if (!creditBalanceDeltaAccountingEnabled) return;
+  // Only attribute the balance delta when this job was provably the only
+  // billable RunPod activity between its before/after snapshots. Concurrent
+  // queue jobs and prompt helper calls spend from the same account balance,
+  // so any overlap would misattribute their credits to this job.
+  if (!hasExclusiveRunpodActivityWindow(activityBaseline)) return;
+
+  const actualCredits = balanceDeltaCredits(job.creditBalanceBefore, job.creditBalanceAfter);
+  if (actualCredits == null) return;
+
+  job.creditsActual = actualCredits;
+  job.creditsActualSource = COMPANY_BALANCE_DELTA_SOURCE;
+  job.creditsUsed = actualCredits;
+}
+
+function applyAccountingCreditsToJob(job: Job) {
+  const credits = creditsSpentForAccounting(job);
+  if (credits > 0) {
+    job.creditsUsed = credits;
+    return;
+  }
+
+  delete job.creditsUsed;
 }
 
 async function runLocalComfyJob(job: Job, serverUrl: string) {
@@ -791,11 +959,13 @@ function preferredResultMedia(media: RunpodMediaResult[]) {
 async function materializeRunpodInputImages(job: Job, model: WorkflowModel) {
   const expectedNames = await detectWorkflowLoadImageNames(model);
   const images: RunpodComfyImageInput[] = [];
+  const imageNames = chooseRunpodImageInputNames(job.inputImages, job.id, expectedNames);
+  const inlineImageMaxBytes = runpodInlineImageByteBudget(job.inputImages.length);
 
   for (let index = 0; index < job.inputImages.length; index += 1) {
     const value = job.inputImages[index];
-    const name = expectedNames?.[index] ?? fallbackRunpodImageName(value, job.id, index);
-    images.push(await runpodImageInput(value, name));
+    const name = imageNames[index];
+    images.push(await runpodImageInput(value, name, inlineImageMaxBytes));
   }
 
   return {
@@ -804,23 +974,62 @@ async function materializeRunpodInputImages(job: Job, model: WorkflowModel) {
   };
 }
 
-async function materializeRunpodInputVideo(job: Job, model: WorkflowModel) {
+export function chooseRunpodImageInputNames(inputImages: string[], jobId: string, expectedNames?: string[]) {
+  const usedNames = new Set<string>();
+
+  return inputImages.map((value, index) => {
+    const expectedName = expectedNames?.[index]?.trim();
+    const fallbackName = fallbackRunpodImageName(value, jobId, index);
+    const preferredName = expectedName && !usedNames.has(runpodInputNameKey(expectedName))
+      ? expectedName
+      : fallbackName;
+
+    return uniqueRunpodInputName(preferredName, usedNames);
+  });
+}
+
+function uniqueRunpodInputName(preferredName: string, usedNames: Set<string>) {
+  const extension = path.extname(preferredName);
+  const base = extension ? preferredName.slice(0, -extension.length) : preferredName;
+  let candidate = preferredName;
+  let suffix = 2;
+
+  while (usedNames.has(runpodInputNameKey(candidate))) {
+    candidate = `${base}_${suffix}${extension}`;
+    suffix += 1;
+  }
+
+  usedNames.add(runpodInputNameKey(candidate));
+  return candidate;
+}
+
+function runpodInputNameKey(value: string) {
+  return value.replaceAll("\\", "/").toLowerCase();
+}
+
+async function materializeRunpodInputVideo(job: Job, model: WorkflowModel, inputFolder: string) {
   if (!job.inputVideo) return undefined;
   const expectedNames = await detectWorkflowLoadVideoNames(model);
   const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
+  const filePath = localMediaFilePathFromUrl(job.inputVideo);
+  const preparedFilePath = filePath
+    ? await prepareRunpodVideoFile(filePath, inputFolder, model)
+    : undefined;
   return {
-    videos: [await runpodVideoInput(job.inputVideo, name)],
+    videos: [preparedFilePath
+      ? await runpodFileInput(preparedFilePath, name, "video")
+      : await runpodVideoInput(job.inputVideo, name)],
     videoName: name,
   };
 }
 
-async function runpodImageInput(value: string, name: string): Promise<RunpodComfyImageInput> {
+async function runpodImageInput(value: string, name: string, inlineImageMaxBytes: number): Promise<RunpodComfyImageInput> {
   if (value.startsWith("data:image/")) {
-    return runpodInlineDataUrlInput(value, name, "image");
+    return runpodInlineImageDataUrlInput(value, name, inlineImageMaxBytes);
   }
   const filePath = localMediaFilePathFromUrl(value);
   if (filePath) {
-    return runpodFileInput(filePath, name, "image");
+    return runpodFileInput(filePath, name, "image", inlineImageMaxBytes);
   }
   if (/^https?:\/\//i.test(value)) {
     return { name, url: value };
@@ -830,7 +1039,7 @@ async function runpodImageInput(value: string, name: string): Promise<RunpodComf
 
 async function runpodVideoInput(value: string, name: string): Promise<RunpodComfyImageInput> {
   if (value.startsWith("data:video/")) {
-    return runpodInlineDataUrlInput(value, name, "video");
+    return runpodInlineVideoDataUrlInput(value, name);
   }
   const filePath = localMediaFilePathFromUrl(value);
   if (filePath) {
@@ -842,10 +1051,14 @@ async function runpodVideoInput(value: string, name: string): Promise<RunpodComf
   throw new Error("RunPod video inputs must be saved media, browser data URLs, or public http(s) URLs.");
 }
 
-async function runpodFileInput(filePath: string, name: string, kind: RunpodInputKind): Promise<RunpodComfyImageInput> {
+async function runpodFileInput(filePath: string, name: string, kind: RunpodInputKind, inlineImageMaxBytes?: number): Promise<RunpodComfyImageInput> {
   const signedUrl = createRunpodInputUrl(filePath, kind);
   if (signedUrl) {
     return { name, url: signedUrl };
+  }
+
+  if (kind === "image") {
+    return runpodInlineImageFileInput(filePath, name, inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
   }
 
   return {
@@ -854,10 +1067,38 @@ async function runpodFileInput(filePath: string, name: string, kind: RunpodInput
   };
 }
 
-function runpodInlineDataUrlInput(value: string, name: string, kind: RunpodInputKind): RunpodComfyImageInput {
+async function runpodInlineImageDataUrlInput(value: string, name: string, maxBytes: number): Promise<RunpodComfyImageInput> {
+  const parsed = parseImageDataUrl(value);
+  if (!parsed) {
+    throw new Error("Unsupported image data URL.");
+  }
+
+  const prepared = await prepareRunpodInlineImageInput({
+    buffer: parsed.buffer,
+    mimeType: parsed.mimeType,
+    name,
+    source: name,
+    maxBytes,
+  });
+  return { name: prepared.name, image: prepared.image };
+}
+
+async function runpodInlineImageFileInput(filePath: string, name: string, maxBytes: number): Promise<RunpodComfyImageInput> {
+  const buffer = await fs.readFile(filePath);
+  const prepared = await prepareRunpodInlineImageInput({
+    buffer,
+    mimeType: mimeTypeFromMediaPath(filePath, "image"),
+    name,
+    source: filePath,
+    maxBytes,
+  });
+  return { name: prepared.name, image: prepared.image };
+}
+
+function runpodInlineVideoDataUrlInput(value: string, name: string): RunpodComfyImageInput {
   const byteLength = dataUrlBase64ByteLength(value);
   if (byteLength != null) {
-    assertRunpodInlineMediaSize(byteLength, kind, name);
+    assertRunpodInlineMediaSize(byteLength, "video", name);
   }
   return { name, image: value };
 }

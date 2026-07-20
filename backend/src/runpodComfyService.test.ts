@@ -137,6 +137,150 @@ test("video output under images is detected", () => {
   assert.equal(media[0]?.source, "images");
 });
 
+test("old RunPod image-only response keeps media behavior and no text artifacts", async () => {
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: jsonFetch({
+      id: "job-image-only",
+      status: "COMPLETED",
+      output: {
+        success: true,
+        images: [{ filename: "preview.png", type: "s3_url", data: "https://cdn.example/preview.png" }],
+      },
+    }) as typeof fetch,
+  });
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.media.length, 1);
+  assert.equal(result.media[0]?.url, "https://cdn.example/preview.png");
+  assert.equal(result.textArtifacts.length, 0);
+  assert.equal(result.generatedText, undefined);
+});
+
+test("RunPod response with inline texts returns generated prompt before file artifacts", async () => {
+  const calls: string[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    calls.push(String(url));
+    if (String(url) === "https://cdn.example/seedance_prompt.txt") {
+      return new Response("FILE TEXT SHOULD NOT WIN", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+
+    return jsonResponse({
+      id: "job-inline-text",
+      status: "COMPLETED",
+      output: {
+        success: true,
+        images: [{ filename: "preview.png", type: "s3_url", data: "https://cdn.example/preview.png" }],
+        files: [{ filename: "seedance_prompt.txt", type: "s3_url", data: "https://cdn.example/seedance_prompt.txt" }],
+        texts: [{ filename: "seedance_prompt.txt", text: "SCENE CONTEXT\nInline Seedance prompt." }],
+      },
+    });
+  };
+
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(result.media.length, 1);
+  assert.equal(result.generatedText, "SCENE CONTEXT\nInline Seedance prompt.");
+  assert.equal(result.textArtifacts[0]?.source, "texts");
+  assert.equal(result.textArtifacts[0]?.filename, "seedance_prompt.txt");
+  assert.equal(calls.includes("https://cdn.example/seedance_prompt.txt"), false);
+});
+
+test("text file artifacts are read separately from media outputs", async () => {
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url) === "https://cdn.example/seedance_prompt.txt") {
+      return new Response("SCENE CONTEXT\nA Seedance prompt from a generated text file.", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+
+    return jsonResponse({
+      id: "job-text-file",
+      status: "COMPLETED",
+      output: {
+        images: [{ filename: "preview.png", url: "https://cdn.example/preview.png" }],
+        files: [{ filename: "seedance_prompt.txt", type: "s3_url", data: "https://cdn.example/seedance_prompt.txt" }],
+      },
+    });
+  };
+
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(result.media.length, 1);
+  assert.equal(result.media[0]?.filename, "preview.png");
+  assert.equal(result.generatedText, "SCENE CONTEXT\nA Seedance prompt from a generated text file.");
+  assert.equal(result.textArtifacts[0]?.filename, "seedance_prompt.txt");
+});
+
+test("direct worker output with texts is parsed without RunPod wrapper", async () => {
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: jsonFetch({
+      success: true,
+      images: [{ filename: "preview.png", url: "https://cdn.example/preview.png" }],
+      texts: [{ filename: "seedance_prompt_00001.txt", text: "SCENE CONTEXT\nDirect worker text." }],
+    }) as typeof fetch,
+  });
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.media[0]?.filename, "preview.png");
+  assert.equal(result.generatedText, "SCENE CONTEXT\nDirect worker text.");
+  assert.equal(result.textArtifacts[0]?.source, "texts");
+});
+
+test("Comfy history string outputs are treated as generated text", async () => {
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: jsonFetch({
+      id: "job-history-string",
+      status: "COMPLETED",
+      output: {
+        outputs: {
+          "6": {
+            string: ["SCENE CONTEXT\nSeedance prompt from Comfy history."],
+          },
+        },
+      },
+    }) as typeof fetch,
+  });
+
+  assert.equal(result.generatedText, "SCENE CONTEXT\nSeedance prompt from Comfy history.");
+  assert.equal(result.textArtifacts[0]?.source, "string");
+});
+
+test("response with no text artifacts does not crash", async () => {
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: jsonFetch({
+      id: "job-no-text",
+      status: "COMPLETED",
+      output: {
+        success: true,
+        files: [{ filename: "preview.webp", type: "s3_url", data: "https://cdn.example/preview.webp" }],
+      },
+    }) as typeof fetch,
+  });
+
+  assert.equal(result.media.length, 1);
+  assert.equal(result.media[0]?.filename, "preview.webp");
+  assert.equal(result.textArtifacts.length, 0);
+  assert.equal(result.generatedText, undefined);
+});
+
 test("credit_usage is normalized for display", () => {
   const creditUsage = service.normalizeRunpodCreditUsage({
     total_estimated_credits: 21.1,
@@ -174,4 +318,8 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function jsonFetch(body: unknown) {
+  return async () => jsonResponse(body);
 }

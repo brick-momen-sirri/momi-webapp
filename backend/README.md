@@ -25,7 +25,7 @@ RUNPOD_ENDPOINT_ID=<your RunPod endpoint id>
 RUNPOD_API_KEY=<your RunPod API key>
 COMFY_ORG_API_KEY=<your Comfy org API key>
 RUNPOD_POLL_INTERVAL_MS=5000
-RUNPOD_TIMEOUT_MS=900000
+RUNPOD_TIMEOUT_MS=2400000
 SERVERLESS_WORKFLOW_ROOT=C:\Momi-Animation\workflow
 CREDIT_TRACKER_URLS=http://127.0.0.1:8188
 ```
@@ -35,6 +35,8 @@ The frontend calls only this backend; RunPod and Comfy API keys stay server-side
 Large browser uploads are streamed to `POST /api/media/upload` before job creation, and `/api/jobs` now receives media URLs instead of base64 media. Keep `JSON_BODY_LIMIT` low, such as `5mb`, and tune `MEDIA_UPLOAD_MAX_BYTES` deliberately for the largest input files you want to allow.
 
 For large image/video inputs, set `RUNPOD_INPUT_BASE_URL` to a public HTTPS URL for this backend, such as a production domain or Cloudflare/ngrok tunnel. The backend will give RunPod short-lived signed download links to the original files instead of embedding base64 media in the JSON request, avoiding RunPod's 20MiB body limit without recompressing or resizing the images.
+
+When `RUNPOD_INPUT_BASE_URL` is not configured, oversized image inputs are automatically resized and re-encoded before inline JSON submission so the request stays below RunPod's limit. This fallback can reduce image quality; set `RUNPOD_INLINE_IMAGE_AUTO_COMPRESS=false` to restore strict failures, or tune `RUNPOD_INLINE_IMAGE_MAX_DIMENSION` and `RUNPOD_INLINE_IMAGE_MIN_QUALITY`.
 
 By default, RunPod mode scans `SERVERLESS_WORKFLOW_ROOT` for clean serverless workflow JSON files. Local Comfy development scans the legacy Comfy custom-node workflow folders unless `WORKFLOW_ROOTS` is explicitly set.
 

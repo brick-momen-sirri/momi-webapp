@@ -38,6 +38,7 @@ import { extractAuthToken, getRequestUser, requireAdmin, requireAuth } from "./a
 import { readWindowsClipboardImage } from "./clipboardService.js";
 import { getServers, refreshServers, runComfyPoolAction, type ComfyPoolAction } from "./comfyPool.js";
 import { getCredits } from "./creditService.js";
+import { creditAccountingSource, creditsSpentForAccounting, isCountedCreditUsage } from "./creditUsageAccounting.js";
 import { getCreditTrackerProjectStats, type CreditTrackerProjectStats } from "./creditUsageService.js";
 import {
   archiveJob,
@@ -48,6 +49,7 @@ import {
   getJobs,
   getJobsWithExistingMedia,
   loadJobs,
+  moveJobResult,
   permanentlyDeleteArchivedJob,
   renameJob,
   restoreArchivedJob,
@@ -70,6 +72,8 @@ import {
 import { getPodStatus } from "./podStatusService.js";
 import { resolveRunpodInputToken } from "./runpodInputUrlService.js";
 import { describeImageWithRunpod } from "./runpodService.js";
+import { runKlingPromptWorkflow } from "./klingPromptWorkflowService.js";
+import { runSeedancePromptWorkflow } from "./seedancePromptWorkflowService.js";
 import type { Job, Project, User } from "./types.js";
 import { getWorkflowModel, getWorkflowModels, loadWorkflowModels } from "./workflowService.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
@@ -348,8 +352,8 @@ app.get("/api/projects", async (req, res) => {
         return {
           ...project,
           jobCount: jobStats?.jobCount ?? 0,
-          creditsUsed: trackerStats?.creditsUsed ?? jobStats?.creditsUsed ?? 0,
-          monthCreditsUsed: trackerStats?.monthCreditsUsed ?? jobStats?.monthCreditsUsed ?? 0,
+          creditsUsed: jobStats?.creditsUsed ?? trackerStats?.creditsUsed ?? 0,
+          monthCreditsUsed: jobStats?.monthCreditsUsed ?? trackerStats?.monthCreditsUsed ?? 0,
         };
       }),
     });
@@ -500,6 +504,37 @@ app.patch("/api/projects/:projectId/jobs/:jobId/save-number", requireAdmin, asyn
   }
 });
 
+app.patch("/api/projects/:projectId/jobs/:jobId/folder", async (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    const project = getProject(req.params.projectId);
+    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+
+    const existing = getJob(req.params.jobId);
+    if (!existing || existing.projectId !== project.id || !canAccessJob(user, existing)) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    if (!canManageJob(user, existing)) {
+      return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
+    }
+
+    const requestedFolderId = req.body?.destinationFolderId;
+    if (requestedFolderId !== null && typeof requestedFolderId !== "string") {
+      return res.status(400).json({ error: "Destination folder must be a folder ID or null for the project root." });
+    }
+    const destinationFolderId = typeof requestedFolderId === "string" && requestedFolderId.trim()
+      ? requestedFolderId.trim()
+      : null;
+    const job = await moveJobResult(project.id, existing.id, destinationFolderId, user.id);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+    res.json({ job });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not move result.";
+    const status = /missing|already exists|not found|only completed|restore this result/i.test(message) ? 409 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
 app.post("/api/projects/:projectId/members", async (req, res) => {
   try {
     const user = getRequestUser(req);
@@ -550,7 +585,7 @@ app.get("/api/usage/monthly", (req, res) => {
       creditsSpent: 0,
       jobsCompleted: 0,
     };
-    current.creditsSpent = roundCredits(current.creditsSpent + (job.creditsUsed ?? job.creditsEstimated ?? 0));
+    current.creditsSpent = roundCredits(current.creditsSpent + creditsSpentForJob(job));
     current.jobsCompleted += 1;
     users.set(job.userId, current);
   }
@@ -619,7 +654,7 @@ app.get("/api/credits/dashboard", (req, res) => {
       credits,
       usd,
       expectedCredits: expectedCreditsForJob(job),
-      source: job.creditUsage?.source ?? "",
+      source: creditAccountingSource(job),
       resolution: resolutionLabel(job),
       runDurationSeconds: runDurationSeconds(job),
       createdAt: job.createdAt,
@@ -679,6 +714,7 @@ app.get("/api/credits/dashboard", (req, res) => {
   for (const job of visibleJobs) {
     const project = getProject(job.projectId);
     const owner = getUserById(job.userId);
+    if (!isCountedCreditUsage(job.creditUsage)) continue;
     for (const [index, row] of (job.creditUsage?.rows ?? []).entries()) {
       const createdAt = job.completedAt ?? job.createdAt;
       const rowTimestamp = new Date(createdAt).getTime();
@@ -751,6 +787,52 @@ app.post("/api/prompt/describe-image", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not describe image.";
     const status = message.includes("RUNPOD_API_KEY") ? 500 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post("/api/prompt/seedance-workflow", async (req, res) => {
+  try {
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const imageBase64 = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64 : "";
+    const imagesBase64 = Array.isArray(req.body?.imagesBase64)
+      ? req.body.imagesBase64.filter((item: unknown) => typeof item === "string" && item.trim())
+      : [];
+    const referenceImages = imagesBase64.length ? imagesBase64 : imageBase64.trim() ? [imageBase64] : [];
+
+    const result = await runSeedancePromptWorkflow({
+      prompt,
+      imagesBase64: referenceImages,
+    });
+
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not generate Seedance prompt.";
+    const status = promptWorkflowErrorStatus(message);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post("/api/prompt/kling-workflow", async (req, res) => {
+  try {
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const cameraPrompt = typeof req.body?.cameraPrompt === "string" ? req.body.cameraPrompt : undefined;
+    const imageBase64 = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64 : "";
+    const imagesBase64 = Array.isArray(req.body?.imagesBase64)
+      ? req.body.imagesBase64.filter((item: unknown) => typeof item === "string" && item.trim())
+      : [];
+    const referenceImages = imagesBase64.length ? imagesBase64 : imageBase64.trim() ? [imageBase64] : [];
+
+    const result = await runKlingPromptWorkflow({
+      prompt,
+      cameraPrompt,
+      imagesBase64: referenceImages,
+    });
+
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not generate Kling prompt.";
+    const status = promptWorkflowErrorStatus(message);
     res.status(status).json({ error: message });
   }
 });
@@ -1021,12 +1103,44 @@ app.post("/api/jobs", async (req, res) => {
     const project = getProject(projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
     if (!canCreateJobInProject(user, project)) return res.status(403).json({ error: "Project editor access required." });
+    const modelId = typeof req.body?.modelId === "string" ? req.body.modelId : "";
+    const model = getWorkflowModel(modelId);
+    if (user.role !== "admin" && model && isSeedanceModel(model) && is4KResolution(req.body?.resolution)) {
+      return res.status(403).json({ error: "Seedance 4K generation is available to administrators only." });
+    }
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    if (model && isKlingVideoModel(model) && prompt.length > KLING_PROMPT_CHARACTER_LIMIT) {
+      return res.status(400).json({
+        error: `Kling prompts are limited to ${KLING_PROMPT_CHARACTER_LIMIT} characters; this prompt is ${prompt.length}. Shorten it and try again.`,
+      });
+    }
     const job = await createJob({ ...(req.body ?? {}), userId: user.id });
     res.status(201).json({ job });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not create job" });
   }
 });
+
+function isSeedanceModel(model: { id: string; name: string; category: string; workflowPath: string }) {
+  return `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("seedance");
+}
+
+// Kept in sync with KLING_PROMPT_CHARACTER_LIMIT in src/services/promptRules.ts.
+const KLING_PROMPT_CHARACTER_LIMIT = 2500;
+
+function isKlingVideoModel(model: { id: string; name: string; category: string; workflowPath: string; outputType: string }) {
+  return model.outputType === "video"
+    && `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("kling");
+}
+
+function is4KResolution(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const resolution = value as { width?: unknown; height?: unknown; label?: unknown };
+  const label = typeof resolution.label === "string" ? resolution.label.toLowerCase().replace(/\s+/g, "") : "";
+  const width = Number(resolution.width);
+  const height = Number(resolution.height);
+  return label === "4k" || (Math.max(width, height) === 3840 && Math.min(width, height) === 2160);
+}
 
 app.post("/api/jobs/:jobId/cancel", async (req, res) => {
   const user = getRequestUser(req);
@@ -1164,9 +1278,7 @@ function roundCredits(value: number) {
 }
 
 function creditsSpentForJob(job: Job) {
-  if (job.source === "existing_project_media") return 0;
-  const value = Number(job.creditsUsed ?? 0);
-  return Number.isFinite(value) && value > 0 ? value : 0;
+  return creditsSpentForAccounting(job);
 }
 
 type CreditDashboardGroup = {
@@ -1241,6 +1353,7 @@ type CreditDashboardAnomaly = {
 };
 
 function usdSpentForJob(job: Job) {
+  if (!isCountedCreditUsage(job.creditUsage)) return 0;
   const direct = Number(job.creditUsage?.total_estimated_usd ?? 0);
   if (Number.isFinite(direct) && direct > 0) return direct;
   const rows = job.creditUsage?.rows ?? [];
@@ -1885,4 +1998,25 @@ function improveTextPromptLocally(prompt: string) {
 
   const cleaned = currentPrompt.replace(/[.。]+$/g, "");
   return `${cleaned}, with clear subject preservation, natural realistic details, consistent lighting, clean edges, and no unwanted changes to the surrounding scene.`;
+}
+
+function promptWorkflowErrorStatus(message: string) {
+  if (
+    message.startsWith("Write the initial Seedance idea") ||
+    message.startsWith("Write the initial Kling image-to-video idea") ||
+    message.startsWith("Upload at least one reference image")
+  ) {
+    return 400;
+  }
+
+  if (
+    message.includes("is not configured") ||
+    message.includes("RUNPOD_API_KEY") ||
+    message.includes("COMFY_ORG_API_KEY") ||
+    message.includes("workflow JSON")
+  ) {
+    return 500;
+  }
+
+  return 502;
 }

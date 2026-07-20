@@ -38,6 +38,17 @@ export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(co
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");
 export const uploadedMediaRoot = process.env.UPLOADED_MEDIA_ROOT ?? path.join(localProjectsRoot, "_uploads");
 export const workflowMappingsPath = path.join(backendRoot, "config", "workflow-mappings.json");
+export const seedancePromptWorkflowPath =
+  process.env.SEEDANCE_PROMPT_WORKFLOW_PATH ??
+  path.join(workspaceRoot, "workflow", "prompt_generation", "Seedance_prompt_generation.json");
+export const seedancePromptOpenAIModel = process.env.SEEDANCE_PROMPT_OPENAI_MODEL?.trim() ?? "gpt5.5-pro";
+export const klingPromptWorkflowPath =
+  process.env.KLING_PROMPT_WORKFLOW_PATH ??
+  path.join(workspaceRoot, "workflow", "prompt_generation", "Kling_image_to_video_prompt_generation.json");
+export const klingPromptSkillPath =
+  process.env.KLING_PROMPT_SKILL_PATH ??
+  path.join(workspaceRoot, "workflow", "prompt_generation", "Kling_image_to_video_skill.md");
+export const klingPromptOpenAIModel = process.env.KLING_PROMPT_OPENAI_MODEL?.trim() ?? "gpt5.5-pro";
 export const jobsStorePath = path.join(backendRoot, "data", "jobs.json");
 export const archivedItemsStorePath = path.join(backendRoot, "data", "archived-items.json");
 export const projectsStorePath = path.join(backendRoot, "data", "projects.json");
@@ -62,16 +73,25 @@ export const runpodHealthUrl = runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}
 export const runpodApiKey = process.env.RUNPOD_API_KEY?.trim() ?? "";
 export const comfyOrgApiKey = process.env.COMFY_ORG_API_KEY?.trim() ?? "";
 export const runpodPollIntervalMs = positiveNumber(process.env.RUNPOD_POLL_INTERVAL_MS, 5000);
-export const runpodTimeoutMs = positiveNumber(process.env.RUNPOD_TIMEOUT_MS, 900000);
+export const runpodTimeoutMs = positiveNumber(process.env.RUNPOD_TIMEOUT_MS, 2_400_000);
 export const runpodInputBaseUrl =
   (process.env.RUNPOD_INPUT_BASE_URL ?? process.env.PUBLIC_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 export const runpodInputTokenSecret = (process.env.RUNPOD_INPUT_URL_SECRET ?? runpodApiKey).trim();
 export const runpodInputUrlTtlMs = positiveNumber(process.env.RUNPOD_INPUT_URL_TTL_MS, runpodTimeoutMs + 15 * 60_000);
 export const runpodInlineMediaMaxBytes = positiveNumber(process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES, 12 * 1024 * 1024);
 export const runpodRequestBodyMaxBytes = positiveNumber(process.env.RUNPOD_REQUEST_BODY_MAX_BYTES, 19 * 1024 * 1024);
+export const runpodInlineImageAutoCompress = !["0", "false", "no", "off"].includes(
+  String(process.env.RUNPOD_INLINE_IMAGE_AUTO_COMPRESS ?? "true").trim().toLowerCase(),
+);
+export const runpodInlineImageMaxDimension = positiveNumber(process.env.RUNPOD_INLINE_IMAGE_MAX_DIMENSION, 4096);
+export const runpodInlineImageMinQuality = boundedNumber(process.env.RUNPOD_INLINE_IMAGE_MIN_QUALITY, 55, 20, 95);
 export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX_BYTES, 1024 * 1024 * 1024);
+export const runpodDebug = ["1", "true", "yes", "on"].includes(String(process.env.RUNPOD_DEBUG ?? "").trim().toLowerCase());
+export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "exclusive"].includes(
+  String(process.env.CREDIT_BALANCE_DELTA_ACCOUNTING ?? "").trim().toLowerCase(),
+);
 export const mediaUploadMaxBytes = positiveNumber(process.env.MEDIA_UPLOAD_MAX_BYTES, 1024 * 1024 * 1024);
-export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "5mb";
+export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 
 export function validateRuntimeConfigForStartup() {
@@ -106,4 +126,9 @@ function missingRunpodEnvVars() {
 function positiveNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function boundedNumber(value: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = positiveNumber(value, fallback);
+  return Math.min(max, Math.max(min, parsed));
 }

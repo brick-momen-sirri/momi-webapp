@@ -8,6 +8,17 @@ import {
   runpodStatusUrl,
   runpodTimeoutMs,
 } from "./config.js";
+import {
+  combinedTextArtifactContent,
+  extractRunpodTextArtifacts,
+  isRunpodTextOutputItem,
+  type RunpodTextArtifact,
+} from "./runpodTextArtifactService.js";
+import {
+  logRunpodFetchError,
+  logRunpodRequest,
+  logRunpodResponse,
+} from "./runpodDebugLogger.js";
 import type { CreditUsageRow, CreditUsageSummary } from "./types.js";
 
 export type RunpodComfyImageInput = {
@@ -28,6 +39,8 @@ export type RunpodComfyResult = {
   jobId?: string;
   status: string;
   media: RunpodMediaResult[];
+  textArtifacts: RunpodTextArtifact[];
+  generatedText?: string;
   creditUsage?: CreditUsageSummary;
 };
 
@@ -55,13 +68,15 @@ const videoExtensions = new Set([".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"
 export class RunpodComfyError extends Error {
   response?: unknown;
   status?: string;
+  jobId?: string;
   creditUsage?: CreditUsageSummary;
 
-  constructor(message: string, options: { response?: unknown; status?: string; creditUsage?: CreditUsageSummary } = {}) {
+  constructor(message: string, options: { response?: unknown; status?: string; jobId?: string; creditUsage?: CreditUsageSummary } = {}) {
     super(message);
     this.name = "RunpodComfyError";
     this.response = options.response;
     this.status = options.status;
+    this.jobId = options.jobId;
     this.creditUsage = options.creditUsage;
   }
 }
@@ -182,43 +197,67 @@ async function resolveRunpodResponse(response: RunpodResponse, fetchImpl: typeof
     }
 
     if (!terminalStatuses.has(status) && current.output && !current.error) {
-      return completedResult(current, status);
+      return completedResult(current, status, fetchImpl);
     }
 
     if (status === "COMPLETED") {
-      return completedResult(current, status);
+      return completedResult(current, status, fetchImpl);
     }
 
     const creditUsage = creditUsageFromRunpodOutput(current.output);
     throw new RunpodComfyError(runpodFailureMessage(current, status), {
       response: current,
       status,
+      jobId: runpodJobId(current),
       creditUsage,
     });
   }
 }
 
-function completedResult(response: RunpodResponse, status: string): RunpodComfyResult {
+async function completedResult(response: RunpodResponse, status: string, fetchImpl: typeof fetch): Promise<RunpodComfyResult> {
   const output = response.output ?? response;
+  const textArtifacts = await extractRunpodTextArtifacts(output, fetchImpl);
+  logTextArtifacts(textArtifacts);
+  const generatedText = combinedTextArtifactContent(textArtifacts);
   return {
     jobId: runpodJobId(response),
     status,
     media: extractRunpodMedia(output),
+    textArtifacts,
+    ...(generatedText ? { generatedText } : {}),
     creditUsage: creditUsageFromRunpodOutput(output),
   };
+}
+
+function logTextArtifacts(textArtifacts: RunpodTextArtifact[]) {
+  if (!textArtifacts.length) return;
+  const labels = textArtifacts
+    .map((artifact) => artifact.filename ?? artifact.url ?? artifact.source)
+    .filter(Boolean)
+    .join(", ");
+  console.info(`[runpod] Found ${textArtifacts.length} text artifact(s)${labels ? `: ${labels}` : "."}`);
 }
 
 async function runpodFetch(fetchImpl: typeof fetch, url: string, init: RequestInit, startedAt: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), remainingTimeoutMs(startedAt));
+  logRunpodRequest(url, init);
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal });
     const data = await parseRunpodResponse(response);
+    logRunpodResponse(url, response.status, data);
     if (!response.ok) {
-      throw new RunpodComfyError(runpodHttpFailureMessage(response, data), { response: data });
+      throw new RunpodComfyError(runpodHttpFailureMessage(response, data), {
+        response: data,
+        status: stringFrom(data.status) ?? String(response.status),
+        jobId: runpodJobId(data),
+      });
     }
     return data;
   } catch (error) {
+    if (!(error instanceof RunpodComfyError)) {
+      logRunpodFetchError(url, error);
+    }
     if (error instanceof RunpodComfyError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
       throw new RunpodComfyError(`RunPod request timed out after ${Math.round(runpodTimeoutMs / 1000)} seconds.`);
@@ -299,6 +338,8 @@ function isUnauthorizedComfyError(value: unknown) {
 }
 
 function mediaFromOutputItem(item: unknown, source: string): RunpodMediaResult | undefined {
+  if (isRunpodTextOutputItem(item, source)) return undefined;
+
   if (typeof item === "string") {
     const filename = filenameFromValue(item);
     return {

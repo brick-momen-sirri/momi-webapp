@@ -40,8 +40,46 @@ test("prompt helper accepts OpenAI-style choices output", async () => {
   assert.equal(result.text, "Choice prompt.");
 });
 
+test("prompt helper reads generated prompt from a RunPod text file artifact", async () => {
+  const calls: string[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    calls.push(String(url));
+    if (String(url) === "https://cdn.example/seedance_prompt.txt") {
+      return new Response("SCENE CONTEXT\nA close portrait shot from the reference image.", {
+        headers: {
+          "content-type": "text/plain",
+          "content-length": "56",
+        },
+      });
+    }
+
+    return jsonFetchResponse({
+      id: "rp-text-file",
+      status: "COMPLETED",
+      output: {
+        images: [{ filename: "preview.png", url: "https://cdn.example/preview.png" }],
+        files: [{ filename: "seedance_prompt.txt", type: "s3_url", data: "https://cdn.example/seedance_prompt.txt" }],
+      },
+    });
+  };
+
+  const result = await service.describeImageWithRunpod({
+    imageBase64: "AAA=",
+    prompt: "Generate a Seedance prompt.",
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(result.text, "SCENE CONTEXT\nA close portrait shot from the reference image.");
+  assert.equal(result.textArtifacts[0]?.filename, "seedance_prompt.txt");
+});
+
 function jsonFetch(body: unknown) {
-  return async () => new Response(JSON.stringify(body), {
+  return async () => jsonFetchResponse(body);
+}
+
+function jsonFetchResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json" },
-  }) as Promise<Response>;
+  });
 }

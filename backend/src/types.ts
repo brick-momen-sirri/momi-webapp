@@ -175,6 +175,20 @@ export type CreditUsageSummary = {
   rows?: CreditUsageRow[];
 };
 
+export type CreditBalanceSnapshot = {
+  creditsLeft: number;
+  source: string;
+  capturedAt: string;
+};
+
+export type JobTextArtifact = {
+  text: string;
+  filename?: string;
+  type?: string;
+  source: string;
+  url?: string;
+};
+
 export type ArchVizGridOptions = {
   slotCount?: "1" | "2" | "4" | "6" | "8" | "9";
   useSmartDefaults?: boolean;
@@ -184,6 +198,7 @@ export type ArchVizGridOptions = {
 export type WorkflowOptions = {
   archVizGrid?: ArchVizGridOptions;
   nanoBanana?: {
+    aspectRatio?: string;
     outputCount?: 1 | 2;
   };
   gptImage?: {
@@ -230,6 +245,8 @@ export type Job = {
   outputResolution?: Resolution;
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
+  generatedPrompt?: string;
+  textArtifacts?: JobTextArtifact[];
   status: JobStatus;
   inputImages: string[];
   inputVideo?: string;
@@ -241,6 +258,10 @@ export type Job = {
   workflowSnapshotPath?: string;
   creditsEstimated?: number;
   creditsUsed?: number;
+  creditsActual?: number;
+  creditsActualSource?: string;
+  creditBalanceBefore?: CreditBalanceSnapshot;
+  creditBalanceAfter?: CreditBalanceSnapshot;
   creditUsage?: CreditUsageSummary;
   errorMessage?: string;
   fileName?: string;

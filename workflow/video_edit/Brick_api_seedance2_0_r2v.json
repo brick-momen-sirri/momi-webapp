@@ -1,104 +1,397 @@
 {
-  "352": {
-    "inputs": {
-      "image": "sd_outfit_1.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "353": {
-    "inputs": {
-      "image": "sd_outfit_2.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "354": {
-    "inputs": {
-      "image": "sd_outfit_3.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "356": {
-    "inputs": {
-      "image": "selfie_cartoon_style.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
-  },
-  "359": {
-    "inputs": {
-      "model": "Seedance 2.0",
-      "model.prompt": "",
-      "model.resolution": "1080p",
-      "model.ratio": "16:9",
-      "model.duration": 5,
-      "model.generate_audio": true,
-      "model.auto_downscale": false,
-      "model.auto_upscale": 0,
-      "seed": "randomize",
-      "watermark": false,
-      "model.reference_images.image_1": [
-        "356",
-        0
+  "id": "00000000-0000-0000-0000-000000000000",
+  "revision": 0,
+  "last_node_id": 365,
+  "last_link_id": 13,
+  "nodes": [
+    {
+      "id": 352,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        130
       ],
-      "model.reference_images.image_2": [
-        "352",
-        0
+      "size": [
+        282.798828125,
+        102
       ],
-      "model.reference_images.image_3": [
-        "353",
-        0
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
       ],
-      "model.reference_images.image_4": [
-        "354",
-        0
-      ],
-      "model.reference_videos.video_1": [
-        "364",
-        0
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "sd_outfit_1.png",
+        "image"
       ]
     },
-    "class_type": "ByteDance2ReferenceNode",
-    "_meta": {
-      "title": "ByteDance Seedance 2.0 Reference to Video"
-    }
-  },
-  "363": {
-    "inputs": {
-      "project_name": "0000_base",
-      "model_prefix": "Seedance 2.0_r2v",
-      "shot_number": 0,
-      "format": "auto",
-      "codec": "auto",
-      "create_project_dom": "",
-      "video": [
-        "359",
-        0
+    {
+      "id": 353,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        362
+      ],
+      "size": [
+        282.798828125,
+        102
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            9
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "sd_outfit_2.png",
+        "image"
       ]
     },
-    "class_type": "SaveArchVizVideo",
-    "_meta": {
-      "title": "Save Brick Video"
-    }
-  },
-  "364": {
-    "inputs": {
-      "file": "01 (1).mp4",
-      "video-preview": ""
+    {
+      "id": 354,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        594
+      ],
+      "size": [
+        282.798828125,
+        102
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            10
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "sd_outfit_3.png",
+        "image"
+      ]
     },
-    "class_type": "LoadVideo",
-    "_meta": {
-      "title": "Load Video"
+    {
+      "id": 356,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        826
+      ],
+      "size": [
+        282.798828125,
+        102
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "selfie_cartoon_style.png",
+        "image"
+      ]
+    },
+    {
+      "id": 364,
+      "type": "LoadVideo",
+      "pos": [
+        100,
+        1058
+      ],
+      "size": [
+        282.798828125,
+        82
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "01 (1).mp4",
+        "image"
+      ]
+    },
+    {
+      "id": 359,
+      "type": "ByteDance2ReferenceNode",
+      "pos": [
+        482.798828125,
+        130
+      ],
+      "size": [
+        400,
+        488
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "image_1",
+          "name": "model.reference_images.image_1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 7
+        },
+        {
+          "label": "image_2",
+          "name": "model.reference_images.image_2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 8
+        },
+        {
+          "label": "image_3",
+          "name": "model.reference_images.image_3",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 9
+        },
+        {
+          "label": "image_4",
+          "name": "model.reference_images.image_4",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "label": "image_5",
+          "name": "model.reference_images.image_5",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "video_1",
+          "name": "model.reference_videos.video_1",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": 11
+        },
+        {
+          "label": "video_2",
+          "name": "model.reference_videos.video_2",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "label": "audio_1",
+          "name": "model.reference_audios.audio_1",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "asset_1",
+          "name": "model.reference_assets.asset_1",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ByteDance2ReferenceNode"
+      },
+      "widgets_values": [
+        "Seedance 2.0",
+        "",
+        "1080p",
+        "16:9",
+        5,
+        true,
+        false,
+        0,
+        null,
+        "randomize",
+        false
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 365,
+      "type": "SaveVideo",
+      "pos": [
+        1003.3463890205501,
+        103.41983696718097
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {},
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto"
+      ]
     }
-  }
+  ],
+  "links": [
+    [
+      7,
+      356,
+      0,
+      359,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      352,
+      0,
+      359,
+      1,
+      "IMAGE"
+    ],
+    [
+      9,
+      353,
+      0,
+      359,
+      2,
+      "IMAGE"
+    ],
+    [
+      10,
+      354,
+      0,
+      359,
+      3,
+      "IMAGE"
+    ],
+    [
+      11,
+      364,
+      0,
+      359,
+      5,
+      "VIDEO"
+    ],
+    [
+      13,
+      359,
+      0,
+      365,
+      0,
+      "VIDEO"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.111560083770325,
+      "offset": [
+        -59.68225065648995,
+        120.6936450433664
+      ]
+    },
+    "frontendVersion": "1.45.21",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
 }

@@ -21,6 +21,7 @@ const gptImageSizeOptions = [
   "2160x3840",
 ];
 
+const nanoBananaAspectRatioOptions = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
 export async function loadWorkflowModels() {
   const files = (await Promise.all(workflowRoots.map((root) => listJsonFiles(root)))).flat();
   modelsCache = await Promise.all(files.map(inferWorkflowModel));
@@ -65,20 +66,16 @@ export async function loadWorkflowForRunpod(
     endFrame: model.requiresStartEndFrames ? imageNames[1] : request.endFrame,
   };
 
-  if (isApiPromptLike(workflow)) {
-    const prompt = toApiPrompt(workflow, {});
-    const mapping = mappingsCache[model.id] ?? {};
-    if (model.outputType === "video") {
-      pruneSaveBrickSequenceNodes(prompt);
-    }
-    injectInputs(prompt, model, requestWithImageNames, projectName, mapping, {});
-    applyTextOnlyImageWorkflowMode(prompt, model, requestWithImageNames);
-    applyImageOutputCountOptions(prompt, model, requestWithImageNames);
-    return prompt;
+  assertUiWorkflowWidgetsSupported(workflow, model.workflowPath);
+  const prompt = toApiPrompt(workflow, {});
+  const mapping = mappingsCache[model.id] ?? {};
+  if (model.outputType === "video") {
+    pruneSaveBrickSequenceNodes(prompt);
   }
-
-  injectUiWorkflowInputs(workflow, model, requestWithImageNames, projectName, imageNames, mappingsCache[model.id] ?? {});
-  return workflow;
+  injectInputs(prompt, model, requestWithImageNames, projectName, mapping, {});
+  applyTextOnlyImageWorkflowMode(prompt, model, requestWithImageNames);
+  applyImageOutputCountOptions(prompt, model, requestWithImageNames);
+  return prompt;
 }
 
 export async function detectWorkflowLoadImageNames(model: WorkflowModel) {
@@ -764,10 +761,20 @@ function uiNodeInputs(
   return inputs;
 }
 
-function widgetInputSpecs(classType: string, objectInfo: Record<string, any>) {
+type WidgetInputSpec = {
+  name: string;
+  inputType: unknown;
+  defaultValue?: unknown;
+  hasControlAfterGenerate: boolean;
+  options?: Record<string, unknown>;
+  widgetSpan: number;
+  isWidget: boolean;
+};
+
+function widgetInputSpecs(classType: string, objectInfo: Record<string, any>): WidgetInputSpec[] {
   const info = objectInfo[classType]?.input;
   const sections = [info?.required, info?.optional].filter(Boolean) as Array<Record<string, unknown>>;
-  return sections.flatMap((section) =>
+  const specs = sections.flatMap((section) =>
     Object.entries(section)
       .map(([name, value]) => {
         const inputType = Array.isArray(value) ? value[0] : undefined;
@@ -784,6 +791,92 @@ function widgetInputSpecs(classType: string, objectInfo: Record<string, any>) {
       })
       .filter((spec) => spec.isWidget),
   );
+  return specs.length ? specs : fallbackWidgetInputSpecs(classType);
+}
+
+function fallbackWidgetInputSpecs(classType: string): WidgetInputSpec[] {
+  const definitions: Record<string, Array<[string, unknown, Record<string, unknown>?]>> = {
+    LoadImage: [["image", "STRING"]],
+    LoadVideo: [["file", "STRING"]],
+    SaveVideo: [
+      ["filename_prefix", "STRING", { default: "video/ComfyUI" }],
+      ["format", "COMBO", { default: "auto" }],
+      ["codec", "COMBO", { default: "auto" }],
+    ],
+    KlingOmniProEditVideoNode: [
+      ["model_name", "COMBO", { default: "kling-v3-omni" }],
+      ["prompt", "STRING", { default: "" }],
+      ["keep_original_sound", "BOOLEAN", { default: true }],
+      ["resolution", "COMBO", { default: "1080p" }],
+      ["seed", "INT", { default: 0, control_after_generate: true }],
+    ],
+    ByteDance2ReferenceNode: [
+      ["model", "COMBO", { default: "Seedance 2.0" }],
+      ["model.prompt", "STRING", { default: "" }],
+      ["model.resolution", "COMBO", { default: "1080p" }],
+      ["model.ratio", "COMBO", { default: "16:9" }],
+      ["model.duration", "INT", { default: 5 }],
+      ["model.generate_audio", "BOOLEAN", { default: true }],
+      ["model.auto_downscale", "BOOLEAN", { default: true }],
+      ["model.auto_upscale", "BOOLEAN", { default: false }],
+      ["seed", "INT", { default: 0, control_after_generate: true }],
+      ["watermark", "BOOLEAN", { default: false }],
+    ],
+  };
+
+  return (definitions[classType] ?? []).map(([name, inputType, options]) => ({
+    name,
+    inputType,
+    defaultValue: options?.default,
+    hasControlAfterGenerate: Boolean(options?.control_after_generate),
+    options,
+    widgetSpan: widgetSpan(inputType, options),
+    isWidget: true,
+  }));
+}
+
+// UI-only node types whose widget values never become executable inputs.
+const inertUiNodeTypes = new Set(["Note", "MarkdownNote", "Reroute", "PrimitiveNode"]);
+
+// The RunPod path converts UI-format workflows without a live ComfyUI server,
+// so widget values can only be mapped through fallbackWidgetInputSpecs. A node
+// type missing from that table would silently lose all of its widget values
+// (prompt, resolution, seed, ...) and generate with defaults. Fail loudly
+// instead so the gap is caught when the workflow is added, not in its output.
+function assertUiWorkflowWidgetsSupported(workflow: unknown, workflowPath: string) {
+  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return;
+  const record = workflow as Record<string, any>;
+  // API-prompt shapes carry named inputs already and need no widget mapping.
+  if (record.output && typeof record.output === "object") return;
+  if (record.prompt && typeof record.prompt === "object") return;
+  if (Object.keys(record).some((key) => /^\d+$/.test(key))) return;
+  if (!Array.isArray(record.nodes)) return;
+
+  const subgraphs = subgraphDefinitions(record);
+  const unsupported = new Set<string>();
+  const collectUnsupported = (nodes: any[]) => {
+    for (const node of nodes) {
+      if (!node || node.id == null) continue;
+      const classType = String(nodeClassType(node) ?? "");
+      if (!classType || inertUiNodeTypes.has(classType) || subgraphs.has(classType)) continue;
+      const widgets = Array.isArray(node.widgets_values) ? node.widgets_values : [];
+      if (!widgets.length) continue;
+      if (!widgetInputSpecs(classType, {}).length) unsupported.add(classType);
+    }
+  };
+
+  collectUnsupported(record.nodes);
+  for (const subgraph of subgraphs.values()) {
+    collectUnsupported(subgraph.nodes);
+  }
+
+  if (unsupported.size) {
+    throw new Error(
+      `Workflow ${path.basename(workflowPath)} uses node type(s) with widget values that have no RunPod input mapping: `
+      + `${[...unsupported].sort().join(", ")}. Add them to fallbackWidgetInputSpecs in workflowService.ts `
+      + "so their widget values are not silently dropped.",
+    );
+  }
 }
 
 function isWidgetInput(inputType: unknown) {
@@ -904,7 +997,9 @@ function injectInputs(
         delete inputs[key];
         continue;
       }
-      if (request.prompt && model.requiresPrompt && isEditablePromptInput(lowerKey) && typeof inputs[key] === "string") inputs[key] = request.prompt;
+      if (request.prompt && model.requiresPrompt && isEditablePromptInput(lowerKey) && typeof inputs[key] === "string") {
+        inputs[key] = request.prompt;
+      }
       if (resolution && lowerKey === "width") inputs[key] = resolution.width;
       if (resolution && lowerKey === "height") inputs[key] = resolution.height;
       if (resolution && lowerKey === "resolution") inputs[key] = directResolutionLabel(resolution.label ?? "1080p");
@@ -944,6 +1039,9 @@ function injectInputs(
     }
     if (classType.includes("archvizgridpromptbuilder")) {
       applyArchVizGridOptions(inputs, request.workflowOptions?.archVizGrid);
+    }
+    if (isNanoBananaClassType(classType)) {
+      applyNanoBananaAspectRatioInput(inputs, request.workflowOptions);
     }
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {
@@ -1056,7 +1154,28 @@ function isGptImageKey(key: string) {
 
 function isNanoBananaNode(node: any) {
   const classType = String(node?.class_type ?? node?.type ?? "").toLowerCase();
+  return isNanoBananaClassType(classType);
+}
+
+function isNanoBananaClassType(classType: string) {
   return classType.includes("gemininanobanana") || (classType.includes("nano") && classType.includes("banana"));
+}
+
+function normalizeNanoBananaAspectRatio(value: unknown) {
+  return typeof value === "string" && nanoBananaAspectRatioOptions.has(value) ? value : undefined;
+}
+
+function applyNanoBananaAspectRatioInput(
+  inputs: Record<string, any>,
+  workflowOptions: CreateJobRequest["workflowOptions"],
+) {
+  const aspectRatio = normalizeNanoBananaAspectRatio(workflowOptions?.nanoBanana?.aspectRatio);
+  if (!aspectRatio) return;
+  const key = Object.keys(inputs).find((item) => {
+    const lower = item.toLowerCase();
+    return lower === "aspect_ratio" || lower === "aspect.ratio" || lower === "aspect ratio";
+  }) ?? "aspect_ratio";
+  inputs[key] = aspectRatio;
 }
 
 function isGptImageNode(node: any) {
@@ -1136,151 +1255,6 @@ function defaultSaveImageNode() {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function injectUiWorkflowInputs(
-  workflow: unknown,
-  model: WorkflowModel,
-  request: CreateJobRequest,
-  projectName: string,
-  imageNames: string[],
-  mapping: WorkflowInputMapping,
-) {
-  if (!workflow || typeof workflow !== "object") return;
-  let sequentialImageIndex = 0;
-  const durationSeconds = normalizeDurationSeconds(request.durationSeconds, model);
-
-  for (const node of workflowNodesDeep(workflow)) {
-    const classType = String(node.type ?? node.class_type ?? "").toLowerCase();
-    const widgets = Array.isArray(node.widgets_values) ? node.widgets_values : undefined;
-    const inputs = node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-      ? node.inputs as Record<string, any>
-      : undefined;
-
-    if (classType.includes("loadimage")) {
-      const imageName = imageNames[sequentialImageIndex];
-      if (imageName) {
-        if (widgets) widgets[0] = imageName;
-        if (inputs && typeof inputs.image === "string") inputs.image = imageName;
-        sequentialImageIndex += 1;
-      }
-    }
-
-    if (widgets && request.prompt && model.requiresPrompt) {
-      applyUiPromptWidget(classType, widgets, request.prompt);
-    }
-
-    if (widgets && durationSeconds) {
-      applyUiDurationWidget(classType, widgets, durationSeconds);
-    }
-
-    if (widgets && request.resolution) {
-      applyUiResolutionWidget(classType, widgets, request.resolution);
-    }
-
-    if (widgets) {
-      applyUiSaveWidgets(classType, widgets, projectName, request.workflowOptions?.save);
-    }
-
-    applyUiMappedInputs(String(node.id ?? ""), node, mapping, request, projectName);
-  }
-}
-
-function applyUiPromptWidget(classType: string, widgets: unknown[], prompt: string) {
-  if (classType.includes("klingfirstlastframenode")) {
-    widgets[0] = prompt;
-    return;
-  }
-  if (classType.includes("klingimagetovideowithaudio") || classType.includes("klingvideonode")) {
-    widgets[1] = prompt;
-    return;
-  }
-  if (classType.includes("bytedance") || classType.includes("seedance") || classType.includes("veo")) {
-    const index = widgets.findIndex((value) => typeof value === "string" && String(value).length > 10);
-    if (index >= 0) widgets[index] = prompt;
-  }
-}
-
-function applyUiDurationWidget(classType: string, widgets: unknown[], durationSeconds: number) {
-  if (classType.includes("klingfirstlastframenode")) {
-    widgets[1] = durationSeconds;
-    return;
-  }
-  if (classType.includes("klingimagetovideowithaudio") || classType.includes("klingvideonode")) {
-    widgets[3] = durationSeconds;
-    return;
-  }
-  if (classType.includes("bytedance") || classType.includes("seedance") || classType.includes("veo")) {
-    const index = widgets.findIndex((value) => typeof value === "number" && Number.isInteger(value) && value >= 3 && value <= 20);
-    if (index >= 0) widgets[index] = durationSeconds;
-  }
-}
-
-function applyUiResolutionWidget(classType: string, widgets: unknown[], resolution: { width: number; height: number; label?: string }) {
-  if (classType.includes("imageresize")) {
-    widgets[0] = resolution.width;
-    widgets[1] = resolution.height;
-  }
-  if (classType.includes("klingfirstlastframenode")) {
-    widgets[4] = resolutionWidgetLabel(resolution.label ?? "1080p");
-  }
-}
-
-function applyUiSaveWidgets(
-  classType: string,
-  widgets: unknown[],
-  projectName: string,
-  save: { cameraNumber?: string; shotNumber?: string } | undefined,
-) {
-  if (!classType.includes("savearchviz")) return;
-  widgets[0] = projectName;
-  if (classType.includes("savearchvizimage")) {
-    widgets[2] = "camera_number";
-    widgets[3] = normalizeSaveNumber(save?.cameraNumber ?? save?.shotNumber);
-    return;
-  }
-  if (classType.includes("savearchvizvideo") || classType.includes("savearchvizsequence")) {
-    widgets[2] = Number(normalizeSaveNumber(save?.shotNumber ?? save?.cameraNumber));
-  }
-}
-
-function applyUiMappedInputs(
-  nodeId: string,
-  node: Record<string, any>,
-  mapping: WorkflowInputMapping,
-  request: CreateJobRequest,
-  projectName: string,
-) {
-  if (!nodeId) return;
-  const widgets = Array.isArray(node.widgets_values) ? node.widgets_values : undefined;
-  const inputs = node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-    ? node.inputs as Record<string, any>
-    : undefined;
-
-  if (inputs) {
-    applyMappedInputs(nodeId, inputs, mapping, request, projectName, request.startFrame, request.endFrame);
-  }
-
-  if (!widgets) return;
-  if (mapping.promptNodeIds?.includes(nodeId) && request.prompt) setFirstStringWidget(widgets, request.prompt);
-  if (mapping.imageInputNodeIds?.includes(nodeId) && request.inputImages?.[0]) setFirstStringWidget(widgets, request.inputImages[0]);
-  if (mapping.startFrameNodeIds?.includes(nodeId) && request.startFrame) setFirstStringWidget(widgets, request.startFrame);
-  if (mapping.endFrameNodeIds?.includes(nodeId) && request.endFrame) setFirstStringWidget(widgets, request.endFrame);
-  if (mapping.videoInputNodeIds?.includes(nodeId) && request.inputVideo) setFirstStringWidget(widgets, request.inputVideo);
-  if (mapping.widthNodeIds?.includes(nodeId) && request.resolution) setFirstNumberWidget(widgets, request.resolution.width);
-  if (mapping.heightNodeIds?.includes(nodeId) && request.resolution) setFirstNumberWidget(widgets, request.resolution.height);
-  if (mapping.durationNodeIds?.includes(nodeId) && request.durationSeconds) setFirstNumberWidget(widgets, request.durationSeconds);
-  if (mapping.projectNameNodeIds?.includes(nodeId)) setFirstStringWidget(widgets, projectName);
-}
-
-function setFirstStringWidget(widgets: unknown[], value: string) {
-  const index = widgets.findIndex((item) => typeof item === "string");
-  widgets[index >= 0 ? index : 0] = value;
-}
-
-function setFirstNumberWidget(widgets: unknown[], value: number) {
-  const index = widgets.findIndex((item) => typeof item === "number");
-  widgets[index >= 0 ? index : 0] = value;
 }
 
 const archVizSlotCounts = new Set(["1", "2", "4", "6", "8", "9"]);

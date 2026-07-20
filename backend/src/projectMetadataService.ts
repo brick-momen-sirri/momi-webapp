@@ -320,6 +320,10 @@ export async function appendManifestEvent(project: Project, record: Record<strin
   });
 }
 
+export async function withProjectMutationLock<T>(project: Project, operation: () => Promise<T>) {
+  return withProjectLock(project, operation);
+}
+
 export function validateDisplayName(name: unknown, label = "Name") {
   if (typeof name !== "string") {
     throw new Error(`${label} must be a string.`);

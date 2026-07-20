@@ -5,7 +5,7 @@ import { defaultArchVizGridOptions } from "./components/ArchVizGridControls";
 import { AuthScreen } from "./components/AuthScreen";
 import { ComfyPoolManager } from "./components/ComfyPoolManager";
 import { CreditUsageDashboard } from "./components/CreditUsageDashboard";
-import { DownloadImageChoiceModal } from "./components/DownloadImageChoiceModal";
+import { DownloadImageChoiceModal, type ImageDownloadFormat } from "./components/DownloadImageChoiceModal";
 import { JobFeed } from "./components/JobFeed";
 import { Layout } from "./components/Layout";
 import { LeftSettingsPanel } from "./components/LeftSettingsPanel";
@@ -43,6 +43,7 @@ import {
   fetchPodStatus,
   getStoredAuthToken,
   logoutBackend,
+  moveBackendJobResult,
   permanentlyDeleteBackendJob,
   resetBackendUserPassword,
   renameBackendProjectFolder,
@@ -57,6 +58,7 @@ import {
   updateBackendUser,
   uploadBackendMedia,
 } from "./services/backendApi";
+import { isSeedanceWorkflowModel, klingPromptOverflowCharacters, KLING_PROMPT_CHARACTER_LIMIT } from "./services/promptRules";
 import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, UploadedVideo, WorkflowOptions } from "./types";
 import { estimateModelCreditLabel, estimateModelCredits } from "./utils/creditEstimator";
 import { getImageSize } from "./utils/imageCrop";
@@ -78,6 +80,7 @@ type PersistedGenerationSettings = {
   saveNumber?: string;
   imageOutputCount?: 1 | 2;
   nanoBananaOutputCount?: 1 | 2;
+  selectedNanoBananaAspectRatio?: string;
 };
 
 function App() {
@@ -101,6 +104,7 @@ function App() {
   const [loadedWorkspaceAccountId, setLoadedWorkspaceAccountId] = useState<string | null>(null);
   const [selectedModelId, setSelectedModelId] = useState(initialSettings.selectedModelId ?? "google_veo");
   const [selectedResolution, setSelectedResolution] = useState(initialSettings.selectedResolution ?? "1080p");
+  const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(normalizeNanoBananaAspectRatio(initialSettings.selectedNanoBananaAspectRatio));
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [selectedProjectId, setSelectedProjectId] = useState(initialSettings.selectedProjectId ?? ALL_PROJECTS_ID);
   const [selectedFolderId, setSelectedFolderId] = useState<"all" | "root" | string>("all");
@@ -109,6 +113,7 @@ function App() {
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
   const [saveNumber, setSaveNumber] = useState(normalizeSaveNumber(initialSettings.saveNumber));
   const [imageOutputCount, setImageOutputCount] = useState<1 | 2>(initialSettings.imageOutputCount ?? initialSettings.nanoBananaOutputCount ?? 1);
+  const [enableImageToVideo16By9Cropping, setEnableImageToVideo16By9Cropping] = useState(true);
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [video, setVideo] = useState<UploadedVideo | undefined>();
   const [favoriteJobIds, setFavoriteJobIds] = useState(readFavoriteJobIds);
@@ -165,6 +170,7 @@ function App() {
     return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [account, workspaceAccounts]);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const allowSeedance4K = account?.role === "admin";
   const creditsRemaining = backendCreditsRemaining ?? 0;
   const currentMonthUsage = account
     ? monthlyUsageByUser[account.id] ?? getMonthlyUsageForUser(jobs, account.id)
@@ -175,6 +181,8 @@ function App() {
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
+  const selectedModelIsImageToVideo = isImageToVideoModel(selectedModel);
+  const use16By9Cropping = !selectedModelIsImageToVideo || enableImageToVideo16By9Cropping;
   const disabledReason = getDisabledReason({
     isDemoAccount: Boolean(account && isDemoAccount(account)),
     insufficientCredits: creditsRemaining < selectedModel.cost,
@@ -182,8 +190,9 @@ function App() {
     selectedProject,
     hasMissingImages: uploadedImages.length < minimumRequiredImages,
     hasMissingVideo: Boolean(selectedModel.requiresVideo && !video),
-    hasCropIssues: Boolean(selectedModel.requiresLandscape && uploadedImages.some((image) => image.cropRequired)),
+    hasCropIssues: Boolean(selectedModel.requiresLandscape && use16By9Cropping && uploadedImages.some((image) => image.cropRequired)),
     hasMissingPrompt: selectedModel.requiresPrompt !== false && !prompt.trim(),
+    promptOverflowCharacters: klingPromptOverflowCharacters(selectedModel, prompt),
     requiredImages: minimumRequiredImages,
   });
   const hasMoreBackendJobs = backendAvailable && backendJobsOffset < backendJobsTotal;
@@ -205,8 +214,8 @@ function App() {
 
   useEffect(() => {
     setSelectedDurationSeconds((current) => normalizeDurationSeconds(current, selectedModel));
-    setSelectedResolution((current) => normalizeResolutionForModel(current, selectedModel));
-  }, [selectedModel]);
+    setSelectedResolution((current) => normalizeResolutionForModel(current, selectedModel, allowSeedance4K));
+  }, [allowSeedance4K, selectedModel]);
 
   useEffect(() => {
     if (!supportsImageOutputCount(selectedModelBase)) {
@@ -218,6 +227,7 @@ function App() {
     writePersistedGenerationSettings({
       selectedModelId,
       selectedResolution,
+      selectedNanoBananaAspectRatio,
       selectedDurationSeconds,
       selectedProjectId,
       targetFolderId,
@@ -225,7 +235,7 @@ function App() {
       saveNumber,
       imageOutputCount,
     });
-  }, [imageOutputCount, prompt, saveNumber, selectedDurationSeconds, selectedModelId, selectedProjectId, selectedResolution, targetFolderId]);
+  }, [imageOutputCount, prompt, saveNumber, selectedDurationSeconds, selectedModelId, selectedNanoBananaAspectRatio, selectedProjectId, selectedResolution, targetFolderId]);
 
   useEffect(() => {
     writeFavoriteJobIds(favoriteJobIds);
@@ -456,7 +466,7 @@ function App() {
     const nextModel = models.find((model) => model.id === modelId);
     setSelectedModelId(modelId);
     if (nextModel) {
-      setSelectedResolution((resolution) => normalizeResolutionForModel(resolution, nextModel));
+      setSelectedResolution((resolution) => normalizeResolutionForModel(resolution, nextModel, allowSeedance4K));
       setSelectedDurationSeconds(defaultDurationSecondsForModel(nextModel));
       if (supportsImageOutputCount(nextModel)) {
         setImageOutputCount(1);
@@ -468,6 +478,10 @@ function App() {
       setImages((current) => current.slice(0, imageSlotCountForModel(nextModel)));
     }
     if (!nextModel?.requiresVideo) setVideo(undefined);
+  }
+
+  function handleResolutionChange(resolution: string) {
+    setSelectedResolution(normalizeResolutionForModel(resolution, selectedModel, allowSeedance4K));
   }
 
   async function handleGenerate() {
@@ -491,7 +505,7 @@ function App() {
           images
             .slice(0, requiredImages)
             .filter(Boolean)
-            .map((image) => uploadJobMediaUrl(image.croppedUrl ?? image.url, {
+            .map((image) => uploadJobMediaUrl(jobImageUrl(image, use16By9Cropping), {
               projectId: selectedProjectId,
               kind: "image",
               name: image.name,
@@ -515,7 +529,7 @@ function App() {
           startFrame: selectedModel.requiresTwoImages ? inputImages[0] : undefined,
           endFrame: selectedModel.requiresTwoImages ? inputImages[1] : undefined,
           inputVideo,
-          workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount),
+          workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount, selectedNanoBananaAspectRatio),
         });
         setJobs((current) => mergeJobs([backendJob], current));
         setProjects((current) => incrementProjectJobCount(current, selectedProjectId));
@@ -537,6 +551,8 @@ function App() {
         archVizGridOptions,
         saveNumber,
         imageOutputCount,
+        selectedNanoBananaAspectRatio,
+        use16By9Cropping,
         requiredImages,
       });
       setJobs((current) => [localJob, ...current]);
@@ -689,15 +705,16 @@ function App() {
     }
   }
 
-  async function handleDownloadJobResult(job: Job, resultIndex?: number) {
-    if (resultIndex == null && hasTwoImageDownloadChoices(job)) {
+  async function handleDownloadJobResult(job: Job, resultIndex?: number, imageFormat?: ImageDownloadFormat) {
+    if (isImageResult(job) && imageFormat == null) {
       setDownloadChoiceJob(job);
       return;
     }
 
     try {
       const blob = await fetchResultBlob(job, resultIndex ?? 0);
-      downloadBlob(blob, downloadNameForJob(job, blob, resultIndex));
+      const download = imageFormat ? await convertImageBlobForDownload(blob, imageFormat) : blob;
+      downloadBlob(download, downloadNameForJob(job, download, resultIndex));
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not download result.");
     }
@@ -741,7 +758,7 @@ function App() {
     }
 
     if (hasKnownResolution(job)) {
-      setSelectedResolution(normalizeResolutionForModel(job.resolution, targetModel));
+      setSelectedResolution(normalizeResolutionForModel(job.resolution, targetModel, allowSeedance4K));
       restored.add("resolution");
     }
 
@@ -766,6 +783,12 @@ function App() {
     if (outputCount && supportsImageOutputCount(targetModel)) {
       setImageOutputCount(outputCount);
       restored.add("output count");
+    }
+
+    const nanoBananaAspectRatio = reusableNanoBananaAspectRatio(job.workflowOptions);
+    if (nanoBananaAspectRatio && isNanoBananaModel(targetModel)) {
+      setSelectedNanoBananaAspectRatio(nanoBananaAspectRatio);
+      restored.add("aspect ratio");
     }
 
     if (hasInputImageMetadata(job)) {
@@ -800,6 +823,50 @@ function App() {
     setJobs([]);
     setBackendJobsOffset(0);
     setBackendJobsTotal(0);
+  }
+
+  async function handleMoveJobResult(job: Job, destinationFolderId: string | null) {
+    const project = projects.find((item) => item.id === job.projectId);
+    if (!project) {
+      showToast("Project not found.");
+      return false;
+    }
+    const destinationFolder = destinationFolderId
+      ? project.folders?.find((folder) => folder.folderId === destinationFolderId && !folder.archived)
+      : undefined;
+    if (destinationFolderId && !destinationFolder) {
+      showToast("Destination folder not found.");
+      return false;
+    }
+
+    const optimisticJob: Job = {
+      ...job,
+      folderId: destinationFolderId,
+      folderName: destinationFolder?.name ?? "Root",
+    };
+    const leavesSelectedFolder = selectedFolderId !== "all" && matchesFolder(job, selectedFolderId);
+    setJobs((current) => current.map((item) => item.id === job.id ? optimisticJob : item));
+    if (backendAvailable && leavesSelectedFolder) {
+      setBackendJobsTotal((current) => Math.max(0, current - 1));
+      setBackendJobsOffset((current) => Math.max(0, current - 1));
+    }
+
+    try {
+      const updated = backendAvailable
+        ? await moveBackendJobResult(job.projectId, job.id, destinationFolderId)
+        : optimisticJob;
+      setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
+      showToast(`Moved to ${destinationFolder?.name ?? "project root"}.`);
+      return true;
+    } catch (error) {
+      setJobs((current) => current.map((item) => item.id === job.id ? job : item));
+      if (backendAvailable && leavesSelectedFolder) {
+        setBackendJobsTotal((current) => current + 1);
+        setBackendJobsOffset((current) => current + 1);
+      }
+      showToast(error instanceof Error ? error.message : "Could not move result.");
+      return false;
+    }
   }
 
   async function handleArchiveJob(job: Job) {
@@ -909,24 +976,30 @@ function App() {
             selectedProject={selectedProject}
             targetFolderId={targetFolderId}
             selectedResolution={selectedResolution}
+            allowSeedance4K={allowSeedance4K}
+            selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
             selectedDurationSeconds={selectedDurationSeconds}
             prompt={prompt}
             archVizGridOptions={archVizGridOptions}
             saveNumber={saveNumber}
             imageOutputCount={imageOutputCount}
+            enable16By9Cropping={enableImageToVideo16By9Cropping}
+            show16By9CropToggle={selectedModelIsImageToVideo}
             images={images}
             video={video}
             creditsRemaining={creditsRemaining}
             disabledReason={disabledReason}
             isSubmitting={isSubmitting}
             onModelChange={handleModelChange}
-            onResolutionChange={setSelectedResolution}
+            onResolutionChange={handleResolutionChange}
+            onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
             onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
             onPromptChange={setPrompt}
             onArchVizGridOptionsChange={setArchVizGridOptions}
             onTargetFolderChange={setTargetFolderId}
             onSaveNumberChange={(value) => setSaveNumber(value.replace(/\D/g, "").slice(0, 4))}
             onImageOutputCountChange={setImageOutputCount}
+            onEnable16By9CroppingChange={setEnableImageToVideo16By9Cropping}
             onImagesChange={setImages}
             onVideoChange={setVideo}
             onGenerate={handleGenerate}
@@ -948,6 +1021,7 @@ function App() {
             onReuseSettings={handleReuseJobSettings}
             canReuseSettings={(job) => canReuseJobSettings(job, models)}
             onToggleFavorite={handleToggleFavorite}
+            onMove={handleMoveJobResult}
             onArchive={handleArchiveJob}
             onRestore={handleRestoreArchivedJob}
             onDeletePermanently={handlePermanentlyDeleteJob}
@@ -1008,10 +1082,10 @@ function App() {
       {downloadChoiceJob ? (
         <DownloadImageChoiceModal
           job={downloadChoiceJob}
-          onChoose={(index) => {
+          onChoose={(index, format) => {
             const job = downloadChoiceJob;
             setDownloadChoiceJob(null);
-            void handleDownloadJobResult(job, index);
+            void handleDownloadJobResult(job, index, format);
           }}
           onClose={() => setDownloadChoiceJob(null)}
         />
@@ -1053,6 +1127,7 @@ type DisabledReasonInput = {
   hasMissingVideo: boolean;
   hasCropIssues: boolean;
   hasMissingPrompt: boolean;
+  promptOverflowCharacters: number;
   requiredImages: number;
 };
 
@@ -1065,12 +1140,16 @@ function getDisabledReason({
   hasMissingVideo,
   hasCropIssues,
   hasMissingPrompt,
+  promptOverflowCharacters,
   requiredImages,
 }: DisabledReasonInput) {
   if (isDemoAccount) return "Demo accounts are view-only and cannot generate tasks.";
   if (insufficientCredits) return "Insufficient credits.";
   if (selectedProjectId === ALL_PROJECTS_ID || !selectedProject) return "Please select a specific project before generating.";
   if (hasMissingPrompt) return "Add a prompt before generating.";
+  if (promptOverflowCharacters > 0) {
+    return `Kling prompts are limited to ${KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters. Shorten this prompt by ${promptOverflowCharacters.toLocaleString()} characters before generating.`;
+  }
   if (hasMissingImages) {
     if (requiredImages === 2) return "Upload both required images.";
     if (requiredImages > 2) return `Upload all ${requiredImages} input images.`;
@@ -1220,6 +1299,12 @@ function reusableSaveNumber(job: Job) {
 function reusableImageOutputCount(options: WorkflowOptions | undefined): 1 | 2 | undefined {
   const value = options?.gptImage?.outputCount ?? options?.nanoBanana?.outputCount;
   return value === 1 || value === 2 ? value : undefined;
+}
+
+function reusableNanoBananaAspectRatio(options: WorkflowOptions | undefined) {
+  return typeof options?.nanoBanana?.aspectRatio === "string"
+    ? normalizeNanoBananaAspectRatio(options.nanoBanana.aspectRatio)
+    : undefined;
 }
 
 async function rehydrateJobInputImages(job: Job, slotCount: number) {
@@ -1429,6 +1514,12 @@ function incrementProjectJobCount(projects: Project[], projectId: string) {
   );
 }
 
+function matchesFolder(job: Job, folderId: "all" | "root" | string) {
+  if (folderId === "all") return true;
+  if (folderId === "root") return !job.folderId;
+  return job.folderId === folderId;
+}
+
 function jobPageParams(projectId: string, folderId: "all" | "root" | string, offset: number, archived = false) {
   return {
     limit: JOB_PAGE_SIZE,
@@ -1482,6 +1573,12 @@ const gptImageResolutionValues = [
   "2160x3840",
 ];
 
+const nanoBananaAspectRatioValues = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+
+function normalizeNanoBananaAspectRatio(value: unknown) {
+  return typeof value === "string" && nanoBananaAspectRatioValues.includes(value) ? value : "auto";
+}
+
 function normalizeExactResolutionValue(value: string) {
   const lower = value.toLowerCase().replace(/\s+/g, "");
   return gptImageResolutionValues.find((resolution) => resolution.toLowerCase() === lower);
@@ -1503,8 +1600,11 @@ function normalizeResolutionAlias(value: string) {
   return "1080p";
 }
 
-function normalizeResolutionForModel(value: string, model: Pick<ModelType, "supportedResolutions">) {
+function normalizeResolutionForModel(value: string, model: ModelType, allowSeedance4K: boolean) {
   const supported = model.supportedResolutions?.length ? model.supportedResolutions : ["720p", "1080p", "4K"];
+  if (isSeedanceWorkflowModel(model) && !allowSeedance4K && normalizeResolutionAlias(value) === "4K") {
+    return supported.find((resolution) => resolution.toLowerCase() === "1080p") ?? supported[0] ?? "1080p";
+  }
   const exact = normalizeExactResolutionValue(value);
   if (exact && supported.some((resolution) => resolution.toLowerCase() === exact.toLowerCase())) return exact;
   const alias = normalizeResolutionAlias(value);
@@ -1541,16 +1641,29 @@ function isArchVizGridModel(model: Pick<ModelType, "id" | "label" | "workflowPat
   return key.includes("exteriorgrid") || key.includes("exterior grid");
 }
 
+function isImageToVideoModel(model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">) {
+  if (model.backendCategory) return model.backendCategory === "image_to_video";
+  if (model.category !== "video") return false;
+  const key = `${model.id} ${model.label ?? ""} ${model.workflowPath ?? ""}`.toLowerCase().replaceAll("\\", "/");
+  return key.includes("/i2v/")
+    || key.includes("image_to_video")
+    || key.includes("image-to-video")
+    || key.includes("image to video")
+    || model.id === "video_generation"
+    || model.id === "google_veo";
+}
+
 function workflowOptionsForJob(
   model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">,
   archVizGrid: ArchVizGridOptions,
   saveNumber: string,
   imageOutputCount: 1 | 2,
+  nanoBananaAspectRatio: string,
 ): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
     ...(isArchVizGridModel(model) ? { archVizGrid } : {}),
-    ...(isNanoBananaModel(model) ? { nanoBanana: { outputCount: imageOutputCount } } : {}),
+    ...(isNanoBananaModel(model) ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } } : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
     save: {
       cameraNumber: normalizedSaveNumber,
@@ -1594,6 +1707,8 @@ function createLocalJob({
   archVizGridOptions,
   saveNumber,
   imageOutputCount,
+  selectedNanoBananaAspectRatio,
+  use16By9Cropping,
   requiredImages,
 }: {
   account: AuthUser;
@@ -1607,9 +1722,11 @@ function createLocalJob({
   archVizGridOptions: ArchVizGridOptions;
   saveNumber: string;
   imageOutputCount: 1 | 2;
+  selectedNanoBananaAspectRatio: string;
+  use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
-  const inputImages = images.slice(0, requiredImages).filter(Boolean).map((image) => image.croppedUrl ?? image.url);
+  const inputImages = images.slice(0, requiredImages).filter(Boolean).map((image) => jobImageUrl(image, use16By9Cropping));
   const resultUrl = inputImages[0] ?? "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1180&q=90";
   return {
     id: createClientId("job_").slice(0, 28),
@@ -1631,7 +1748,7 @@ function createLocalJob({
     prompt: prompt.trim(),
     resolution: selectedResolution,
     durationSeconds: selectedModel.category === "video" ? selectedDurationSeconds : undefined,
-    workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount),
+    workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount, selectedNanoBananaAspectRatio),
     status: "queued",
     inputImages,
     inputVideo: video?.url,
@@ -1644,6 +1761,10 @@ function createLocalJob({
     creditsUsed: selectedModel.cost,
     createdAt: new Date().toISOString(),
   };
+}
+
+function jobImageUrl(image: UploadedImage, use16By9Cropping: boolean) {
+  return use16By9Cropping ? image.croppedUrl ?? image.url : image.url;
 }
 
 function normalizeSaveNumber(value: unknown) {
@@ -1701,6 +1822,7 @@ function readPersistedGenerationSettings(): PersistedGenerationSettings {
       saveNumber: typeof parsed.saveNumber === "string" ? normalizeSaveNumber(parsed.saveNumber) : undefined,
       imageOutputCount: parsed.imageOutputCount === 2 || parsed.nanoBananaOutputCount === 2 ? 2 : 1,
       nanoBananaOutputCount: parsed.nanoBananaOutputCount === 2 ? 2 : undefined,
+      selectedNanoBananaAspectRatio: normalizeNanoBananaAspectRatio(parsed.selectedNanoBananaAspectRatio),
     };
   } catch {
     return {};
@@ -1759,10 +1881,13 @@ function getPrimaryResultUrl(job: Job) {
   return job.resultUrls?.[0] ?? job.resultUrl ?? job.thumbnailUrls?.[0] ?? job.thumbnailUrl;
 }
 
+function isImageResult(job: Job) {
+  return job.outputType === "image" || (!job.outputType && !job.videoLength);
+}
+
 function hasTwoImageDownloadChoices(job: Job) {
   const resultCount = job.resultUrls?.length ?? 0;
-  const isImageResult = job.outputType === "image" || (!job.outputType && !job.videoLength);
-  return job.status === "completed" && isImageResult && resultCount === 2;
+  return job.status === "completed" && isImageResult(job) && resultCount === 2;
 }
 
 function slugify(value: string) {
@@ -1823,6 +1948,13 @@ function extensionFromBlob(blob: Blob) {
   return ".bin";
 }
 
+async function convertImageBlobForDownload(blob: Blob, format: ImageDownloadFormat) {
+  const mimeType = format === "png" ? "image/png" : "image/jpeg";
+  if (format === "png" && blob.type === mimeType) return blob;
+
+  return convertImageBlob(blob, mimeType, format === "jpg" ? 1 : undefined, format === "jpg");
+}
+
 async function clipboardCompatibleImageBlob(blob: Blob) {
   const clipboardTypeSupported = typeof ClipboardItem.supports === "function" ? ClipboardItem.supports(blob.type) : blob.type === "image/png";
   if (clipboardTypeSupported) return blob;
@@ -1830,6 +1962,16 @@ async function clipboardCompatibleImageBlob(blob: Blob) {
 }
 
 function convertImageBlobToPng(blob: Blob) {
+  return convertImageBlob(blob, "image/png", undefined, false, "Could not prepare image for clipboard.");
+}
+
+function convertImageBlob(
+  blob: Blob,
+  mimeType: "image/png" | "image/jpeg",
+  quality?: number,
+  fillWhite = false,
+  errorMessage = "Could not prepare image download.",
+) {
   return new Promise<Blob>((resolve, reject) => {
     const image = new Image();
     const url = URL.createObjectURL(blob);
@@ -1840,22 +1982,26 @@ function convertImageBlobToPng(blob: Blob) {
       const context = canvas.getContext("2d");
       if (!context) {
         URL.revokeObjectURL(url);
-        reject(new Error("Could not prepare image for clipboard."));
+        reject(new Error(errorMessage));
         return;
       }
+      if (fillWhite) {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      }
       context.drawImage(image, 0, 0);
-      canvas.toBlob((pngBlob) => {
+      canvas.toBlob((convertedBlob) => {
         URL.revokeObjectURL(url);
-        if (!pngBlob) {
-          reject(new Error("Could not prepare image for clipboard."));
+        if (!convertedBlob) {
+          reject(new Error(errorMessage));
           return;
         }
-        resolve(pngBlob);
-      }, "image/png");
+        resolve(convertedBlob);
+      }, mimeType, quality);
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("Could not prepare image for clipboard."));
+      reject(new Error(errorMessage));
     };
     image.src = url;
   });

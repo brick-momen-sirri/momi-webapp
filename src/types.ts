@@ -95,6 +95,20 @@ export type CreditUsageSummary = {
   rows?: CreditUsageRow[];
 };
 
+export type CreditBalanceSnapshot = {
+  creditsLeft: number;
+  source: string;
+  capturedAt: string;
+};
+
+export type JobTextArtifact = {
+  text: string;
+  filename?: string;
+  type?: string;
+  source: string;
+  url?: string;
+};
+
 export type MediaResolution = {
   width: number;
   height: number;
@@ -125,6 +139,8 @@ export type Job = {
   thumbnailUrls?: string[];
   outputType?: "image" | "video" | "sequence";
   fileName?: string;
+  generatedPrompt?: string;
+  textArtifacts?: JobTextArtifact[];
   source?: "backend_job" | "existing_project_media";
   missingMetadata?: string[];
   archivedAt?: string;
@@ -132,7 +148,12 @@ export type Job = {
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
   videoLength?: string;
+  creditsEstimated?: number;
   creditsUsed?: number;
+  creditsActual?: number;
+  creditsActualSource?: string;
+  creditBalanceBefore?: CreditBalanceSnapshot;
+  creditBalanceAfter?: CreditBalanceSnapshot;
   creditUsage?: CreditUsageSummary;
   errorMessage?: string;
   createdAt: string;
@@ -150,6 +171,7 @@ export type ArchVizGridOptions = {
 export type WorkflowOptions = {
   archVizGrid?: ArchVizGridOptions;
   nanoBanana?: {
+    aspectRatio?: string;
     outputCount?: 1 | 2;
   };
   gptImage?: {

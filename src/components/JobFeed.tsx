@@ -28,6 +28,7 @@ type JobFeedProps = {
   onReuseSettings: (job: Job) => void;
   canReuseSettings: (job: Job) => boolean;
   onToggleFavorite: (job: Job) => void;
+  onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
   onRestore: (job: Job) => void;
   onDeletePermanently: (job: Job) => void;
@@ -96,6 +97,7 @@ export function JobFeed({
   onReuseSettings,
   canReuseSettings,
   onToggleFavorite,
+  onMove,
   onArchive,
   onRestore,
   onDeletePermanently,
@@ -630,6 +632,7 @@ export function JobFeed({
               onCopyImage={onCopyImage}
               onReuseSettings={onReuseSettings}
               onToggleFavorite={onToggleFavorite}
+              onMove={onMove}
               archiveView={archiveView}
               onArchive={onArchive}
               onRestore={onRestore}

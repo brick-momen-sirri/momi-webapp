@@ -14,6 +14,9 @@ type ImageUploaderProps = {
   requiresTwoImages: boolean;
   imageSlotCount: number;
   requiresLandscape: boolean;
+  enable16By9Cropping: boolean;
+  show16By9CropToggle: boolean;
+  onEnable16By9CroppingChange: (enabled: boolean) => void;
   textOnly: boolean;
 };
 
@@ -34,6 +37,9 @@ export function ImageUploader({
   requiresTwoImages,
   imageSlotCount,
   requiresLandscape,
+  enable16By9Cropping,
+  show16By9CropToggle,
+  onEnable16By9CroppingChange,
   textOnly,
 }: ImageUploaderProps) {
   const [activeCropIndex, setActiveCropIndex] = useState<number | null>(null);
@@ -41,6 +47,16 @@ export function ImageUploader({
   const [isPasting, setIsPasting] = useState(false);
   const slots = textOnly ? [] : imageSlots(requiresTwoImages, imageSlotCount);
   const cropOutputSize = outputSizeForResolution(selectedResolution);
+  const use16By9Cropping = requiresLandscape && (!show16By9CropToggle || enable16By9Cropping);
+
+  function handle16By9CroppingChange(enabled: boolean) {
+    onEnable16By9CroppingChange(enabled);
+    if (!enabled) {
+      setActiveCropIndex(null);
+      return;
+    }
+    setActiveCropIndex(slots.find((slot) => images[slot.index]?.cropRequired)?.index ?? null);
+  }
 
   async function buildUploadedImage(file: File): Promise<UploadedImage> {
     const url = URL.createObjectURL(file);
@@ -71,7 +87,7 @@ export function ImageUploader({
     nextImages[slotIndex] = nextImage;
     onChange(nextImages);
 
-    if (nextImage.cropRequired) {
+    if (use16By9Cropping && nextImage.cropRequired) {
       setActiveCropIndex(slotIndex);
     }
   }
@@ -157,7 +173,7 @@ export function ImageUploader({
       setPasteMessage(`Pasted into ${targetSlot.label}.`);
       window.setTimeout(() => setPasteMessage(""), 2200);
 
-      if (uploaded.cropRequired) {
+      if (use16By9Cropping && uploaded.cropRequired) {
         setActiveCropIndex(targetSlot.index);
       }
     } catch (error) {
@@ -224,13 +240,29 @@ export function ImageUploader({
               <ClipboardPaste className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {requiresLandscape ? (
+          {use16By9Cropping ? (
             <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">
               crop on import
+            </span>
+          ) : show16By9CropToggle ? (
+            <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
+              original ratio
             </span>
           ) : null}
         </div>
       </div>
+
+      {show16By9CropToggle && !textOnly ? (
+        <label className="mb-3 flex min-h-9 items-center gap-2 rounded-md border border-line bg-stone-50 px-3 text-xs font-semibold text-stone-700">
+          <input
+            type="checkbox"
+            checked={enable16By9Cropping}
+            onChange={(event) => handle16By9CroppingChange(event.target.checked)}
+            className="h-4 w-4 accent-accent"
+          />
+          Enable 16:9 Cropping
+        </label>
+      ) : null}
 
       {textOnly ? (
         <div className="rounded-md border border-dashed border-line bg-mist/70 px-4 py-8 text-center">
@@ -246,7 +278,8 @@ export function ImageUploader({
                 key={slot.index}
                 slot={slot}
                 image={images[slot.index]}
-                requiresLandscape={requiresLandscape}
+                requiresLandscape={use16By9Cropping}
+                useCroppedImage={use16By9Cropping}
                 cropOutputSize={cropOutputSize}
                 onFile={(file) => void applyFile(slot.index, file)}
                 onResultImage={(dragData) => void applyDraggedResult(slot.index, dragData)}
@@ -264,7 +297,7 @@ export function ImageUploader({
         </>
       )}
 
-      {activeCropIndex !== null && images[activeCropIndex] ? (
+      {use16By9Cropping && activeCropIndex !== null && images[activeCropIndex] ? (
         <CropModal
           image={images[activeCropIndex]}
           selectedResolution={selectedResolution}
@@ -556,6 +589,7 @@ type UploadSlotProps = {
   slot: Slot;
   image?: UploadedImage;
   requiresLandscape: boolean;
+  useCroppedImage: boolean;
   cropOutputSize: { width: number; height: number };
   onFile: (file: File) => void;
   onResultImage: (dragData: ResultImageDragData) => void;
@@ -563,24 +597,26 @@ type UploadSlotProps = {
   onCrop: () => void;
 };
 
-function UploadSlot({ slot, image, requiresLandscape, cropOutputSize, onFile, onResultImage, onRemove, onCrop }: UploadSlotProps) {
+function UploadSlot({ slot, image, requiresLandscape, useCroppedImage, cropOutputSize, onFile, onResultImage, onRemove, onCrop }: UploadSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const source = image?.croppedUrl ?? image?.url;
+  const source = useCroppedImage ? image?.croppedUrl ?? image?.url : image?.url;
   const tooSmall = Boolean(
     requiresLandscape &&
       image?.width &&
       image?.height &&
       (image.width < cropOutputSize.width || image.height < cropOutputSize.height),
   );
-  const status = image?.cropRequired ? "crop required" : image?.croppedUrl ? "cropped" : "ready";
-  const statusClass = image?.cropRequired
+  const status = !useCroppedImage ? "original" : image?.cropRequired ? "crop required" : image?.croppedUrl ? "cropped" : "ready";
+  const statusClass = !useCroppedImage
+    ? "bg-stone-100 text-stone-700"
+    : image?.cropRequired
     ? "bg-amber-100 text-amber-800"
     : image?.croppedUrl
       ? "bg-cyan-100 text-cyan-800"
       : "bg-teal-100 text-teal-800";
   const sizeLabel = image?.width && image?.height
-    ? image.cropWidth && image.cropHeight
+    ? useCroppedImage && image.cropWidth && image.cropHeight
       ? `${image.width}x${image.height} -> ${image.cropWidth}x${image.cropHeight}`
       : `${image.width}x${image.height}`
     : "";
@@ -625,7 +661,7 @@ function UploadSlot({ slot, image, requiresLandscape, cropOutputSize, onFile, on
         onDrop={handleDrop}
       >
         <div className="relative aspect-video overflow-hidden rounded-md bg-stone-100">
-          <img src={source} alt="" className="h-full w-full object-cover" />
+          <img src={source} alt="" className={`h-full w-full ${useCroppedImage ? "object-cover" : "object-contain"}`} />
           <span className={`absolute left-2 top-2 rounded-full px-2 py-1 text-[11px] font-semibold ${statusClass}`}>
             {status}
           </span>

@@ -62,9 +62,15 @@ type BackendJob = {
   outputType: "image" | "video" | "sequence";
   creditsEstimated?: number;
   creditsUsed?: number;
+  creditsActual?: number;
+  creditsActualSource?: string;
+  creditBalanceBefore?: Job["creditBalanceBefore"];
+  creditBalanceAfter?: Job["creditBalanceAfter"];
   creditUsage?: Job["creditUsage"];
   errorMessage?: string;
   fileName?: string;
+  generatedPrompt?: string;
+  textArtifacts?: Job["textArtifacts"];
   source?: "backend_job" | "existing_project_media";
   missingMetadata?: string[];
   archivedAt?: string;
@@ -666,6 +672,18 @@ export async function updateBackendJobSaveNumber(projectId: string, jobId: strin
   return mapJob(data.job);
 }
 
+export async function moveBackendJobResult(projectId: string, jobId: string, destinationFolderId: string | null) {
+  const data = await api<{ job: BackendJob }>(
+    `/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/folder`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destinationFolderId }),
+    },
+  );
+  return mapJob(data.job);
+}
+
 export async function archiveBackendJob(jobId: string) {
   const data = await api<{ job: BackendJob }>(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { method: "POST" });
   return mapJob(data.job);
@@ -849,12 +867,19 @@ function mapJob(job: BackendJob): Job {
     thumbnailUrl: thumbnailUrls[0] ?? resultUrl,
     outputType: job.outputType,
     fileName: job.fileName,
+    generatedPrompt: job.generatedPrompt,
+    textArtifacts: job.textArtifacts,
+    creditsEstimated: job.creditsEstimated,
+    creditsActual: job.creditsActual,
+    creditsActualSource: job.creditsActualSource,
+    creditBalanceBefore: job.creditBalanceBefore,
+    creditBalanceAfter: job.creditBalanceAfter,
     source: job.source,
     missingMetadata: job.missingMetadata,
     archivedAt: job.archivedAt,
     archivedBy: job.archivedBy,
     videoLength: job.durationSeconds ? `${job.durationSeconds} seconds` : job.outputType === "video" ? "Backend video" : job.outputType === "sequence" ? "Image sequence" : undefined,
-    creditsUsed: job.creditsUsed ?? job.creditUsage?.total_estimated_credits ?? job.creditsEstimated,
+    creditsUsed: mappedCreditsUsed(job),
     creditUsage: job.creditUsage,
     errorMessage: job.errorMessage,
     createdAt: job.createdAt,
@@ -862,6 +887,34 @@ function mapJob(job: BackendJob): Job {
     completedAt: job.completedAt,
     generationTime: generationTimeForJob(job),
   };
+}
+
+function mappedCreditsUsed(job: BackendJob) {
+  // Measured values (balance delta or counted usage) are trusted even at 0 so
+  // genuinely free jobs show "Credits: 0" instead of falling back to the
+  // estimate label. Legacy stored values without usage data keep requiring > 0
+  // because 0 there historically meant "unknown".
+  const actualCredits = nonNegativeNumber(job.creditsActual);
+  if (actualCredits != null) return actualCredits;
+  if (isCountedCreditUsage(job.creditUsage)) return nonNegativeNumber(job.creditsUsed) ?? nonNegativeNumber(job.creditUsage?.total_estimated_credits);
+  if (!job.creditUsage) return positiveNumber(job.creditsUsed);
+  return undefined;
+}
+
+function isCountedCreditUsage(creditUsage?: Job["creditUsage"]) {
+  const source = (creditUsage?.source ?? "").trim().toLowerCase();
+  return Boolean(creditUsage && source !== "local_kling_estimate" && !(source.startsWith("local_") && source.includes("estimate")));
+}
+
+function positiveNumber(value: unknown) {
+  const number = nonNegativeNumber(value);
+  return number != null && number > 0 ? number : undefined;
+}
+
+function nonNegativeNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)) && Number(value) >= 0) return Number(value);
+  return undefined;
 }
 
 function normalizeResolution(value?: MediaResolution) {

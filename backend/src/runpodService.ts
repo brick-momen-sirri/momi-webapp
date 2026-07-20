@@ -1,3 +1,14 @@
+import {
+  combinedTextArtifactContent,
+  extractRunpodTextArtifacts,
+} from "./runpodTextArtifactService.js";
+import {
+  logRunpodFetchError,
+  logRunpodRequest,
+  logRunpodResponse,
+} from "./runpodDebugLogger.js";
+import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
+
 type DescribeImageParams = {
   imageBase64?: string;
   imagesBase64?: string[];
@@ -58,19 +69,23 @@ export async function describeImageWithRunpod({
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180_000);
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  };
 
+  const endBillableOperation = beginRunpodBillableOperation();
   try {
-    const response = await fetchImpl(endpointUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
+    logRunpodRequest(endpointUrl, requestInit);
+    const response = await fetchImpl(endpointUrl, requestInit);
 
     const data = await response.json().catch(() => ({})) as RunpodResponse;
+    logRunpodResponse(endpointUrl, response.status, data);
     if (!response.ok) {
       throw new Error(data.error || data.message || `RunPod request failed with ${response.status}`);
     }
@@ -80,7 +95,10 @@ export async function describeImageWithRunpod({
       throw new Error(stringFrom(output.message) || "RunPod image description failed.");
     }
 
-    const text = extractOutputText(output) ?? extractOutputText(data);
+    const textArtifacts = await extractRunpodTextArtifacts(output, fetchImpl);
+    const text = await extractOutputText(output)
+      ?? await extractOutputText(data)
+      ?? combinedTextArtifactContent(textArtifacts);
     if (!text?.trim()) {
       throw new Error("RunPod response did not include output text.");
     }
@@ -90,26 +108,31 @@ export async function describeImageWithRunpod({
       model: isRecord(output) ? stringFrom(output.model) : data.model,
       runpodJobId: data.id,
       runpodStatus: data.status,
+      textArtifacts,
     };
+  } catch (error) {
+    logRunpodFetchError(endpointUrl, error);
+    throw error;
   } finally {
+    endBillableOperation();
     clearTimeout(timeout);
   }
 }
 
-function extractOutputText(value: unknown): string | undefined {
+async function extractOutputText(value: unknown): Promise<string | undefined> {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
   }
 
   if (Array.isArray(value)) {
-    const parts = value.map(extractOutputText).filter((item): item is string => Boolean(item));
+    const parts = (await Promise.all(value.map((item) => extractOutputText(item)))).filter((item): item is string => Boolean(item));
     return parts.length ? parts.join("\n").trim() : undefined;
   }
 
   if (!isRecord(value)) return undefined;
 
-  for (const key of ["text", "response", "result", "generated_text", "generatedText", "caption", "description", "content", "message"]) {
-    const text = extractOutputText(value[key]);
+  for (const key of ["text", "response", "result", "generated_text", "generatedText", "caption", "description", "content", "message", "string"]) {
+    const text = await extractOutputText(value[key]);
     if (text) return text;
   }
 
@@ -117,10 +140,12 @@ function extractOutputText(value: unknown): string | undefined {
   if (Array.isArray(choices)) {
     for (const choice of choices) {
       if (isRecord(choice)) {
-        const text = extractOutputText(choice.message) ?? extractOutputText(choice.delta) ?? extractOutputText(choice.text);
+        const text = await extractOutputText(choice.message)
+          ?? await extractOutputText(choice.delta)
+          ?? await extractOutputText(choice.text);
         if (text) return text;
       }
-      const text = extractOutputText(choice);
+      const text = await extractOutputText(choice);
       if (text) return text;
     }
   }

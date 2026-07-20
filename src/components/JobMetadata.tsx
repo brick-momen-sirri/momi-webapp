@@ -11,6 +11,7 @@ type JobMetadataProps = {
 export function JobMetadata({ job, project, user }: JobMetadataProps) {
   const hasSaveNumber = Boolean(job.workflowOptions?.save?.cameraNumber || job.workflowOptions?.save?.shotNumber);
   const saveNumber = job.source === "existing_project_media" && !hasSaveNumber ? "" : getJobSaveNumber(job);
+  const creditItem = creditMetadataItem(job);
   const items = [
     { icon: CheckCircle2, label: "Status", value: job.status },
     { icon: Gauge, label: "Model", value: job.modelType },
@@ -21,7 +22,7 @@ export function JobMetadata({ job, project, user }: JobMetadataProps) {
     { icon: Maximize2, label: "Resolution", value: formatResolution(job.outputResolution) },
     { icon: CalendarDays, label: "Created", value: formatDate(job.createdAt) },
     { icon: Clock3, label: "Time", value: job.generationTime ?? job.videoLength ?? "" },
-    { icon: Coins, label: "Credits", value: job.creditsUsed == null && job.source === "existing_project_media" ? "" : formatCredits(job.creditsUsed ?? 0) },
+    { icon: Coins, ...creditItem },
   ].filter((item) => item.value !== "");
 
   return (
@@ -50,6 +51,16 @@ export function JobMetadata({ job, project, user }: JobMetadataProps) {
       ) : null}
     </div>
   );
+}
+
+function creditMetadataItem(job: Job) {
+  if (job.creditsUsed != null) {
+    return { label: "Credits", value: formatCredits(job.creditsUsed) };
+  }
+  if (job.source !== "existing_project_media" && job.creditsEstimated != null) {
+    return { label: "Estimate", value: `${formatCredits(job.creditsEstimated)} est.` };
+  }
+  return { label: "Credits", value: "" };
 }
 
 function formatResolution(value: Job["outputResolution"]) {

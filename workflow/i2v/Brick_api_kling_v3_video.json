@@ -1,9 +1,10 @@
 {
   "3": {
     "inputs": {
-      "multi_shot": "1 storyboard",
-      "multi_shot.storyboard_1_prompt": "",
-      "multi_shot.storyboard_1_duration": 5,
+      "multi_shot": "disabled",
+      "multi_shot.prompt": "",
+      "multi_shot.negative_prompt": "",
+      "multi_shot.duration": 5,
       "generate_audio": false,
       "model": "kling-v3",
       "model.resolution": "1080p",

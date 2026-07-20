@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Camera, Eraser, FileText, Sparkle, Wand2 } from "lucide-react";
-import { describeUploadedImages, improvePromptWithQwen } from "../services/promptApi";
+import { describeUploadedImages, generateKlingPromptWithWorkflow, generateSeedancePromptWithWorkflow, improvePromptWithQwen } from "../services/promptApi";
+import { isKlingWorkflowModel, isSeedanceWorkflowModel, KLING_PROMPT_CHARACTER_LIMIT } from "../services/promptRules";
 import type { ModelType, UploadedImage } from "../types";
 
 type PromptBoxProps = {
@@ -66,11 +67,16 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
   const [speedModifier, setSpeedModifier] = useState("Slow and smooth");
   const [lockTargetSubject, setLockTargetSubject] = useState(false);
   const [stabilityReinforcement, setStabilityReinforcement] = useState(true);
+  const [cameraHelperEnabled, setCameraHelperEnabled] = useState(false);
   const [targetSubjectPreset, setTargetSubjectPreset] = useState("Custom");
   const [targetSubject, setTargetSubject] = useState("[Subject]");
   const promptMode = promptModeForModel(selectedModel);
   const isVideoWorkflow = selectedModel.category === "video";
-  const isKlingWorkflow = promptMode === "klingVideo";
+  const isKlingWorkflow = isKlingWorkflowModel(selectedModel);
+  const isSeedanceWorkflow = isSeedanceWorkflowModel(selectedModel);
+  const isKlingPromptTooLong = isKlingWorkflow && value.length > KLING_PROMPT_CHARACTER_LIMIT;
+  const usesCameraHelper = isVideoWorkflow && !isSeedanceWorkflow;
+  const shouldUseCameraHelper = usesCameraHelper && cameraHelperEnabled;
   const isImageEditingWorkflow = !isVideoWorkflow;
   const availableActions = movementActions[movementStyle];
 
@@ -88,7 +94,15 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
     setIsDescribing(true);
     setDescriptionError("");
     try {
-      const cameraPrompt = isVideoWorkflow
+      if (isSeedanceWorkflow) {
+        const seedancePrompt = await generateSeedancePromptWithWorkflow(images, {
+          userPrompt: value,
+        });
+        onChange(seedancePrompt);
+        return;
+      }
+
+      const cameraPrompt = shouldUseCameraHelper
         ? buildCameraPrompt({
             movementStyle,
             actionType,
@@ -100,6 +114,15 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
             compact: isKlingWorkflow,
           })
         : undefined;
+      if (isKlingWorkflow) {
+        const klingPrompt = await generateKlingPromptWithWorkflow(images, {
+          userPrompt: value,
+          cameraPrompt,
+        });
+        onChange(klingPrompt);
+        return;
+      }
+
       const description = await describeUploadedImages(images, {
         mode: promptMode,
         userPrompt: value,
@@ -121,7 +144,7 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
     setIsImproving(true);
     setDescriptionError("");
     try {
-      const cameraPrompt = isVideoWorkflow
+      const cameraPrompt = shouldUseCameraHelper
         ? buildCameraPrompt({
             movementStyle,
             actionType,
@@ -168,99 +191,135 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Describe the generation you want..."
-        className="min-h-32 w-full resize-none rounded-md border border-line bg-white p-3 text-sm leading-6 outline-none transition placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+        aria-invalid={isKlingPromptTooLong}
+        aria-describedby={isKlingWorkflow ? "kling-prompt-length" : undefined}
+        className={`min-h-32 w-full resize-none rounded-md border bg-white p-3 text-sm leading-6 outline-none transition placeholder:text-stone-400 focus:ring-2 ${
+          isKlingPromptTooLong
+            ? "border-red-400 focus:border-red-500 focus:ring-red-200"
+            : "border-line focus:border-accent focus:ring-accent/20"
+        }`}
       />
 
-      {isVideoWorkflow ? (
+      {isKlingWorkflow ? (
+        <div id="kling-prompt-length" className="mt-2">
+          <p className={`text-right text-xs font-semibold ${isKlingPromptTooLong ? "text-red-600" : "text-stone-500"}`}>
+            {value.length.toLocaleString()} / {KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters
+          </p>
+          {isKlingPromptTooLong ? (
+            <p role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold leading-5 text-red-700">
+              Kling accepts a maximum of {KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters. Shorten this prompt by {(value.length - KLING_PROMPT_CHARACTER_LIMIT).toLocaleString()} characters before generating.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {usesCameraHelper ? (
         <div className="mt-3 rounded-md border border-line bg-stone-50 p-2">
-          <div className="mb-2 flex items-center gap-2">
-            <Camera className="h-3.5 w-3.5 text-stone-500" />
-            <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Camera</p>
+          <div className={`flex items-center justify-between gap-3 ${cameraHelperEnabled ? "mb-2" : ""}`}>
+            <div className="flex items-center gap-2">
+              <Camera className="h-3.5 w-3.5 text-stone-500" />
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Camera</p>
+            </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-stone-600" title="Enable or disable camera instructions in prompt generation">
+              <input
+                type="checkbox"
+                checked={cameraHelperEnabled}
+                onChange={(event) => setCameraHelperEnabled(event.target.checked)}
+                aria-controls="camera-helper-controls"
+                aria-expanded={cameraHelperEnabled}
+                className="accent-accent"
+              />
+              Enabled
+            </label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <select
-              value={movementStyle}
-              onChange={(event) => {
-                const nextStyle = event.target.value as MovementStyle;
-                setMovementStyle(nextStyle);
-                setActionType(movementActions[nextStyle][0]);
-              }}
-              className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-            >
-              {Object.keys(movementActions).map((style) => (
-                <option key={style} value={style}>
-                  {style}
-                </option>
-              ))}
-            </select>
-            <select
-              value={actionType}
-              onChange={(event) => setActionType(event.target.value)}
-              className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-            >
-              {availableActions.map((action) => (
-                <option key={action} value={action}>
-                  {action}
-                </option>
-              ))}
-            </select>
-            <select
-              value={speedModifier}
-              onChange={(event) => setSpeedModifier(event.target.value)}
-              className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-            >
-              {speedModifiers.map((speed) => (
-                <option key={speed} value={speed}>
-                  {speed}
-                </option>
-              ))}
-            </select>
-            {lockTargetSubject ? (
-              <select
-                value={targetSubjectPreset}
-                onChange={(event) => setTargetSubjectPreset(event.target.value)}
-                className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-              >
-                {subjectPresets.map((subject) => (
-                  <option key={subject} value={subject}>
-                    {subject}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="flex h-9 items-center rounded-md border border-line bg-white px-2 text-xs font-semibold text-stone-400">
-                Custom disabled
+          {cameraHelperEnabled ? (
+            <div id="camera-helper-controls">
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={movementStyle}
+                  onChange={(event) => {
+                    const nextStyle = event.target.value as MovementStyle;
+                    setMovementStyle(nextStyle);
+                    setActionType(movementActions[nextStyle][0]);
+                  }}
+                  className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                >
+                  {Object.keys(movementActions).map((style) => (
+                    <option key={style} value={style}>
+                      {style}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={actionType}
+                  onChange={(event) => setActionType(event.target.value)}
+                  className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                >
+                  {availableActions.map((action) => (
+                    <option key={action} value={action}>
+                      {action}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={speedModifier}
+                  onChange={(event) => setSpeedModifier(event.target.value)}
+                  className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                >
+                  {speedModifiers.map((speed) => (
+                    <option key={speed} value={speed}>
+                      {speed}
+                    </option>
+                  ))}
+                </select>
+                {lockTargetSubject ? (
+                  <select
+                    value={targetSubjectPreset}
+                    onChange={(event) => setTargetSubjectPreset(event.target.value)}
+                    className="h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  >
+                    {subjectPresets.map((subject) => (
+                      <option key={subject} value={subject}>
+                        {subject}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="flex h-9 items-center rounded-md border border-line bg-white px-2 text-xs font-semibold text-stone-400">
+                    Custom disabled
+                  </div>
+                )}
+                {targetSubjectPreset === "Custom" && lockTargetSubject ? (
+                  <input
+                    value={targetSubject}
+                    onChange={(event) => setTargetSubject(event.target.value)}
+                    className="col-span-2 h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+                    placeholder="[Subject]"
+                  />
+                ) : null}
               </div>
-            )}
-            {targetSubjectPreset === "Custom" && lockTargetSubject ? (
-              <input
-                value={targetSubject}
-                onChange={(event) => setTargetSubject(event.target.value)}
-                className="col-span-2 h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
-                placeholder="[Subject]"
-              />
-            ) : null}
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <label className="flex min-h-8 items-center gap-2 rounded-md bg-white px-2 text-xs font-semibold text-stone-600">
-              <input
-                type="checkbox"
-                checked={lockTargetSubject}
-                onChange={(event) => setLockTargetSubject(event.target.checked)}
-                className="accent-accent"
-              />
-              Lock subject
-            </label>
-            <label className="flex min-h-8 items-center gap-2 rounded-md bg-white px-2 text-xs font-semibold text-stone-600">
-              <input
-                type="checkbox"
-                checked={stabilityReinforcement}
-                onChange={(event) => setStabilityReinforcement(event.target.checked)}
-                className="accent-accent"
-              />
-              Stable motion
-            </label>
-          </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <label className="flex min-h-8 items-center gap-2 rounded-md bg-white px-2 text-xs font-semibold text-stone-600">
+                  <input
+                    type="checkbox"
+                    checked={lockTargetSubject}
+                    onChange={(event) => setLockTargetSubject(event.target.checked)}
+                    className="accent-accent"
+                  />
+                  Lock subject
+                </label>
+                <label className="flex min-h-8 items-center gap-2 rounded-md bg-white px-2 text-xs font-semibold text-stone-600">
+                  <input
+                    type="checkbox"
+                    checked={stabilityReinforcement}
+                    onChange={(event) => setStabilityReinforcement(event.target.checked)}
+                    className="accent-accent"
+                  />
+                  Stable motion
+                </label>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -273,7 +332,7 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
             className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-line bg-stone-50 px-3 text-xs font-semibold text-stone-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
           >
             <Sparkle className="h-3.5 w-3.5 text-accent" />
-            {isDescribing ? "Generating..." : "Generate video prompt"}
+            {isDescribing ? "Generating..." : isSeedanceWorkflow ? "Generate Seedance prompt" : isKlingWorkflow ? "Generate Kling prompt" : "Generate video prompt"}
           </button>
         ) : null}
         <button
@@ -295,8 +354,10 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
   );
 }
 
-function videoPromptMode(mode: "generic" | "video" | "klingVideo") {
-  return mode === "klingVideo" ? "klingVideo" : "video";
+function videoPromptMode(mode: "generic" | "video" | "klingVideo" | "seedanceVideo") {
+  if (mode === "klingVideo") return "klingVideo";
+  if (mode === "seedanceVideo") return "seedanceVideo";
+  return "video";
 }
 
 function buildCameraPrompt({
@@ -353,6 +414,7 @@ function promptModeForModel(model: ModelType) {
     return "generic";
   }
 
-  const text = `${model.id} ${model.label} ${model.workflowPath ?? ""}`.toLowerCase();
-  return text.includes("kling") ? "klingVideo" : "video";
+  if (isKlingWorkflowModel(model)) return "klingVideo";
+  if (isSeedanceWorkflowModel(model)) return "seedanceVideo";
+  return "video";
 }

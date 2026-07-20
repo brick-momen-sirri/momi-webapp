@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { getWorkflowModels, loadWorkflowForRunpod, loadWorkflowModels } from "./workflowService.js";
 import type { CreateJobRequest, WorkflowModel } from "./types.js";
 
@@ -94,6 +97,21 @@ test("Nano Banana workflow applies the selected output resolution", async () => 
   ) as Record<string, any>;
 
   assert.equal(nanoWorkflow["1"].inputs.resolution, "2K");
+});
+
+test("Nano Banana workflow applies the selected aspect ratio", async () => {
+  const nano = requiredModel("brick_nano_banana_2");
+  const nanoWorkflow = await loadWorkflowForRunpod(
+    nano,
+    {
+      ...request(nano, ["nano_1.png"]),
+      workflowOptions: { nanoBanana: { aspectRatio: "16:9" } },
+    },
+    "0000_ply_graound",
+    ["nano_1.png"],
+  ) as Record<string, any>;
+
+  assert.equal(nanoWorkflow["1"].inputs.aspect_ratio, "16:9");
 });
 
 test("Nano Banana can create two output branches with different seeds", async () => {
@@ -228,15 +246,17 @@ test("video edit workflows inject RunPod video filenames and multi-reference ima
   assert.equal("model.reference_images.image_2" in partialSeedanceWorkflow["359"].inputs, false);
 });
 
-test("Kling video workflows randomize fixed seeds before RunPod submission", async () => {
+test("Kling video workflows randomize fixed seeds and preserve long prompts for RunPod submission", async () => {
   const originalRandom = Math.random;
   Math.random = () => 0.123456;
   try {
     const kling = requiredModel("brick_api_kling_v3_video");
+    const longPrompt = "A".repeat(518);
     const klingWorkflow = await loadWorkflowForRunpod(
       kling,
       {
         ...request(kling, ["start.png"]),
+        prompt: longPrompt,
         resolution: { width: 3840, height: 2160, label: "4K" },
         durationSeconds: 7,
       },
@@ -247,7 +267,9 @@ test("Kling video workflows randomize fixed seeds before RunPod submission", asy
     assert.equal(klingWorkflow["3"].inputs.seed, Math.floor(0.123456 * 2_147_483_647));
     assert.notEqual(klingWorkflow["3"].inputs.seed, 0);
     assert.equal(klingWorkflow["3"].inputs["model.resolution"], "4k");
-    assert.equal(klingWorkflow["3"].inputs["multi_shot.storyboard_1_duration"], 7);
+    assert.equal(klingWorkflow["3"].inputs["multi_shot.duration"], 7);
+    assert.equal(klingWorkflow["3"].inputs["multi_shot.prompt"], longPrompt);
+    assert.equal(klingWorkflow["3"].inputs["multi_shot.negative_prompt"], "");
   } finally {
     Math.random = originalRandom;
   }
@@ -266,6 +288,57 @@ test("Veo3 image-to-video workflow applies selected duration over scalar default
   ) as Record<string, any>;
 
   assert.equal(veoWorkflow["1"].inputs.duration_seconds, 6);
+});
+
+test("RunPod loading rejects UI workflows containing widget-bearing node types without an input mapping", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-test-"));
+  const workflowPath = path.join(tempDir, "unsupported_ui_workflow.json");
+  try {
+    await fs.writeFile(workflowPath, JSON.stringify({
+      nodes: [
+        { id: 1, type: "LoadImage", widgets_values: ["input.png", "image"] },
+        { id: 2, type: "SomeBrandNewVideoNode", widgets_values: ["a prompt", "1080p", 5] },
+      ],
+      links: [],
+    }), "utf8");
+
+    const base = requiredModel("brcik_api_kling_o3_video_edit");
+    const model: WorkflowModel = { ...base, workflowPath };
+
+    await assert.rejects(
+      loadWorkflowForRunpod(model, request(model, ["input.png"]), "0000_ply_graound", ["input.png"]),
+      /SomeBrandNewVideoNode.*fallbackWidgetInputSpecs/s,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("RunPod loading ignores widget values on inert note nodes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-test-"));
+  const workflowPath = path.join(tempDir, "noted_ui_workflow.json");
+  try {
+    await fs.writeFile(workflowPath, JSON.stringify({
+      nodes: [
+        { id: 1, type: "LoadImage", widgets_values: ["input.png", "image"] },
+        { id: 2, type: "Note", widgets_values: ["reminder for the artist"] },
+      ],
+      links: [],
+    }), "utf8");
+
+    const base = requiredModel("brcik_api_kling_o3_video_edit");
+    const model: WorkflowModel = { ...base, workflowPath };
+
+    const workflow = await loadWorkflowForRunpod(
+      model,
+      request(model, ["input.png"]),
+      "0000_ply_graound",
+      ["input.png"],
+    ) as Record<string, any>;
+    assert.equal(workflow["1"].inputs.image, "input.png");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 function requiredModel(id: string) {
