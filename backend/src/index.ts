@@ -45,6 +45,7 @@ import {
   activeRunpodJobCount,
   archiveJob,
   cancelJob,
+  closeJobStore,
   createJob,
   flushPersistedJobs,
   getJob,
@@ -1369,6 +1370,7 @@ function installGracefulShutdown(server: import("node:http").Server) {
       }
       try {
         await flushPersistedJobs();
+        closeJobStore();
         console.log("Pending job state flushed.");
       } catch (error) {
         console.error("Failed to flush job state on shutdown:", error);

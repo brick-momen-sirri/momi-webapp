@@ -103,7 +103,10 @@ export async function loadJobs() {
     return normalized;
   });
   if (changed) {
-    await persistJobs();
+    // Persist the normalization now rather than via the debounced timer, which
+    // is unref'd and may not fire before boot completes.
+    persistJobs().catch(() => undefined);
+    await flushPersistedJobs();
   }
   archivedMediaJobs = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
   return jobs;
@@ -1540,6 +1543,13 @@ export async function flushPersistedJobs() {
     persistTimer = undefined;
   }
   await runPersistFlush();
+}
+
+// Close the SQLite store connection (if open) so file handles are released.
+// Called on graceful shutdown and by tests for deterministic cleanup.
+export function closeJobStore() {
+  sqliteStore?.close();
+  sqliteStore = undefined;
 }
 
 async function persistArchivedMediaJobs() {
