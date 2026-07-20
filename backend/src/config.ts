@@ -88,6 +88,11 @@ export const runpodInlineImageMaxDimension = positiveNumber(process.env.RUNPOD_I
 export const runpodInlineImageMinQuality = boundedNumber(process.env.RUNPOD_INLINE_IMAGE_MIN_QUALITY, 55, 20, 95);
 export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX_BYTES, 1024 * 1024 * 1024);
 export const runpodTextOutputMaxBytes = Math.max(1024, positiveNumber(process.env.RUNPOD_TEXT_OUTPUT_MAX_BYTES, 1024 * 1024));
+// Retries downloading completed results whose media is still on a remote URL
+// (e.g. after a failed persist). "0" disables the periodic pass.
+export const resultRecoveryIntervalMs = process.env.RESULT_RECOVERY_INTERVAL_MS?.trim() === "0"
+  ? 0
+  : positiveNumber(process.env.RESULT_RECOVERY_INTERVAL_MS, 10 * 60 * 1000);
 export const runpodDebug = ["1", "true", "yes", "on"].includes(String(process.env.RUNPOD_DEBUG ?? "").trim().toLowerCase());
 export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "exclusive"].includes(
   String(process.env.CREDIT_BALANCE_DELTA_ACCOUNTING ?? "").trim().toLowerCase(),

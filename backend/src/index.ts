@@ -15,6 +15,7 @@ import {
   localProjectsRoot,
   mediaUploadMaxBytes,
   memoryLogIntervalMs,
+  resultRecoveryIntervalMs,
   PORT,
   runpodPollIntervalMs,
   runpodTimeoutMs,
@@ -51,8 +52,10 @@ import {
   loadJobs,
   moveJobResult,
   permanentlyDeleteArchivedJob,
+  recoverRemoteResultMedia,
   renameJob,
   restoreArchivedJob,
+  scheduleRemoteResultRecovery,
   updateJobSaveNumber,
 } from "./jobQueue.js";
 import {
@@ -1240,6 +1243,16 @@ async function boot() {
     console.log(`Generation backend: ${generationBackend}`);
     logMemory("boot-listening");
   });
+
+  if (resultRecoveryIntervalMs > 0) {
+    // Re-download completed results that are still remote-only (failed or
+    // skipped persists) while their signed URLs are valid: once shortly after
+    // boot, then periodically.
+    scheduleRemoteResultRecovery(30_000);
+    setInterval(() => {
+      void recoverRemoteResultMedia().catch(() => undefined);
+    }, resultRecoveryIntervalMs).unref();
+  }
 }
 
 void boot().catch((error) => {

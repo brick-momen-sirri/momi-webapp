@@ -833,6 +833,7 @@ function range(start: number, end: number) {
 function mapJob(job: BackendJob): Job {
   const resolution = job.resolution?.label ?? (job.resolution ? `${job.resolution.width} x ${job.resolution.height}` : "Unknown");
   const outputResolution = normalizeResolution(job.outputResolution);
+  const hasUnsavedRemoteMedia = jobHasUnsavedRemoteMedia(job);
   const shouldProxyResults = job.source !== "existing_project_media";
   const resultUrls = shouldProxyResults
     ? job.resultUrls.map((_, index) => backendResultMediaUrl(job.id, index))
@@ -876,6 +877,7 @@ function mapJob(job: BackendJob): Job {
     creditBalanceAfter: job.creditBalanceAfter,
     source: job.source,
     missingMetadata: job.missingMetadata,
+    hasUnsavedRemoteMedia,
     archivedAt: job.archivedAt,
     archivedBy: job.archivedBy,
     videoLength: job.durationSeconds ? `${job.durationSeconds} seconds` : job.outputType === "video" ? "Backend video" : job.outputType === "sequence" ? "Image sequence" : undefined,
@@ -887,6 +889,16 @@ function mapJob(job: BackendJob): Job {
     completedAt: job.completedAt,
     generationTime: generationTimeForJob(job),
   };
+}
+
+// Persisted results are always local "/api/media?path=..." URLs. A remote
+// http(s) URL on a completed job means the backend could not save that file
+// locally yet — it only exists on the generation service until recovery
+// re-downloads it (or its signed URL expires).
+function jobHasUnsavedRemoteMedia(job: BackendJob) {
+  if (job.status !== "completed") return false;
+  return [...(job.resultUrls ?? []), ...(job.thumbnailUrls ?? [])]
+    .some((url) => /^https?:\/\//i.test(url ?? "") && !url.includes("/api/media"));
 }
 
 function mappedCreditsUsed(job: BackendJob) {

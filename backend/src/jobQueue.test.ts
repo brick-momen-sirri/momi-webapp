@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 import sharp from "sharp";
-import { chooseRunpodImageInputNames } from "./jobQueue.js";
+import { chooseRunpodImageInputNames, isRemoteResultMediaUrl, jobRemoteMediaEntries } from "./jobQueue.js";
 import {
   prepareRunpodInlineImageInput,
   runpodInlineImageByteBudget,
@@ -32,6 +32,47 @@ test("RunPod image input names keep distinct workflow placeholders", () => {
   );
 
   assert.deepEqual(names, ["image_a.png", "image_b.jpg"]);
+});
+
+test("remote result media urls are detected regardless of scheme and whitespace", () => {
+  assert.equal(isRemoteResultMediaUrl("https://cdn.runpod.io/output/clip.mp4"), true);
+  assert.equal(isRemoteResultMediaUrl("http://example.com/frame.png"), true);
+  assert.equal(isRemoteResultMediaUrl("  https://example.com/frame.png  "), true);
+  assert.equal(isRemoteResultMediaUrl("/api/media?path=C%3A%5Cout%5Cclip.mp4"), false);
+  assert.equal(isRemoteResultMediaUrl("[embedded data URL omitted]"), false);
+});
+
+test("jobRemoteMediaEntries flags only remote urls on completed jobs", () => {
+  const entries = jobRemoteMediaEntries({
+    status: "completed",
+    resultUrls: ["/api/media?path=local.mp4", "https://cdn.runpod.io/clip.mp4"],
+    thumbnailUrls: ["https://cdn.runpod.io/thumb.png"],
+  });
+
+  assert.deepEqual(entries, [
+    { kind: "result", index: 1, url: "https://cdn.runpod.io/clip.mp4" },
+    { kind: "thumbnail", index: 0, url: "https://cdn.runpod.io/thumb.png" },
+  ]);
+});
+
+test("jobRemoteMediaEntries ignores jobs that are not completed or are fully local", () => {
+  assert.deepEqual(
+    jobRemoteMediaEntries({
+      status: "running",
+      resultUrls: ["https://cdn.runpod.io/clip.mp4"],
+      thumbnailUrls: [],
+    }),
+    [],
+  );
+
+  assert.deepEqual(
+    jobRemoteMediaEntries({
+      status: "completed",
+      resultUrls: ["/api/media?path=local.mp4"],
+      thumbnailUrls: ["/api/media?path=thumb.png"],
+    }),
+    [],
+  );
 });
 
 test("RunPod inline image budget shrinks as image input count grows", () => {

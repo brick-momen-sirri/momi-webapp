@@ -83,6 +83,14 @@ export function JobCard({
                 Missing metadata
               </span>
             ) : null}
+            {job.hasUnsavedRemoteMedia ? (
+              <span
+                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700"
+                title="This result is still on the generation service and has not been saved to the project drive yet. The backend retries automatically; if this persists, check backend disk space and logs."
+              >
+                Not saved locally
+              </span>
+            ) : null}
             {job.source === "existing_project_media" ? (
               <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
                 Existing media

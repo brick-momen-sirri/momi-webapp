@@ -692,6 +692,11 @@ async function runRunpodJob(job: Job) {
 
     job.status = "completed";
     job.completedAt = new Date().toISOString();
+    if (jobRemoteMediaEntries(job).length) {
+      // Some outputs could not be saved locally; retry soon while the remote
+      // signed URLs are still valid.
+      scheduleRemoteResultRecovery();
+    }
     await incrementProjectJobCount(job.projectId);
     logMemory("job-finished", job.id);
   } catch (error) {
@@ -910,6 +915,129 @@ async function persistResultMedia(resultUrls: string[], outputFolder: string, jo
   }
 
   return persistedUrls;
+}
+
+export type RemoteMediaEntry = {
+  kind: "result" | "thumbnail";
+  index: number;
+  url: string;
+};
+
+// A completed job's media should always be a local /api/media URL. Remote
+// http(s) URLs mean the original persist failed (or was skipped for size) and
+// the file only exists on the generation service until its signed URL expires.
+export function isRemoteResultMediaUrl(value: string) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+export function jobRemoteMediaEntries(job: Pick<Job, "status" | "resultUrls" | "thumbnailUrls">): RemoteMediaEntry[] {
+  if (job.status !== "completed") return [];
+  const entries: RemoteMediaEntry[] = [];
+  (job.resultUrls ?? []).forEach((url, index) => {
+    if (isRemoteResultMediaUrl(url)) entries.push({ kind: "result", index, url });
+  });
+  (job.thumbnailUrls ?? []).forEach((url, index) => {
+    if (isRemoteResultMediaUrl(url)) entries.push({ kind: "thumbnail", index, url });
+  });
+  return entries;
+}
+
+// Signed URLs stop working long before this cap is reached at the default
+// 10-minute recovery interval; the cap just keeps dead links from being
+// re-fetched forever within one process lifetime.
+const remoteRecoveryMaxAttempts = 24;
+const remoteRecoveryFailureCounts = new Map<string, number>();
+let remoteRecoveryRunning = false;
+let remoteRecoveryTimer: NodeJS.Timeout | undefined;
+
+export function scheduleRemoteResultRecovery(delayMs = 60_000) {
+  if (remoteRecoveryTimer) return;
+  remoteRecoveryTimer = setTimeout(() => {
+    remoteRecoveryTimer = undefined;
+    void recoverRemoteResultMedia().catch(() => undefined);
+  }, delayMs);
+  remoteRecoveryTimer.unref?.();
+}
+
+export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) {
+  if (remoteRecoveryRunning) return { recovered: 0, failed: 0 };
+  remoteRecoveryRunning = true;
+  try {
+    let recovered = 0;
+    let failed = 0;
+    let changed = false;
+
+    for (const job of jobs) {
+      const entries = jobRemoteMediaEntries(job);
+      if (!entries.length) continue;
+      const project = getProject(job.projectId);
+      if (!project) continue;
+
+      const folders = await ensureJobFolders(project, job.id).catch(() => undefined);
+      if (!folders) continue;
+
+      const recoveredByUrl = new Map<string, string>();
+      for (const entry of entries) {
+        let localUrl = recoveredByUrl.get(entry.url);
+        if (!localUrl) {
+          const attempts = remoteRecoveryFailureCounts.get(entry.url) ?? 0;
+          if (attempts >= remoteRecoveryMaxAttempts) continue;
+          localUrl = await downloadRemoteResultMedia(entry, folders.output, job.id, fetchImpl);
+          if (!localUrl) {
+            remoteRecoveryFailureCounts.set(entry.url, attempts + 1);
+            failed += 1;
+            continue;
+          }
+          remoteRecoveryFailureCounts.delete(entry.url);
+          recoveredByUrl.set(entry.url, localUrl);
+        }
+
+        if (entry.kind === "result") {
+          job.resultUrls[entry.index] = localUrl;
+        } else {
+          job.thumbnailUrls[entry.index] = localUrl;
+        }
+        recovered += 1;
+        changed = true;
+      }
+    }
+
+    if (changed) await persistJobs();
+    if (recovered || failed) {
+      console.info(`[recovery] Remote result media pass: recovered ${recovered}, failed ${failed}.`);
+    }
+    return { recovered, failed };
+  } finally {
+    remoteRecoveryRunning = false;
+  }
+}
+
+async function downloadRemoteResultMedia(
+  entry: RemoteMediaEntry,
+  outputFolder: string,
+  jobId: string,
+  fetchImpl: typeof fetch,
+) {
+  try {
+    const url = new URL(entry.url);
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(120000) });
+    if (!response.ok) return undefined;
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const extension = resultExtension(url, contentType);
+    const fileName = `${jobId}_${entry.kind}_${String(entry.index + 1).padStart(2, "0")}_recovered${extension}`;
+    const filePath = path.join(outputFolder, fileName);
+    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    if (Number.isFinite(contentLength) && contentLength > runpodOutputMaxBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+
+    await writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes);
+    return `/api/media?path=${encodeURIComponent(filePath)}`;
+  } catch {
+    return undefined;
+  }
 }
 
 async function detectFirstPersistedResultResolution(resultUrls: string[], outputType: Job["outputType"]) {

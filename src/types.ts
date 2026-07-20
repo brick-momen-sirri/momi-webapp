@@ -143,6 +143,7 @@ export type Job = {
   textArtifacts?: JobTextArtifact[];
   source?: "backend_job" | "existing_project_media";
   missingMetadata?: string[];
+  hasUnsavedRemoteMedia?: boolean;
   archivedAt?: string;
   archivedBy?: string;
   durationSeconds?: number;
