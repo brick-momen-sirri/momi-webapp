@@ -436,3 +436,12 @@ html[data-theme="dark"] button:hover .workflow-icon-img:not(.workflow-icon-selec
 html[data-theme="dark"] .scrollbar-thin {
   scrollbar-color: #5d574f transparent;
 }
+
+/* Let the browser skip layout and paint for job cards that are scrolled out of
+   view. The list stays in the DOM (search, anchor scroll, and pagination keep
+   working); only off-screen rendering cost is deferred. contain-intrinsic-size
+   uses "auto" so a card's real height is remembered once measured. */
+.job-card-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 720px;
+}

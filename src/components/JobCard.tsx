@@ -66,7 +66,7 @@ export function JobCard({
   return (
     <article
       className={cn(
-        "rounded-lg border bg-white p-4 shadow-card",
+        "job-card-cv rounded-lg border bg-white p-4 shadow-card",
         job.status === "completed" ? "border-teal-200" : "border-line",
       )}
     >

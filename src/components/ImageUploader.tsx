@@ -83,9 +83,11 @@ export function ImageUploader({
   async function applyFile(slotIndex: number, file: File) {
     const nextImage = await buildUploadedImage(file);
 
+    const previous = images[slotIndex];
     const nextImages = [...images];
     nextImages[slotIndex] = nextImage;
     onChange(nextImages);
+    revokeImageObjectUrls(previous);
 
     if (use16By9Cropping && nextImage.cropRequired) {
       setActiveCropIndex(slotIndex);
@@ -164,11 +166,13 @@ export function ImageUploader({
 
     try {
       const uploaded = await buildUploadedImage(files[0]);
+      const previous = images[targetSlot.index];
       const nextImages = [...images];
 
       nextImages[targetSlot.index] = uploaded;
 
       onChange(nextImages);
+      revokeImageObjectUrls(previous);
 
       setPasteMessage(`Pasted into ${targetSlot.label}.`);
       window.setTimeout(() => setPasteMessage(""), 2200);
@@ -186,9 +190,11 @@ export function ImageUploader({
   }
 
   function removeImage(slotIndex: number) {
+    const previous = images[slotIndex];
     const nextImages = [...images];
     delete nextImages[slotIndex];
     onChange(nextImages);
+    revokeImageObjectUrls(previous);
   }
 
   function saveCrop(slotIndex: number, result: CropSaveResult) {
@@ -477,6 +483,16 @@ function decodeHtmlEntities(value: string) {
   const textarea = document.createElement("textarea");
   textarea.innerHTML = value;
   return textarea.value;
+}
+
+// Release blob: URLs created by buildUploadedImage/CropModal once an image
+// leaves its slot, so long editing sessions don't accumulate detached blobs.
+// Only blob: URLs are revoked; server (/api/media) and data: URLs are left alone.
+function revokeImageObjectUrls(image: UploadedImage | undefined) {
+  if (!image) return;
+  for (const url of [image.url, image.croppedUrl]) {
+    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  }
 }
 
 function dedupeFiles(files: File[]) {
