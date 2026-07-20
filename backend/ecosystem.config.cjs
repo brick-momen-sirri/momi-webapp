@@ -23,6 +23,12 @@ module.exports = {
         MEDIA_SCAN_CACHE_MS: "60000",
         MEDIA_UPLOAD_MAX_BYTES: String(1024 * 1024 * 1024),
         RUNPOD_OUTPUT_MAX_BYTES: String(1024 * 1024 * 1024),
+        // Persist jobs to SQLite. On first boot, jobs.json / archived-items.json
+        // are migrated into jobs.sqlite / archived-items.sqlite; those .json
+        // files remain frozen as a fallback. To roll back, set this to "json"
+        // BEFORE new jobs accumulate on SQLite (see the caveat below), or export
+        // the SQLite store back to JSON first.
+        JOB_STORE_DRIVER: "sqlite",
         // Let sharp image encoding use more libuv threads so it doesn't starve
         // file streaming under concurrent load.
         UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || "12",
