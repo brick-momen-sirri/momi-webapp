@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -124,6 +125,47 @@ test("prepended jobs keep newest-first order across syncs", async () => {
     store.replaceAll([job("job_3"), job("job_2"), job("job_1")]); // job_3 prepended
     assert.deepEqual(store.loadAll().map((j) => j.id), ["job_3", "job_2", "job_1"]);
     store.close();
+  });
+});
+
+test("replaceAll rejects a job with embedded media (symmetric with the JSON writer)", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    assert.throws(
+      () => store.replaceAll([job("job_bad", { prompt: "data:image/png;base64,AAAA" } as Partial<Job>)]),
+      /embedded media/i,
+    );
+    assert.equal(store.count(), 0, "the bad row must not be persisted");
+    store.close();
+  });
+});
+
+test("replaceAll rejects an oversized string field", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    assert.throws(
+      () => store.replaceAll([job("job_big", { prompt: "x".repeat(100_001) } as Partial<Job>)]),
+      /oversized metadata string|metadata/i,
+    );
+    store.close();
+  });
+});
+
+test("readonly open of a missing file throws instead of fabricating an empty store", () => {
+  const missing = path.join(os.tmpdir(), `momi-nope-${Date.now()}.sqlite`);
+  assert.throws(() => openSqliteJobStore(missing, "jobs", { readonly: true }));
+  assert.equal(existsSync(missing), false, "must not create the file");
+});
+
+test("a readonly store cannot be written", async () => {
+  await withStore((dbPath) => {
+    const writable = openSqliteJobStore(dbPath, "jobs"); // create + seed
+    writable.replaceAll([job("job_1")]);
+    writable.close();
+    const ro = openSqliteJobStore(dbPath, "jobs", { readonly: true });
+    assert.deepEqual(ro.loadAll().map((j) => j.id), ["job_1"]);
+    assert.throws(() => ro.replaceAll([job("job_2")]), /read-only/i);
+    ro.close();
   });
 });
 

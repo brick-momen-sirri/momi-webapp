@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { assertNoEmbeddedMedia } from "./storageService.js";
 import type { Job } from "./types.js";
 
 // A SQLite-backed persistence layer for the job list, an alternative to the
@@ -19,6 +20,14 @@ import type { Job } from "./types.js";
 
 export type SyncStats = { written: number; deleted: number };
 
+export type OpenOptions = {
+  // Open an existing store for reading only. The DB file MUST already exist
+  // (no create-on-missing) and the schema is not touched; replaceAll throws.
+  // Used by the exporter so a missing/mis-pathed DB fails loudly instead of
+  // fabricating an empty store and clobbering the JSON fallback.
+  readonly?: boolean;
+};
+
 export type SqliteJobStore = {
   loadAll(): Job[];
   replaceAll(jobs: Job[]): SyncStats;
@@ -31,41 +40,65 @@ type JobRow = { data: string };
 // `table` lets a second logical store (archived items) reuse this code. It is
 // a hardcoded identifier from config, never user input, but is validated to
 // keep the SQL string interpolation safe.
-export function openSqliteJobStore(dbPath: string, table = "jobs"): SqliteJobStore {
+export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOptions = {}): SqliteJobStore {
   if (!/^[a-z_][a-z0-9_]*$/i.test(table)) {
     throw new Error(`Invalid SQLite table name: ${table}`);
   }
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS ${table} (
-      id TEXT PRIMARY KEY,
-      seq INTEGER NOT NULL,
-      status TEXT,
-      project_id TEXT,
-      user_id TEXT,
-      created_at TEXT,
-      completed_at TEXT,
-      comfy_prompt_id TEXT,
-      credits_used REAL,
-      data TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_${table}_seq ON ${table}(seq);
-    CREATE INDEX IF NOT EXISTS idx_${table}_status ON ${table}(status);
-    CREATE INDEX IF NOT EXISTS idx_${table}_project ON ${table}(project_id);
-    CREATE INDEX IF NOT EXISTS idx_${table}_user ON ${table}(user_id);
-    CREATE INDEX IF NOT EXISTS idx_${table}_created ON ${table}(created_at);
-  `);
+  const readonly = opts.readonly === true;
+  if (!readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  // fileMustExist stops better-sqlite3 from silently creating an empty DB when
+  // the path is wrong or the store was never initialized.
+  const db = new Database(dbPath, readonly ? { readonly: true, fileMustExist: true } : {});
+  if (!readonly) {
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        id TEXT PRIMARY KEY,
+        seq INTEGER NOT NULL,
+        status TEXT,
+        project_id TEXT,
+        user_id TEXT,
+        created_at TEXT,
+        completed_at TEXT,
+        comfy_prompt_id TEXT,
+        credits_used REAL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_${table}_seq ON ${table}(seq);
+      CREATE INDEX IF NOT EXISTS idx_${table}_status ON ${table}(status);
+      CREATE INDEX IF NOT EXISTS idx_${table}_project ON ${table}(project_id);
+      CREATE INDEX IF NOT EXISTS idx_${table}_user ON ${table}(user_id);
+      CREATE INDEX IF NOT EXISTS idx_${table}_created ON ${table}(created_at);
+    `);
+  }
 
   // seq is a stable, monotonically increasing insertion key (higher = newer),
   // assigned once per job and never rewritten, so a prepend doesn't touch
   // existing rows. loadAll returns newest-first (matching the in-memory array,
-  // which createJob prepends to).
+  // which createJob prepends to). In readonly mode a missing table throws here
+  // (the store was never initialized) rather than returning a bogus empty set.
   const selectAll = db.prepare<[], JobRow>(`SELECT data FROM ${table} ORDER BY seq DESC`);
-  const selectIdSeq = db.prepare<[], { id: string; seq: number }>(`SELECT id, seq FROM ${table}`);
   const countStmt = db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
+
+  if (readonly) {
+    return {
+      loadAll() {
+        return selectAll.all().map((row) => JSON.parse(row.data) as Job);
+      },
+      count() {
+        return countStmt.get()?.n ?? 0;
+      },
+      replaceAll() {
+        throw new Error("Cannot write to a read-only SQLite job store.");
+      },
+      close() {
+        db.close();
+      },
+    };
+  }
+
+  const selectIdSeq = db.prepare<[], { id: string; seq: number }>(`SELECT id, seq FROM ${table}`);
   const upsert = db.prepare(`
     INSERT INTO ${table} (id, seq, status, project_id, user_id, created_at, completed_at, comfy_prompt_id, credits_used, data)
     VALUES (@id, @seq, @status, @project_id, @user_id, @created_at, @completed_at, @comfy_prompt_id, @credits_used, @data)
@@ -120,6 +153,10 @@ export function openSqliteJobStore(dbPath: string, table = "jobs"): SqliteJobSto
       const data = JSON.stringify(job);
       const hash = hashString(data);
       if (knownHash.get(job.id) === hash) continue;
+      // Enforce the same no-embedded-media / max-string-size contract as the
+      // JSON writer, so the two stores stay symmetric and a later export can
+      // never fail on data SQLite accepted but writeJsonFile would reject.
+      assertNoEmbeddedMedia(job, `job ${job.id}`);
       upsert.run(toRow(job, knownSeq.get(job.id)!, data));
       knownHash.set(job.id, hash);
       written += 1;

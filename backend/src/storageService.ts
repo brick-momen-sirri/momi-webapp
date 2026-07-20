@@ -83,11 +83,13 @@ export async function snapshotJsonStore(filePath: string, retentionDays = 7) {
   }
 }
 
-export async function writeJsonFile(filePath: string, data: unknown) {
+export async function writeJsonFile(filePath: string, data: unknown, options: { maxBytes?: number } = {}) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   assertNoEmbeddedMedia(data, path.basename(filePath));
   const json = `${JSON.stringify(data, null, 2)}\n`;
-  assertMetadataTextSize(json, filePath, MAX_JSON_METADATA_BYTES);
+  // maxBytes lets a full-store export (a recovery dump) exceed the per-metadata
+  // cap; runtime metadata writes keep the default MAX_JSON_METADATA_BYTES.
+  assertMetadataTextSize(json, filePath, options.maxBytes ?? MAX_JSON_METADATA_BYTES);
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   const backupPath = `${filePath}.bak`;
   await fs.writeFile(tempPath, json, "utf8");
