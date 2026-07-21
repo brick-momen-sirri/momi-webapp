@@ -1524,7 +1524,17 @@ async function ensureWorkerProjectFolder(serverUrl: string, projectFolderName: s
 // create and update; it keeps the store row in lockstep with the array.
 async function persistUpsert(job: Job): Promise<void> {
   if (jobRowLevelWrites && sqliteStore) {
-    sqliteStore.insertJob(job);
+    // Respect array membership so a stale holder can't resurrect a row that was
+    // concurrently removed. A runner's finally block keeps its job reference
+    // across the long RunPod await; if the job is archived + permanently
+    // deleted during that window, this upsert must NOT re-insert it. This
+    // mirrors the flag-off invariant that replaceAll's prune provides
+    // ("removed from the array ⇒ removed from the store").
+    if (jobs.some((existing) => existing.id === job.id)) {
+      sqliteStore.insertJob(job);
+    } else {
+      sqliteStore.deleteJob(job.id);
+    }
     return;
   }
   await persistJobs();
@@ -1540,7 +1550,12 @@ async function persistRemove(id: string): Promise<void> {
 
 async function persistArchivedUpsert(job: Job): Promise<void> {
   if (jobRowLevelWrites && archivedStore) {
-    archivedStore.insertJob(job);
+    // Same membership guard as persistUpsert, against the archived set.
+    if (archivedMediaJobs.some((existing) => existing.id === job.id)) {
+      archivedStore.insertJob(job);
+    } else {
+      archivedStore.deleteJob(job.id);
+    }
     return;
   }
   await persistArchivedMediaJobs();
