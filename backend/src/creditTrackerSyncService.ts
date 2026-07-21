@@ -116,7 +116,11 @@ export function buildCreditTrackerRows(
   const user = getUserById(job.userId);
   const userName = user?.displayName || user?.name || user?.username || job.userId;
   const promptId = `runpod:${job.runpodJobId ?? job.id}`;
-  const projectName = path.basename(project.folderPath || project.name);
+  // folderPath is stored with the deployment host's separators (Windows in
+  // prod). path.win32.basename treats both "\" and "/" as separators on any OS,
+  // so this yields the folder name whether the code runs on Windows or Linux
+  // (e.g. CI); plain path.basename would return the whole Windows path on POSIX.
+  const projectName = path.win32.basename(project.folderPath || project.name);
   const inputSummary = JSON.stringify({
     source: "runpod_serverless",
     job_id: job.id,
