@@ -3,7 +3,16 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { mediaIndexRefreshMs } from "./config.js";
+import {
+  closeSharedMediaIndexStore,
+  getSharedMediaIndexStore,
+  initializeSharedMediaIndexStore,
+  invalidateSharedMediaIndex,
+  registerMediaIndexInvalidationListener,
+} from "./mediaIndexCoordinator.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
+import { isDispatcher } from "./processRole.js";
 import { getProjects } from "./projectService.js";
 import { loadProjectFolders, resolveProjectMediaPath } from "./projectMetadataService.js";
 import type { Job, Project, ProjectFolder, Resolution } from "./types.js";
@@ -30,12 +39,29 @@ type ScanTarget = {
 let mediaCache: { createdAt: number; jobs: Job[] } | undefined;
 let mediaScanVersion = 0;
 let mediaScanInFlight: { version: number; promise: Promise<Job[]> } | undefined;
+let sharedMediaCache: { revision: number; jobs: Job[] } | undefined;
+let sharedMediaRefreshInFlight: Promise<Job[]> | undefined;
+let sharedMediaRefreshTimer: NodeJS.Timeout | undefined;
 const MEDIA_SCAN_CACHE_MS = Math.max(15_000, Number(process.env.MEDIA_SCAN_CACHE_MS ?? 60_000) || 60_000);
 const MEDIA_METADATA_CONCURRENCY = boundedPositiveInteger(process.env.MEDIA_METADATA_CONCURRENCY, 32, 128);
 let activeMediaMetadataReads = 0;
 const mediaMetadataWaiters: Array<() => void> = [];
 
+registerMediaIndexInvalidationListener(() => {
+  mediaScanVersion += 1;
+  mediaCache = undefined;
+});
+
 export async function scanExistingMediaJobs() {
+  const sharedStore = getSharedMediaIndexStore();
+  if (sharedStore) {
+    const state = sharedStore.loadState();
+    if (isDispatcher() && state.dirtyRevision > state.builtRevision) {
+      await refreshSharedMediaIndex();
+    }
+    return loadSharedMediaIndex();
+  }
+
   if (mediaCache && Date.now() - mediaCache.createdAt < MEDIA_SCAN_CACHE_MS) {
     return mediaCache.jobs;
   }
@@ -58,18 +84,101 @@ export async function scanExistingMediaJobs() {
 }
 
 async function scanExistingMediaJobsUncached(version: number) {
-  const projects = getProjects();
-  const jobs = (await Promise.all(projects.map(scanProjectMedia))).flat();
-  const sortedJobs = jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const sortedJobs = await scanExistingMediaJobsFromDisk();
   if (version === mediaScanVersion) {
     mediaCache = { createdAt: Date.now(), jobs: sortedJobs };
   }
   return sortedJobs;
 }
 
+async function scanExistingMediaJobsFromDisk() {
+  const projects = getProjects();
+  const jobs = (await Promise.all(projects.map(scanProjectMedia))).flat();
+  return jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 export function invalidateMediaCache() {
-  mediaScanVersion += 1;
-  mediaCache = undefined;
+  invalidateSharedMediaIndex();
+}
+
+export async function initializeMediaIndex() {
+  closeMediaIndex();
+  const sharedStore = initializeSharedMediaIndexStore();
+  sharedMediaCache = undefined;
+  if (!sharedStore || !isDispatcher()) return;
+
+  await refreshSharedMediaIndex({ force: true });
+  sharedMediaRefreshTimer = setInterval(() => {
+    void refreshSharedMediaIndex().catch((error) => {
+      console.error(`Could not refresh shared media index: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, Math.max(100, mediaIndexRefreshMs));
+  sharedMediaRefreshTimer.unref?.();
+}
+
+export function closeMediaIndex() {
+  if (sharedMediaRefreshTimer) {
+    clearInterval(sharedMediaRefreshTimer);
+    sharedMediaRefreshTimer = undefined;
+  }
+  closeSharedMediaIndexStore();
+  sharedMediaCache = undefined;
+  sharedMediaRefreshInFlight = undefined;
+}
+
+export function getMediaIndexStatus() {
+  const sharedStore = getSharedMediaIndexStore();
+  if (sharedStore) {
+    const state = sharedStore.loadState();
+    return {
+      driver: "sqlite" as const,
+      dirtyRevision: state.dirtyRevision,
+      builtRevision: state.builtRevision,
+      publishedAt: state.publishedAt,
+      cachedRevision: sharedMediaCache?.revision,
+      cachedItems: sharedMediaCache?.jobs.length ?? 0,
+    };
+  }
+  return {
+    driver: "local" as const,
+    cachedItems: mediaCache?.jobs.length ?? 0,
+    cachedAt: mediaCache ? new Date(mediaCache.createdAt).toISOString() : undefined,
+  };
+}
+
+export function refreshSharedMediaIndex(options: { force?: boolean } = {}) {
+  const sharedStore = getSharedMediaIndexStore();
+  if (!sharedStore || !isDispatcher()) return Promise.resolve(sharedMediaCache?.jobs ?? []);
+  if (sharedMediaRefreshInFlight) return sharedMediaRefreshInFlight;
+
+  sharedMediaRefreshInFlight = (async () => {
+    let state = sharedStore.loadState();
+    const publishedAt = state.publishedAt ? new Date(state.publishedAt).getTime() : 0;
+    const periodicallyStale = !Number.isFinite(publishedAt) || Date.now() - publishedAt >= MEDIA_SCAN_CACHE_MS;
+    if (state.dirtyRevision <= state.builtRevision) {
+      if (!options.force && !periodicallyStale) return loadSharedMediaIndex();
+      sharedStore.invalidate();
+      state = sharedStore.loadState();
+    }
+
+    const revision = state.dirtyRevision;
+    const jobs = await scanExistingMediaJobsFromDisk();
+    sharedStore.publish(revision, jobs);
+    return loadSharedMediaIndex();
+  })().finally(() => {
+    sharedMediaRefreshInFlight = undefined;
+  });
+  return sharedMediaRefreshInFlight;
+}
+
+function loadSharedMediaIndex() {
+  const sharedStore = getSharedMediaIndexStore();
+  if (!sharedStore) return [];
+  const published = sharedStore.loadPublishedIfNewer(sharedMediaCache?.revision ?? -1);
+  if (published) {
+    sharedMediaCache = { revision: published.builtRevision, jobs: published.jobs };
+  }
+  return sharedMediaCache?.jobs ?? [];
 }
 
 async function scanProjectMedia(project: Project): Promise<Job[]> {
