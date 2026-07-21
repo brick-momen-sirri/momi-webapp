@@ -1,5 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import os from "node:os";
+import { projectFolderName } from "./projectFolderName.js";
 import { getHistory, queuePrompt, toViewUrl, uploadImage, uploadInputFile } from "./comfyClient.js";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
@@ -8,6 +10,10 @@ import {
   brickProjectsRoot,
   comfyRoot,
   creditBalanceDeltaAccountingEnabled,
+  dispatcherLeaseHeartbeatMs,
+  dispatcherLeaseTtlMs,
+  dispatcherPollIntervalMs,
+  dispatcherWalCheckpointMs,
   generationBackend,
   jobRowLevelWrites,
   jobStoreDriver,
@@ -15,11 +21,14 @@ import {
   jobsStorePath,
   localProjectsRoot,
   runpodOutputMaxBytes,
+  runpodTimeoutMs,
   runpodInlineMediaMaxBytes,
   runpodInputBaseUrl,
   uploadedMediaRoot,
 } from "./config.js";
 import { estimateFallbackCreditUsage, estimateWorkflowCredits } from "./creditEstimator.js";
+import { BackendHttpError } from "./httpError.js";
+import { mergeJobChangesById, mergeJobSnapshotById } from "./jobReadCache.js";
 import { getCredits } from "./creditService.js";
 import { syncServerlessCreditUsage } from "./creditTrackerSyncService.js";
 import {
@@ -30,7 +39,7 @@ import {
 } from "./creditUsageAccounting.js";
 import { getActualCreditsByPromptIds } from "./creditUsageService.js";
 import { detectMediaResolution } from "./mediaResolutionService.js";
-import { incrementProjectJobCount, getProject } from "./projectService.js";
+import { getProject } from "./projectService.js";
 import {
   appendAudit,
   appendManifestEvent,
@@ -40,11 +49,15 @@ import {
   withProjectMutationLock,
 } from "./projectMetadataService.js";
 import {
+  RunpodComfyCanceledError,
   RunpodComfyError,
+  cancelComfyWorkflowOnRunpod,
+  resumeComfyWorkflowOnRunpod,
   runComfyWorkflowOnRunpod,
   type RunpodComfyImageInput,
   type RunpodMediaResult,
 } from "./runpodComfyService.js";
+import { isDispatcher } from "./processRole.js";
 import {
   parseImageDataUrl,
   prepareRunpodInlineImageInput,
@@ -58,7 +71,10 @@ import {
 } from "./runpodActivityTracker.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
 import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
-import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
+import {
+  openSqliteJobStore,
+  type SqliteJobStore,
+} from "./sqliteJobStore.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
 import { ensureJobFolders, readJsonFileWithBackup, safeSegment, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
@@ -82,11 +98,30 @@ let activeRunpodJobs = 0;
 let resultMoveQueue = Promise.resolve();
 let sqliteStore: SqliteJobStore | undefined;
 let archivedStore: SqliteJobStore | undefined;
+let jobsCacheCursor: StoreCacheCursor | undefined;
+let archivedCacheCursor: StoreCacheCursor | undefined;
+const inFlightJobIds = new Set<string>();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
+const dispatcherOwnerHost = os.hostname();
+const dispatcherOwnerId = `${dispatcherOwnerHost}:${process.pid}:${crypto.randomUUID()}`;
+let dispatcherLeaseHeld = false;
+let dispatcherLeaseWasTakeover = false;
+let dispatchPollTimer: NodeJS.Timeout | undefined;
+let dispatcherHeartbeatTimer: NodeJS.Timeout | undefined;
+let walCheckpointTimer: NodeJS.Timeout | undefined;
+
+type StoreCacheCursor = {
+  dataVersion: number;
+  revision: number;
+};
 
 export async function loadJobs() {
-  let changed = false;
-  jobs = (await loadRawJobs()).map((job) => {
+  if (sqliteStore || archivedStore) closeJobStore();
+  acceptingNewWork = true;
+  const rawJobs = await loadRawJobs();
+  initializeDispatcherCoordination();
+  const normalizedJobs: Job[] = [];
+  jobs = rawJobs.map((job) => {
     const normalized: Job = {
       ...job,
       userId: typeof job.userId === "string" && job.userId.trim() ? job.userId : "usr_momen",
@@ -95,23 +130,47 @@ export async function loadJobs() {
       title: typeof job.title === "string" && job.title.trim() ? job.title.trim() : undefined,
     };
 
-    if (generationBackend === "runpod" && (normalized.status === "sending" || normalized.status === "running")) {
-      normalized.status = "failed";
-      normalized.completedAt = normalized.completedAt ?? new Date().toISOString();
-      normalized.errorMessage = normalized.errorMessage ?? "Backend restarted before this RunPod job returned. Retry the job if needed.";
-      normalized.creditsUsed = normalized.creditsUsed ?? 0;
-      changed = true;
+    if (
+      ownsDispatcherWork()
+      && generationBackend === "runpod"
+      && (normalized.status === "sending" || normalized.status === "running")
+    ) {
+      if (normalized.runpodJobId) {
+        // Acknowledged async submissions are resumed by ID after the new
+        // dispatcher owns the lease. Never submit their workflow again.
+      } else if (normalized.runpodSubmissionState === "preparing") {
+        normalized.status = normalized.cancelRequested ? "canceled" : "queued";
+        delete normalized.startedAt;
+        delete normalized.completedAt;
+        delete normalized.runpodSubmissionState;
+        normalizedJobs.push(normalized);
+      } else if (shouldNormalizeInterruptedJob(normalized)) {
+        normalized.status = normalized.cancelRequested ? "canceled" : "failed";
+        normalized.completedAt = normalized.completedAt ?? new Date().toISOString();
+        if (!normalized.cancelRequested) {
+          normalized.errorMessage = normalized.errorMessage ?? "Backend restarted before this RunPod job returned. Retry the job if needed.";
+        }
+        normalized.creditsUsed = normalized.creditsUsed ?? 0;
+        normalizedJobs.push(normalized);
+      }
     }
 
     return normalized;
   });
-  if (changed) {
-    // Persist the normalization now rather than via the debounced timer, which
-    // is unref'd and may not fire before boot completes.
-    persistJobs().catch(() => undefined);
-    await flushPersistedJobs();
+  if (normalizedJobs.length) {
+    if (jobRowLevelWrites && sqliteStore) {
+      for (const job of normalizedJobs) await persistUpsert(job);
+    } else {
+      // Persist the normalization now rather than via the debounced timer,
+      // which is unref'd and may not fire before boot completes.
+      persistJobs().catch(() => undefined);
+      await flushPersistedJobs();
+    }
   }
   archivedMediaJobs = await loadRawArchivedJobs();
+  resumeAcknowledgedRunpodJobs();
+  startDispatcherCoordination();
+  if (isDispatcher() && !usesDispatcherCoordination()) void dispatchQueue();
   return jobs;
 }
 
@@ -120,16 +179,21 @@ export async function loadJobs() {
 async function loadRawArchivedJobs(): Promise<Job[]> {
   if (jobStoreDriver === "sqlite") {
     archivedStore = openSqliteJobStore(archivedItemsSqlitePath, "archived_jobs");
-    const existing = archivedStore.loadAll();
-    if (existing.length > 0) return existing;
+    let existing = loadConsistentSnapshot(archivedStore);
+    archivedCacheCursor = existing.cursor;
+    if (existing.snapshot.jobs.length > 0) return existing.snapshot.jobs;
 
     const legacy = await readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
     if (legacy.length) {
       archivedStore.replaceAll(legacy);
       console.log(`Migrated ${legacy.length} archived items from archived-items.json into SQLite.`);
+      existing = loadConsistentSnapshot(archivedStore);
+      archivedCacheCursor = existing.cursor;
+      return existing.snapshot.jobs;
     }
-    return legacy;
+    return [];
   }
+  archivedCacheCursor = undefined;
   return readJsonFileWithBackup<Job[]>(archivedItemsStorePath, []);
 }
 
@@ -138,28 +202,95 @@ async function loadRawArchivedJobs(): Promise<Job[]> {
 async function loadRawJobs(): Promise<Job[]> {
   if (jobStoreDriver === "sqlite") {
     sqliteStore = openSqliteJobStore(jobsSqlitePath);
-    const existing = sqliteStore.loadAll();
-    if (existing.length > 0) return existing;
+    let existing = loadConsistentSnapshot(sqliteStore);
+    jobsCacheCursor = existing.cursor;
+    if (existing.snapshot.jobs.length > 0) return existing.snapshot.jobs;
 
     const legacy = await readJsonFileWithBackup<Job[]>(jobsStorePath, []);
     if (legacy.length) {
       sqliteStore.replaceAll(legacy);
       console.log(`Migrated ${legacy.length} jobs from jobs.json into SQLite at ${jobsSqlitePath}.`);
+      existing = loadConsistentSnapshot(sqliteStore);
+      jobsCacheCursor = existing.cursor;
+      return existing.snapshot.jobs;
     }
-    return legacy;
+    return [];
   }
 
+  jobsCacheCursor = undefined;
   // Take a point-in-time snapshot before mutating, and recover from .bak if the
   // main store is corrupt, so a bad file can't silently wipe job history.
   await snapshotJsonStore(jobsStorePath);
   return readJsonFileWithBackup<Job[]>(jobsStorePath, []);
 }
 
+function loadConsistentSnapshot(store: SqliteJobStore) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const before = store.dataVersion();
+    const snapshot = store.loadSnapshot();
+    const after = store.dataVersion();
+    if (before === after) {
+      return {
+        snapshot,
+        cursor: { dataVersion: after, revision: snapshot.revision } satisfies StoreCacheCursor,
+      };
+    }
+  }
+  throw new Error("Could not read a stable SQLite job snapshot after 20 attempts.");
+}
+
+function loadConsistentChanges(store: SqliteJobStore, afterRevision: number) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const before = store.dataVersion();
+    const changes = store.loadChanges(afterRevision);
+    const after = store.dataVersion();
+    if (before === after) return { changes, dataVersion: after };
+  }
+  throw new Error("Could not read stable incremental SQLite job changes after 20 attempts.");
+}
+
+function refreshMainJobsCache() {
+  if (!sqliteStore || !jobsCacheCursor) return;
+  const observedVersion = sqliteStore.dataVersion();
+  if (observedVersion === jobsCacheCursor.dataVersion) return;
+
+  const { changes, dataVersion } = loadConsistentChanges(sqliteStore, jobsCacheCursor.revision);
+  if (changes.fullSnapshotRequired) {
+    const stable = loadConsistentSnapshot(sqliteStore);
+    jobs = mergeJobSnapshotById(jobs, stable.snapshot, inFlightJobIds);
+    jobsCacheCursor = stable.cursor;
+    return;
+  }
+
+  jobs = mergeJobChangesById(jobs, changes, inFlightJobIds);
+  jobsCacheCursor = { dataVersion, revision: changes.revision };
+}
+
+function refreshArchivedJobsCache() {
+  if (!archivedStore || !archivedCacheCursor) return;
+  const observedVersion = archivedStore.dataVersion();
+  if (observedVersion === archivedCacheCursor.dataVersion) return;
+
+  const { changes, dataVersion } = loadConsistentChanges(archivedStore, archivedCacheCursor.revision);
+  if (changes.fullSnapshotRequired) {
+    const stable = loadConsistentSnapshot(archivedStore);
+    archivedMediaJobs = mergeJobSnapshotById(archivedMediaJobs, stable.snapshot, new Set());
+    archivedCacheCursor = stable.cursor;
+    return;
+  }
+
+  archivedMediaJobs = mergeJobChangesById(archivedMediaJobs, changes, new Set());
+  archivedCacheCursor = { dataVersion, revision: changes.revision };
+}
+
 export function getJobs() {
+  refreshMainJobsCache();
   return jobs;
 }
 
 export async function getJobsWithExistingMedia(options: { archived?: boolean } = {}) {
+  refreshMainJobsCache();
+  refreshArchivedJobsCache();
   await reconcileActualCreditsForStoredJobs();
   const archived = Boolean(options.archived);
   logMemory("before-media-scan");
@@ -197,7 +328,7 @@ export async function getJobsWithExistingMedia(options: { archived?: boolean } =
 }
 
 export function getJob(id: string) {
-  return jobs.find((job) => job.id === id);
+  return getJobs().find((job) => job.id === id);
 }
 
 export async function getJobFromAnySource(id: string, options: { archived?: boolean } = {}) {
@@ -214,6 +345,10 @@ let acceptingNewWork = true;
 // during a graceful shutdown. Already-running jobs are unaffected.
 export function pauseJobDispatch() {
   acceptingNewWork = false;
+  if (dispatchPollTimer) {
+    clearInterval(dispatchPollTimer);
+    dispatchPollTimer = undefined;
+  }
 }
 
 export function activeRunpodJobCount() {
@@ -221,20 +356,206 @@ export function activeRunpodJobCount() {
 }
 
 export function getQueueSnapshot() {
+  refreshMainJobsCache();
   const queuedJobs = jobs.filter((job) => job.status === "queued");
   const sendingJobs = jobs.filter((job) => job.status === "sending");
   const runningJobs = jobs.filter((job) => job.status === "running");
   const activeJobs = [...sendingJobs, ...runningJobs];
+  const sqlActiveJobs = jobRowLevelWrites && sqliteStore
+    ? sqliteStore.countActiveJobs()
+    : activeRunpodJobs;
 
   return {
     queued: queuedJobs.length,
     sending: sendingJobs.length,
     running: runningJobs.length,
     active: activeJobs.length,
-    runpodActive: activeRunpodJobs,
+    runpodActive: sqlActiveJobs,
     capacity: runpodJobConcurrency,
+    dispatcher: dispatcherLeaseSnapshot(),
     activeJobs: activeJobs.map(jobStatusSummary),
     waitingJobs: queuedJobs.slice(0, 5).map(jobStatusSummary),
+  };
+}
+
+function usesDispatcherCoordination() {
+  return isDispatcher() && jobRowLevelWrites && Boolean(sqliteStore);
+}
+
+function ownsDispatcherWork() {
+  if (!isDispatcher()) return false;
+  if (!usesDispatcherCoordination()) return true;
+  return hasCurrentDispatcherLease();
+}
+
+function initializeDispatcherCoordination() {
+  dispatcherLeaseHeld = false;
+  dispatcherLeaseWasTakeover = false;
+  if (usesDispatcherCoordination()) tryAcquireDispatcherLease();
+}
+
+function startDispatcherCoordination() {
+  if (!usesDispatcherCoordination()) return;
+
+  dispatchPollTimer = setInterval(() => {
+    if (!acceptingNewWork || !ensureDispatcherLease()) return;
+    void dispatchQueue();
+  }, dispatcherPollIntervalMs);
+  dispatchPollTimer.unref?.();
+
+  dispatcherHeartbeatTimer = setInterval(() => {
+    const acquired = maintainDispatcherLease();
+    if (acquired && acceptingNewWork) void dispatchQueue();
+  }, dispatcherLeaseHeartbeatMs);
+  dispatcherHeartbeatTimer.unref?.();
+
+  if (dispatcherWalCheckpointMs > 0) {
+    walCheckpointTimer = setInterval(() => {
+      if (!hasCurrentDispatcherLease()) return;
+      try {
+        sqliteStore?.checkpointWalPassive();
+      } catch (error) {
+        console.warn(`Passive job-store WAL checkpoint failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    }, dispatcherWalCheckpointMs);
+    walCheckpointTimer.unref?.();
+  }
+
+  if (dispatcherLeaseHeld && acceptingNewWork) void dispatchQueue();
+}
+
+function resumeAcknowledgedRunpodJobs() {
+  if (generationBackend !== "runpod" || !ownsDispatcherWork()) return;
+  for (const job of jobs) {
+    if (
+      !job.runpodJobId
+      || (job.status !== "sending" && job.status !== "running")
+      || inFlightJobIds.has(job.id)
+    ) continue;
+
+    activeRunpodJobs += 1;
+    inFlightJobIds.add(job.id);
+    void runRunpodJob(job).finally(() => {
+      inFlightJobIds.delete(job.id);
+      activeRunpodJobs = Math.max(0, activeRunpodJobs - 1);
+      void dispatchQueue();
+    });
+  }
+}
+
+function stopDispatcherCoordination(releaseLease: boolean) {
+  if (dispatchPollTimer) clearInterval(dispatchPollTimer);
+  if (dispatcherHeartbeatTimer) clearInterval(dispatcherHeartbeatTimer);
+  if (walCheckpointTimer) clearInterval(walCheckpointTimer);
+  dispatchPollTimer = undefined;
+  dispatcherHeartbeatTimer = undefined;
+  walCheckpointTimer = undefined;
+
+  if (releaseLease && dispatcherLeaseHeld) {
+    try {
+      sqliteStore?.releaseDispatcherLease(dispatcherOwnerId);
+    } catch (error) {
+      console.warn(`Could not release dispatcher lease: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+  dispatcherLeaseHeld = false;
+  dispatcherLeaseWasTakeover = false;
+}
+
+function maintainDispatcherLease() {
+  if (!usesDispatcherCoordination() || !sqliteStore) return false;
+  const wasHeld = hasCurrentDispatcherLease();
+  const now = Date.now();
+  if (wasHeld) {
+    const renewed = sqliteStore.renewDispatcherLease(dispatcherLease(now));
+    dispatcherLeaseHeld = renewed;
+    return false;
+  }
+  const acquired = tryAcquireDispatcherLease();
+  if (acquired) resumeAcknowledgedRunpodJobs();
+  return acquired;
+}
+
+function ensureDispatcherLease() {
+  if (!isDispatcher()) return false;
+  if (!usesDispatcherCoordination()) return true;
+  if (hasCurrentDispatcherLease()) return true;
+  const acquired = tryAcquireDispatcherLease();
+  if (acquired) resumeAcknowledgedRunpodJobs();
+  return acquired;
+}
+
+function hasCurrentDispatcherLease() {
+  if (!usesDispatcherCoordination() || !sqliteStore) return isDispatcher();
+  const now = Date.now();
+  const stored = sqliteStore.readDispatcherLease();
+  const held = stored?.ownerId === dispatcherOwnerId && stored.expiresAt > now;
+  dispatcherLeaseHeld = held;
+  return held;
+}
+
+function tryAcquireDispatcherLease() {
+  if (!usesDispatcherCoordination() || !sqliteStore) return false;
+  const now = Date.now();
+  const existing = sqliteStore.readDispatcherLease();
+  const replaceOwnerId = existing
+    && existing.ownerHost.toLowerCase() === dispatcherOwnerHost.toLowerCase()
+    && !processAppearsAlive(existing.ownerPid)
+    ? existing.ownerId
+    : undefined;
+  const acquired = sqliteStore.tryAcquireDispatcherLease({
+    ...dispatcherLease(now),
+    now,
+    replaceOwnerId,
+  });
+  const changedOwner = acquired && !dispatcherLeaseHeld;
+  if (changedOwner && existing && existing.ownerId !== dispatcherOwnerId) {
+    dispatcherLeaseWasTakeover = true;
+  }
+  dispatcherLeaseHeld = acquired;
+  if (changedOwner) console.log(`Dispatcher lease acquired by ${dispatcherOwnerId}.`);
+  return acquired;
+}
+
+function shouldNormalizeInterruptedJob(job: Job) {
+  if (!usesDispatcherCoordination() || !dispatcherLeaseWasTakeover) return true;
+  const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : Number.NaN;
+  return !Number.isFinite(startedAt) || startedAt <= Date.now() - runpodTimeoutMs;
+}
+
+function dispatcherLease(now: number) {
+  return {
+    ownerId: dispatcherOwnerId,
+    ownerPid: process.pid,
+    ownerHost: dispatcherOwnerHost,
+    heartbeatAt: now,
+    expiresAt: now + dispatcherLeaseTtlMs,
+  };
+}
+
+function processAppearsAlive(pid: number) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+  }
+}
+
+function dispatcherLeaseSnapshot() {
+  if (!jobRowLevelWrites || !sqliteStore) {
+    return { enabled: false, active: isDispatcher(), heldByThisProcess: isDispatcher() };
+  }
+  const lease = sqliteStore.readDispatcherLease();
+  const active = Boolean(lease && lease.expiresAt > Date.now());
+  return {
+    enabled: true,
+    active,
+    heldByThisProcess: active && lease?.ownerId === dispatcherOwnerId,
+    ownerId: lease?.ownerId,
+    heartbeatAt: lease?.heartbeatAt,
+    expiresAt: lease?.expiresAt,
   };
 }
 
@@ -370,18 +691,108 @@ function normalizeDurationSeconds(value: number | undefined, model: { supportedD
 }
 
 export async function cancelJob(jobId: string) {
-  const job = getJob(jobId);
-  if (!job || job.status === "completed" || job.status === "failed") return job;
-  job.status = "canceled";
-  job.completedAt = new Date().toISOString();
-  await persistUpsert(job);
+  let job: Job | undefined;
+
+  if (jobRowLevelWrites && sqliteStore) {
+    const updated = sqliteStore.applyToJob(jobId, (current) => {
+      if (isTerminalJobStatus(current.status)) return current;
+      current.cancelRequested = true;
+      return current;
+    });
+    job = updated ? mergeCancellationRequestIntoMemory(updated) : undefined;
+  } else {
+    job = getJob(jobId);
+    if (!job || isTerminalJobStatus(job.status)) return job;
+    job.cancelRequested = true;
+    await persistUpsert(job);
+  }
+
+  if (job && isDispatcher()) {
+    await dispatchQueue();
+  }
   return job;
+}
+
+function isTerminalJobStatus(status: Job["status"]) {
+  return status === "completed" || status === "failed" || status === "canceled";
+}
+
+function mergeCancellationRequestIntoMemory(updated: Job) {
+  const cached = getJob(updated.id);
+  if (!cached) {
+    jobs = [updated, ...jobs];
+    return updated;
+  }
+  cached.cancelRequested = updated.cancelRequested;
+  return cached;
+}
+
+// Dispatcher-side read of the request flag. Under the row-level SQLite path
+// this deliberately re-reads just the job row on every RunPod/Comfy poll tick,
+// so a request written by another process is observed without replacing the
+// in-flight object that the dispatcher is mutating across awaits.
+function cancellationRequested(job: Job) {
+  if (jobRowLevelWrites && sqliteStore) {
+    const stored = sqliteStore.loadById(job.id);
+    if (stored?.cancelRequested) job.cancelRequested = true;
+    return stored?.cancelRequested === true || stored?.status === "canceled";
+  }
+  return job.cancelRequested === true || job.status === "canceled";
+}
+
+// Only dispatcher-capable roles call this lifecycle transition. The SQLite
+// branch applies it to the latest row atomically so a concurrent API metadata
+// edit is preserved; the in-flight object is then updated in place.
+async function settleRequestedCancellation(job: Job) {
+  if (!isDispatcher() || !cancellationRequested(job)) return false;
+
+  let canceledRunpodStatus: string | undefined;
+  if (generationBackend === "runpod" && job.runpodJobId && ownsDispatcherWork()) {
+    try {
+      const canceled = await cancelComfyWorkflowOnRunpod(job.runpodJobId);
+      canceledRunpodStatus = canceled.status;
+    } catch (error) {
+      console.warn(`Could not cancel RunPod job ${job.runpodJobId}: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  if (jobRowLevelWrites && sqliteStore) {
+    const updated = sqliteStore.applyToJob(job.id, (current) => {
+      if (!current.cancelRequested || isTerminalJobStatus(current.status)) return current;
+      current.status = "canceled";
+      if (canceledRunpodStatus) current.runpodStatus = canceledRunpodStatus;
+      current.completedAt = current.completedAt ?? new Date().toISOString();
+      return current;
+    });
+    if (!updated) return false;
+    Object.assign(job, updated);
+    return updated.status === "canceled";
+  }
+
+  if (isTerminalJobStatus(job.status)) return job.status === "canceled";
+  job.status = "canceled";
+  if (canceledRunpodStatus) job.runpodStatus = canceledRunpodStatus;
+  job.completedAt = job.completedAt ?? new Date().toISOString();
+  await persistUpsert(job);
+  return true;
 }
 
 export async function archiveJob(jobId: string, userId: string) {
   const archivedAt = new Date().toISOString();
   const backendJob = getJob(jobId);
   if (backendJob) {
+    if (jobRowLevelWrites && sqliteStore) {
+      const updated = sqliteStore.applyToJob(jobId, (current) => {
+        assertJobCanBeArchived(current);
+        current.archivedAt = archivedAt;
+        current.archivedBy = userId;
+        return current;
+      });
+      if (!updated) return undefined;
+      Object.assign(backendJob, updated);
+      return backendJob;
+    }
+    assertJobCanBeArchived(backendJob);
     backendJob.archivedAt = archivedAt;
     backendJob.archivedBy = userId;
     await persistUpsert(backendJob);
@@ -395,6 +806,14 @@ export async function archiveJob(jobId: string, userId: string) {
   archivedMediaJobs = [archivedJob, ...archivedMediaJobs.filter((job) => job.id !== jobId)];
   await persistArchivedUpsert(archivedJob);
   return archivedJob;
+}
+
+function assertJobCanBeArchived(job: Job) {
+  if (isTerminalJobStatus(job.status)) return;
+  throw new BackendHttpError("Cancel the job and wait for it to stop before archiving it.", {
+    statusCode: 409,
+    code: "job_not_terminal",
+  });
 }
 
 export async function restoreArchivedJob(jobId: string) {
@@ -618,23 +1037,34 @@ function serializeResultMove<T>(operation: () => Promise<T>) {
 }
 
 async function dispatchQueue() {
-  if (dispatching || !acceptingNewWork) return;
+  if (!isDispatcher() || dispatching || !acceptingNewWork || !ensureDispatcherLease()) return;
+  refreshMainJobsCache();
   dispatching = true;
 
   try {
+    await failExpiredOrphanedRunpodJobs();
     if (generationBackend === "runpod") {
-      dispatchRunpodJobs();
+      await dispatchRunpodJobs();
       return;
     }
 
     while (true) {
-      const next = jobs.find((job) => job.status === "queued");
-      if (!next) return;
-
       const serverUrl = await acquireIdleServer();
       if (!serverUrl) return;
+      const next = claimNextJobForDispatch(Number.MAX_SAFE_INTEGER)
+        ?? (!jobRowLevelWrites || !sqliteStore ? jobs.find((job) => job.status === "queued") : undefined);
+      if (!next) {
+        releaseServer(serverUrl);
+        return;
+      }
+      if (await settleRequestedCancellation(next)) {
+        releaseServer(serverUrl);
+        continue;
+      }
 
+      inFlightJobIds.add(next.id);
       void runLocalComfyJob(next, serverUrl).finally(() => {
+        inFlightJobIds.delete(next.id);
         releaseServer(serverUrl);
         void dispatchQueue();
       });
@@ -644,22 +1074,68 @@ async function dispatchQueue() {
   }
 }
 
-function dispatchRunpodJobs() {
-  while (acceptingNewWork && activeRunpodJobs < runpodJobConcurrency) {
-    const next = jobs.find((job) => job.status === "queued");
+async function failExpiredOrphanedRunpodJobs() {
+  if (generationBackend !== "runpod") return;
+  const cutoff = Date.now() - runpodTimeoutMs;
+  const expired = jobs.filter((job) => {
+    if (inFlightJobIds.has(job.id) || (job.status !== "sending" && job.status !== "running")) return false;
+    const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : Number.NaN;
+    return !Number.isFinite(startedAt) || startedAt <= cutoff;
+  });
+
+  for (const job of expired) {
+    job.status = "failed";
+    job.completedAt = job.completedAt ?? new Date().toISOString();
+    job.errorMessage = job.errorMessage
+      ?? "The prior dispatcher stopped and the RunPod timeout elapsed before the job returned. Retry the job if needed.";
+    job.creditsUsed = job.creditsUsed ?? 0;
+    await persistUpsert(job);
+  }
+}
+
+async function dispatchRunpodJobs() {
+  const usesSqlClaims = jobRowLevelWrites && Boolean(sqliteStore);
+  while (acceptingNewWork && (usesSqlClaims || activeRunpodJobs < runpodJobConcurrency)) {
+    if (!ensureDispatcherLease()) return;
+    const next = usesSqlClaims
+      ? claimNextJobForDispatch(runpodJobConcurrency)
+      : jobs.find((job) => job.status === "queued");
     if (!next) return;
+    if (await settleRequestedCancellation(next)) continue;
 
     activeRunpodJobs += 1;
+    inFlightJobIds.add(next.id);
     void runRunpodJob(next).finally(() => {
+      inFlightJobIds.delete(next.id);
       activeRunpodJobs = Math.max(0, activeRunpodJobs - 1);
       void dispatchQueue();
     });
   }
 }
 
+function claimNextJobForDispatch(concurrencyLimit: number) {
+  if (!jobRowLevelWrites || !sqliteStore) return undefined;
+  const claimed = sqliteStore.claimNextQueuedJob(
+    new Date().toISOString(),
+    concurrencyLimit,
+    usesDispatcherCoordination() ? dispatcherOwnerId : undefined,
+  );
+  if (!claimed) return undefined;
+
+  const cached = jobs.find((job) => job.id === claimed.id);
+  if (cached) {
+    Object.assign(cached, claimed);
+    return cached;
+  }
+  jobs = [claimed, ...jobs];
+  return claimed;
+}
+
 async function runRunpodJob(job: Job) {
   logMemory("job-start", job.id);
+  if (await settleRequestedCancellation(job)) return;
   const project = getProject(job.projectId);
+  let outputProject = project;
   const model = getWorkflowModel(job.modelId);
   if (!project || !model) {
     job.status = "failed";
@@ -670,18 +1146,23 @@ async function runRunpodJob(job: Job) {
 
   const endBillableOperation = beginRunpodBillableOperation();
   const activityBaseline = runpodActivityBaseline();
+  let dispatcherLeaseLost = false;
   try {
-    job.status = "sending";
-    job.startedAt = new Date().toISOString();
-    await persistUpsert(job);
+    if (await settleRequestedCancellation(job)) return;
+    if (job.status !== "sending") {
+      job.status = "sending";
+      job.startedAt = new Date().toISOString();
+      await persistUpsert(job);
+    }
 
-    job.creditBalanceBefore = await captureCreditBalanceSnapshot();
+    if (!job.runpodJobId) job.runpodSubmissionState = "preparing";
+    job.creditBalanceBefore = job.creditBalanceBefore ?? await captureCreditBalanceSnapshot();
     if (job.creditBalanceBefore) {
       await persistUpsert(job);
     }
 
     const folders = await ensureJobFolders(project, job.id);
-    const projectFolderName = path.basename(project.folderPath);
+    const projectFolder = projectFolderName(project.folderPath);
     const runpodImages = await materializeRunpodInputImages(job, model);
     const runpodVideo = await materializeRunpodInputVideo(job, model, folders.input);
     const workflow = await loadWorkflowForRunpod(
@@ -699,21 +1180,39 @@ async function runRunpodJob(job: Job) {
         workflowOptions: job.workflowOptions,
         userId: job.userId,
       },
-      projectFolderName,
+      projectFolder,
       runpodImages.imageNames,
     );
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
+    if (await settleRequestedCancellation(job)) return;
     job.status = "running";
+    if (!job.runpodJobId) job.runpodSubmissionState = "submitting";
     await persistUpsert(job);
 
     logMemory("before-runpod-request", job.id);
-    const result = await runComfyWorkflowOnRunpod({
-      workflow,
-      images: runpodImages.images,
-      videos: runpodVideo?.videos ?? [],
-    });
+    const shouldStopRunpodWork = () => cancellationRequested(job) || !ownsDispatcherWork();
+    const result = job.runpodJobId
+      ? await resumeComfyWorkflowOnRunpod({
+          jobId: job.runpodJobId,
+          shouldCancel: shouldStopRunpodWork,
+        })
+      : await runComfyWorkflowOnRunpod({
+          workflow,
+          images: runpodImages.images,
+          videos: runpodVideo?.videos ?? [],
+          shouldCancel: shouldStopRunpodWork,
+          onSubmitted: async ({ jobId, status }) => {
+            if (!ownsDispatcherWork()) throw new DispatcherLeaseLostError();
+            job.runpodJobId = jobId;
+            job.runpodStatus = status;
+            job.runpodSubmissionState = "submitted";
+            await persistUpsert(job);
+          },
+        });
     logMemory("after-runpod-request", job.id);
+    if (!ownsDispatcherWork()) throw new DispatcherLeaseLostError();
+    if (await settleRequestedCancellation(job)) return;
     job.runpodJobId = result.jobId;
     job.runpodStatus = result.status;
     job.generatedPrompt = result.generatedText;
@@ -732,7 +1231,11 @@ async function runRunpodJob(job: Job) {
     job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
 
     logMemory("before-runpod-download", job.id);
-    const artifacts = await persistServerlessArtifacts({ project, job, model, media, selectedMedia });
+    // A project may be renamed while RunPod is processing. Resolve its shared
+    // row again before writing outputs so a resumed dispatcher never recreates
+    // the old project path.
+    outputProject = getProject(job.projectId) ?? project;
+    const artifacts = await persistServerlessArtifacts({ project: outputProject, job, model, media, selectedMedia });
     logMemory("after-runpod-download", job.id);
     job.resultUrls = artifacts.resultUrls;
     job.thumbnailUrls = artifacts.thumbnailUrls;
@@ -741,7 +1244,7 @@ async function runRunpodJob(job: Job) {
 
     if (isCountedCreditUsage(creditUsage)) {
       const syncResult = await syncServerlessCreditUsage({
-        project,
+        project: outputProject,
         job,
         model,
         creditUsage,
@@ -752,6 +1255,7 @@ async function runRunpodJob(job: Job) {
       }
     }
 
+    if (await settleRequestedCancellation(job)) return;
     job.status = "completed";
     job.completedAt = new Date().toISOString();
     if (jobRemoteMediaEntries(job).length) {
@@ -759,10 +1263,15 @@ async function runRunpodJob(job: Job) {
       // signed URLs are still valid.
       scheduleRemoteResultRecovery();
     }
-    await incrementProjectJobCount(job.projectId);
     logMemory("job-finished", job.id);
   } catch (error) {
-    if (job.status !== "canceled") {
+    if (error instanceof DispatcherLeaseLostError || (error instanceof RunpodComfyCanceledError && !ownsDispatcherWork())) {
+      dispatcherLeaseLost = true;
+      console.warn(`Dispatcher lease lost while handling ${job.id}; the current lease owner will resume it.`);
+      return;
+    }
+    const canceled = await settleRequestedCancellation(job);
+    if (!canceled && job.status !== "canceled") {
       job.status = "failed";
       job.completedAt = new Date().toISOString();
       await captureRunpodPostBalance(job, activityBaseline);
@@ -781,11 +1290,20 @@ async function runRunpodJob(job: Job) {
         applyAccountingCreditsToJob(job);
       }
     }
-    logMemory("job-failed", job.id);
+    logMemory(canceled || error instanceof RunpodComfyCanceledError ? "job-canceled" : "job-failed", job.id);
   } finally {
     endBillableOperation();
-    await persistUpsert(job);
-    await saveJobMetadata(job, project);
+    if (!dispatcherLeaseLost) {
+      await persistUpsert(job);
+      await saveJobMetadata(job, getProject(job.projectId) ?? outputProject);
+    }
+  }
+}
+
+class DispatcherLeaseLostError extends Error {
+  constructor() {
+    super("Dispatcher lease lost.");
+    this.name = "DispatcherLeaseLostError";
   }
 }
 
@@ -838,6 +1356,7 @@ function applyAccountingCreditsToJob(job: Job) {
 }
 
 async function runLocalComfyJob(job: Job, serverUrl: string) {
+  if (await settleRequestedCancellation(job)) return;
   const project = getProject(job.projectId);
   const model = getWorkflowModel(job.modelId);
   if (!project || !model) {
@@ -848,14 +1367,15 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
   }
 
   try {
+    if (await settleRequestedCancellation(job)) return;
     job.status = "sending";
     job.comfyServerUrl = serverUrl;
     job.startedAt = new Date().toISOString();
     await persistUpsert(job);
 
     const folders = await ensureJobFolders(project, job.id);
-    await ensureWorkerProjectFolder(serverUrl, project.folderName ?? path.basename(project.folderPath));
-    const projectFolderName = path.basename(project.folderPath);
+    await ensureWorkerProjectFolder(serverUrl, project.folderName ?? projectFolderName(project.folderPath));
+    const projectFolder = projectFolderName(project.folderPath);
     const workflow = await loadWorkflowPrompt(
       model,
       {
@@ -869,11 +1389,12 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
         workflowOptions: job.workflowOptions,
         userId: job.userId,
       },
-      projectFolderName,
+      projectFolder,
       serverUrl,
     );
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
+    if (await settleRequestedCancellation(job)) return;
 
     const queued = await queuePrompt(serverUrl, workflow, `momi-${job.id}`);
     job.comfyPromptId = queued.prompt_id;
@@ -886,12 +1407,13 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
     job.resultUrls = persistedResultUrls;
     job.thumbnailUrls = persistedResultUrls.slice(0, 1);
     job.outputResolution = await detectFirstPersistedResultResolution(persistedResultUrls, job.outputType);
+    if (await settleRequestedCancellation(job)) return;
     job.status = "completed";
     job.completedAt = new Date().toISOString();
-    await incrementProjectJobCount(job.projectId);
     await reconcileActualCreditsForStoredJobs();
   } catch (error) {
-    if (job.status !== "canceled") {
+    const canceled = await settleRequestedCancellation(job);
+    if (!canceled && job.status !== "canceled") {
       job.status = "failed";
       job.errorMessage = error instanceof Error ? error.message : "Unknown ComfyUI job error";
       job.completedAt = new Date().toISOString();
@@ -907,7 +1429,7 @@ async function waitForHistory(serverUrl: string, promptId: string, job: Job) {
   const intervalMs = Number(process.env.COMFY_HISTORY_INTERVAL_MS ?? 2500);
 
   for (let index = 0; index < maxChecks; index += 1) {
-    if (job.status === "canceled") throw new Error("Job canceled.");
+    if (await settleRequestedCancellation(job)) throw new Error("Job canceled.");
     const history = await getHistory(serverUrl, promptId).catch(() => ({}));
     if (history && Object.keys(history).length) {
       const promptHistory = getPromptHistory(history, promptId);
@@ -1013,6 +1535,7 @@ let remoteRecoveryRunning = false;
 let remoteRecoveryTimer: NodeJS.Timeout | undefined;
 
 export function scheduleRemoteResultRecovery(delayMs = 60_000) {
+  if (!isDispatcher()) return;
   if (remoteRecoveryTimer) return;
   remoteRecoveryTimer = setTimeout(() => {
     remoteRecoveryTimer = undefined;
@@ -1022,6 +1545,8 @@ export function scheduleRemoteResultRecovery(delayMs = 60_000) {
 }
 
 export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) {
+  if (!isDispatcher()) return { recovered: 0, failed: 0 };
+  refreshMainJobsCache();
   if (remoteRecoveryRunning) return { recovered: 0, failed: 0 };
   remoteRecoveryRunning = true;
   try {
@@ -1520,8 +2045,8 @@ async function ensureWorkerProjectFolder(serverUrl: string, projectFolderName: s
 // whole-array replaceAll. The in-memory array is still mutated by the caller
 // (unchanged); only the persistence call differs. With the flag off (default),
 // these delegate to persistJobs()/persistArchivedMediaJobs(), so behavior is
-// byte-identical to today. insertJob is an upsert-by-id, so it serves both
-// create and update; it keeps the store row in lockstep with the array.
+// byte-identical to today. Existing rows use an atomic read-modify-write so
+// dispatcher persistence cannot erase an API-owned cancellation request.
 async function persistUpsert(job: Job): Promise<void> {
   if (jobRowLevelWrites && sqliteStore) {
     // Respect array membership so a stale holder can't resurrect a row that was
@@ -1531,7 +2056,28 @@ async function persistUpsert(job: Job): Promise<void> {
     // mirrors the flag-off invariant that replaceAll's prune provides
     // ("removed from the array ⇒ removed from the store").
     if (jobs.some((existing) => existing.id === job.id)) {
-      sqliteStore.insertJob(job);
+      const updated = sqliteStore.applyToJob(job.id, (current) => {
+        const next = { ...job };
+        // cancelRequested is API-owned. Preserve a concurrent request across
+        // dispatcher writes, and never let a stale runner's finally block
+        // resurrect a row after cancellation has been settled.
+        if (current.cancelRequested) next.cancelRequested = true;
+        if (current.cancelRequested && isDispatcher() && !isTerminalJobStatus(current.status)) {
+          next.status = "canceled";
+          next.completedAt = current.completedAt ?? new Date().toISOString();
+        } else if (current.cancelRequested && current.status === "canceled") {
+          next.status = "canceled";
+          next.completedAt = current.completedAt ?? next.completedAt;
+        }
+        return next;
+      });
+      if (updated) {
+        job.cancelRequested = updated.cancelRequested;
+        job.status = updated.status;
+        job.completedAt = updated.completedAt;
+      } else {
+        sqliteStore.insertJob(job);
+      }
     } else {
       sqliteStore.deleteJob(job.id);
     }
@@ -1623,10 +2169,25 @@ export async function flushPersistedJobs() {
 // Close the SQLite store connection (if open) so file handles are released.
 // Called on graceful shutdown and by tests for deterministic cleanup.
 export function closeJobStore() {
+  // A clean, fully-drained shutdown can release immediately. If SQL still has
+  // active jobs, leave the lease row to expire so the replacement recognizes
+  // a takeover and keeps those jobs inside the global cap for their timeout.
+  let releaseLease = true;
+  if (dispatcherLeaseHeld && sqliteStore) {
+    try {
+      releaseLease = sqliteStore.countActiveJobs() === 0;
+    } catch {
+      releaseLease = false;
+    }
+  }
+  stopDispatcherCoordination(releaseLease);
   sqliteStore?.close();
   sqliteStore = undefined;
+  jobsCacheCursor = undefined;
   archivedStore?.close();
   archivedStore = undefined;
+  archivedCacheCursor = undefined;
+  inFlightJobIds.clear();
 }
 
 async function persistArchivedMediaJobs() {
@@ -1645,6 +2206,8 @@ let lastReconcileAt = 0;
 let reconcileInFlight: Promise<void> | undefined;
 
 function reconcileActualCreditsForStoredJobs() {
+  if (!isDispatcher()) return Promise.resolve();
+  refreshMainJobsCache();
   if (reconcileInFlight) return reconcileInFlight;
   if (Date.now() - lastReconcileAt < reconcileThrottleMs) return Promise.resolve();
 
