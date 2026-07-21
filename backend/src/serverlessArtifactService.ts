@@ -3,7 +3,8 @@ import path from "node:path";
 import { getUserById } from "./authService.js";
 import { runpodOutputMaxBytes } from "./config.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
-import { relativePathFromOutputRoot, resolveProjectOutputRoot } from "./projectMetadataService.js";
+import { relativePathFromOutputRoot, resolveProjectOutputRoot, withProjectMutationLock } from "./projectMetadataService.js";
+import { projectFolderName } from "./projectFolderName.js";
 import { assertManifestRecordSafe, ensureJobFolders, fallbackProjectFolder, readJsonFile, safeSegment, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache } from "./mediaService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
@@ -59,8 +60,6 @@ type BrickProjectFolders = {
   logsRoot: string;
 };
 
-let versionReservation = Promise.resolve();
-
 export async function persistServerlessArtifacts({
   project,
   job,
@@ -114,11 +113,13 @@ async function persistOneArtifact(
 ): Promise<PersistedServerlessArtifact> {
   const assetType: AssetType = media.isVideo ? "video" : "image";
   let mediaSource: MediaSource | undefined;
+  let reservationPath: string | undefined;
 
   try {
     mediaSource = await openMediaSource(media.url, context.fetchImpl);
     const extension = resultExtension(media, mediaSource.contentType, assetType);
     const target = await reserveArtifactTarget(context.project, context.job, context.model, context.folders, assetType, extension);
+    reservationPath = target.reservationPath;
     await mediaSource.writeTo(target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
 
@@ -164,6 +165,10 @@ async function persistOneArtifact(
       remoteUrl: safeRemoteUrl(media),
       error: error instanceof Error ? error.message : "Could not persist serverless output media.",
     };
+  } finally {
+    if (reservationPath) {
+      await fs.rm(reservationPath, { force: true }).catch(() => undefined);
+    }
   }
 }
 
@@ -257,47 +262,64 @@ async function reserveArtifactTarget(
   assetType: AssetType,
   extension: string,
 ) {
-  const projectName = path.basename(folders.projectRoot);
-  const date = todayCompact();
-  const modelPrefix = normalizeModelPrefix(model.name || model.id);
-  const prefixToken = normalizeModelPrefix(modelPrefix);
-  const cameraNumber = normalizedSaveNumber(job.workflowOptions?.save?.cameraNumber ?? job.workflowOptions?.save?.shotNumber);
-  const shotNumber = normalizedSaveNumber(job.workflowOptions?.save?.shotNumber ?? job.workflowOptions?.save?.cameraNumber);
-  const cameraToken = normalizeCameraNumber(cameraNumber);
-  const shotToken = normalizeShotNumber(shotNumber);
-  const versionItem = assetType === "image"
-    ? [prefixToken, cameraToken].filter(Boolean).join("|") || cameraToken
-    : [prefixToken, shotToken].filter(Boolean).join("|") || shotToken;
-  const versionKey = `${assetType}|${projectName}|${versionItem}`;
-  const scopedVersionKey = job.folderId ? `${assetType}|${projectName}|${job.folderId}|${versionItem}` : versionKey;
+  return withProjectMutationLock(project, async () => {
+    const projectName = projectFolderName(folders.projectRoot);
+    const date = todayCompact();
+    const modelPrefix = normalizeModelPrefix(model.name || model.id);
+    const prefixToken = normalizeModelPrefix(modelPrefix);
+    const cameraNumber = normalizedSaveNumber(job.workflowOptions?.save?.cameraNumber ?? job.workflowOptions?.save?.shotNumber);
+    const shotNumber = normalizedSaveNumber(job.workflowOptions?.save?.shotNumber ?? job.workflowOptions?.save?.cameraNumber);
+    const cameraToken = normalizeCameraNumber(cameraNumber);
+    const shotToken = normalizeShotNumber(shotNumber);
+    const versionItem = assetType === "image"
+      ? [prefixToken, cameraToken].filter(Boolean).join("|") || cameraToken
+      : [prefixToken, shotToken].filter(Boolean).join("|") || shotToken;
+    const versionKey = `${assetType}|${projectName}|${versionItem}`;
+    const scopedVersionKey = job.folderId ? `${assetType}|${projectName}|${job.folderId}|${versionItem}` : versionKey;
 
-  for (let attempts = 0; attempts < 1000; attempts += 1) {
-    const version = await reserveNextVersion(folders.metadataRoot, scopedVersionKey);
-    const filePath = assetType === "image"
-      ? path.join(folders.imagesRoot, date, `${imageStem(date, projectName, cameraToken, version, modelPrefix)}${extension}`)
-      : path.join(folders.videosRoot, shotToken, `${sequenceStem(date, projectName, shotNumber, version, modelPrefix)}${extension}`);
-
-    if (!(await fileExists(filePath))) {
+    for (let attempts = 0; attempts < 1000; attempts += 1) {
+      const version = await reserveNextVersion(folders.metadataRoot, scopedVersionKey);
+      const filePath = assetType === "image"
+        ? path.join(folders.imagesRoot, date, `${imageStem(date, projectName, cameraToken, version, modelPrefix)}${extension}`)
+        : path.join(folders.videosRoot, shotToken, `${sequenceStem(date, projectName, shotNumber, version, modelPrefix)}${extension}`);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      return { filePath, version, modelPrefix, cameraToken, cameraNumber, shotToken, shotNumber };
+      const reservationPath = `${filePath}.momi-reservation`;
+      let reservation: fs.FileHandle | undefined;
+      try {
+        reservation = await fs.open(reservationPath, "wx");
+        await reservation.writeFile(JSON.stringify({ jobId: job.id, createdAt: new Date().toISOString() }), "utf8");
+        if (await fileExists(filePath)) {
+          await reservation.close();
+          reservation = undefined;
+          await fs.rm(reservationPath, { force: true });
+          continue;
+        }
+        await reservation.close();
+        reservation = undefined;
+        return { filePath, reservationPath, version, modelPrefix, cameraToken, cameraNumber, shotToken, shotNumber };
+      } catch (error) {
+        await reservation?.close().catch(() => undefined);
+        const code = typeof error === "object" && error && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "";
+        if (code === "EEXIST") continue;
+        await fs.rm(reservationPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
     }
-  }
 
-  throw new Error("Could not reserve a unique Brick output filename.");
+    throw new Error("Could not reserve a unique Brick output filename.");
+  });
 }
 
 async function reserveNextVersion(metadataRoot: string, key: string) {
-  const reservation = versionReservation.then(async () => {
-    const versionsPath = path.join(metadataRoot, "latest_versions.json");
-    const versions = await readJsonFile<Record<string, unknown>>(versionsPath, {});
-    const current = Number(versions[key] ?? 0);
-    const next = Number.isFinite(current) ? Math.max(0, Math.floor(current)) + 1 : 1;
-    versions[key] = next;
-    await writeJsonFile(versionsPath, versions);
-    return next;
-  });
-  versionReservation = reservation.then(() => undefined, () => undefined);
-  return reservation;
+  const versionsPath = path.join(metadataRoot, "latest_versions.json");
+  const versions = await readJsonFile<Record<string, unknown>>(versionsPath, {});
+  const current = Number(versions[key] ?? 0);
+  const next = Number.isFinite(current) ? Math.max(0, Math.floor(current)) + 1 : 1;
+  versions[key] = next;
+  await writeJsonFile(versionsPath, versions);
+  return next;
 }
 
 function buildManifestRecord({
@@ -333,7 +355,7 @@ function buildManifestRecord({
 }) {
   const user = getUserById(job.userId);
   const userName = user?.displayName || user?.name || user?.username || job.userId;
-  const projectName = path.basename(project.folderPath || fallbackProjectFolder(project));
+  const projectName = projectFolderName(project.folderPath || fallbackProjectFolder(project));
   const creditUsage = job.creditUsage;
   const creditsUsed = creditUsage?.total_estimated_credits ?? job.creditsUsed ?? 0;
   const resolution = resolutionText(job);

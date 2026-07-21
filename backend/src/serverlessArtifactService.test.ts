@@ -58,6 +58,92 @@ test("serverless video output under images is mirrored into Brick video folders 
   assert.equal(versions["video|1234_TestOffice_TestProject|kling-v3-video|SHOT_0007"], 1);
 });
 
+test("dispatcher failover reserves unique versions while an older write is paused", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "momi-serverless-failover-"));
+  const projectFolder = path.join(root, "1234_TestOffice_TestProject");
+  const project = makeProject(projectFolder);
+  const model = makeModel();
+  const oldJob = { ...makeJob(project, model), id: "job-old", runpodJobId: "rp-old" };
+  const newJob = { ...makeJob(project, model), id: "job-new", runpodJobId: "rp-new" };
+  const oldMedia = videoMedia("https://cdn.example/old.mp4");
+  const newMedia = videoMedia("https://cdn.example/new.mp4");
+  let releaseOldWrite: (() => void) | undefined;
+
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url).includes("old.mp4")) {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          releaseOldWrite = () => {
+            controller.enqueue(Buffer.from("old-video"));
+            controller.close();
+          };
+        },
+      });
+      return new Response(body, { headers: { "content-type": "video/mp4" } });
+    }
+    return new Response(Buffer.from("new-video"), { headers: { "content-type": "video/mp4" } });
+  };
+
+  const oldPersist = persistServerlessArtifacts({
+    project,
+    job: oldJob,
+    model,
+    media: [oldMedia],
+    selectedMedia: [oldMedia],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+  await waitForReservation(projectFolder);
+
+  const newResult = await persistServerlessArtifacts({
+    project,
+    job: newJob,
+    model,
+    media: [newMedia],
+    selectedMedia: [newMedia],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+  releaseOldWrite?.();
+  const oldResult = await oldPersist;
+
+  const oldPath = mediaPathFromUrl(oldResult.resultUrls[0]);
+  const newPath = mediaPathFromUrl(newResult.resultUrls[0]);
+  assert.notEqual(oldPath, newPath);
+  assert.match(oldPath, /_v001\.mp4$/);
+  assert.match(newPath, /_v002\.mp4$/);
+  assert.equal(await fs.readFile(oldPath, "utf8"), "old-video");
+  assert.equal(await fs.readFile(newPath, "utf8"), "new-video");
+
+  const versions = JSON.parse(await fs.readFile(path.join(projectFolder, "metadata", "latest_versions.json"), "utf8"));
+  assert.equal(versions["video|1234_TestOffice_TestProject|kling-v3-video|SHOT_0007"], 2);
+  assert.equal((await recursiveFiles(projectFolder)).some((filePath) => filePath.endsWith(".momi-reservation")), false);
+});
+
+function videoMedia(url: string): RunpodMediaResult {
+  return {
+    url,
+    filename: path.basename(new URL(url).pathname),
+    source: "images",
+    type: "s3_url",
+    isVideo: true,
+  };
+}
+
+async function waitForReservation(root: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if ((await recursiveFiles(root)).some((filePath) => filePath.endsWith(".momi-reservation"))) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for the first artifact reservation.");
+}
+
+async function recursiveFiles(root: string): Promise<string[]> {
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  return (await Promise.all(entries.map(async (entry) => {
+    const fullPath = path.join(root, entry.name);
+    return entry.isDirectory() ? recursiveFiles(fullPath) : [fullPath];
+  }))).flat();
+}
+
 function mediaPathFromUrl(value: string) {
   const url = new URL(value, "http://127.0.0.1");
   const filePath = url.searchParams.get("path");
