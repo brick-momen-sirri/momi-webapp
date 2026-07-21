@@ -8,6 +8,8 @@ import {
   type ScryptOptions,
 } from "node:crypto";
 import {
+  appStateDriver,
+  appStateSqlitePath,
   authSessionDays,
   defaultAdminEmail,
   defaultAdminPassword,
@@ -15,6 +17,7 @@ import {
   sessionsStorePath,
   usersStorePath,
 } from "./config.js";
+import { openSqliteAuthStore, type SqliteAuthStore } from "./sqliteAuthStore.js";
 import { readJsonFile, writeJsonFile } from "./storageService.js";
 import type { SessionRecord, StoredUser, User, UserRole } from "./types.js";
 
@@ -58,30 +61,56 @@ const sessionTtlMs = Math.max(1, authSessionDays) * 24 * 60 * 60 * 1000;
 
 let users: StoredUser[] = [];
 let sessions: SessionRecord[] = [];
+let sqliteAuthStore: SqliteAuthStore | undefined;
 
 export async function loadAuthData() {
-  users = (await readJsonFile<StoredUser[]>(usersStorePath, [])).map(normalizeStoredUser).filter(Boolean) as StoredUser[];
-  sessions = (await readJsonFile<SessionRecord[]>(sessionsStorePath, [])).filter(isUsableSession);
+  sqliteAuthStore?.close();
+  sqliteAuthStore = undefined;
+  const storedUsers = (await readJsonFile<StoredUser[]>(usersStorePath, []))
+    .map(normalizeStoredUser)
+    .filter(Boolean) as StoredUser[];
+  const storedSessions = (await readJsonFile<SessionRecord[]>(sessionsStorePath, [])).filter(isUsableSession);
+
+  if (appStateDriver === "sqlite") {
+    sqliteAuthStore = openSqliteAuthStore(appStateSqlitePath);
+    const migrated = sqliteAuthStore.migrateFromJsonIfNeeded(storedUsers, storedSessions);
+    if (migrated && (storedUsers.length || storedSessions.length)) {
+      console.log(`Migrated ${storedUsers.length} users and ${storedSessions.length} sessions into app-state SQLite.`);
+    }
+    users = [];
+    sessions = [];
+  } else {
+    users = storedUsers;
+    sessions = storedSessions;
+  }
+
   await ensureDefaultAdmin();
-  await persistUsers();
-  await persistSessions();
+  if (!sqliteAuthStore) {
+    await persistUsers();
+    await persistSessions();
+  }
+}
+
+export function closeAuthStore() {
+  sqliteAuthStore?.close();
+  sqliteAuthStore = undefined;
 }
 
 export function listUsers(options: { includeDisabled?: boolean } = {}) {
-  return users
+  return authUsers()
     .filter((user) => options.includeDisabled || user.active)
     .map(toPublicUser)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function getUserById(userId: string) {
-  const user = users.find((item) => item.id === userId);
+  const user = sqliteAuthStore?.loadUserById(userId) ?? users.find((item) => item.id === userId);
   return user ? toPublicUser(user) : undefined;
 }
 
 export async function login(identifier: string, password: string): Promise<LoginResult> {
   const normalizedIdentifier = normalizeIdentifier(identifier);
-  const user = users.find((item) => {
+  const user = sqliteAuthStore?.loadUserByIdentifier(normalizedIdentifier) ?? users.find((item) => {
     return item.email === normalizedIdentifier || normalizeUsername(item.username) === normalizeUsername(normalizedIdentifier);
   });
 
@@ -92,15 +121,23 @@ export async function login(identifier: string, password: string): Promise<Login
   const token = randomToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + sessionTtlMs).toISOString();
+  const session: SessionRecord = {
+    id: `ses_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`,
+    userId: user.id,
+    tokenHash: hashToken(token),
+    createdAt: now.toISOString(),
+    expiresAt,
+    lastUsedAt: now.toISOString(),
+  };
+
+  if (sqliteAuthStore) {
+    const updated = sqliteAuthStore.recordLogin(user.id, user.passwordHash, session);
+    if (!updated) throw new Error("Invalid email or password.");
+    return { token, expiresAt, user: toPublicUser(updated) };
+  }
+
   sessions = [
-    {
-      id: `ses_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`,
-      userId: user.id,
-      tokenHash: hashToken(token),
-      createdAt: now.toISOString(),
-      expiresAt,
-      lastUsedAt: now.toISOString(),
-    },
+    session,
     ...sessions.filter((session) => session.userId !== user.id || new Date(session.expiresAt).getTime() > now.getTime()),
   ];
   user.lastLoginAt = now.toISOString();
@@ -113,6 +150,10 @@ export async function login(identifier: string, password: string): Promise<Login
 export async function logout(token: string | undefined) {
   if (!token) return;
   const tokenHash = hashToken(token);
+  if (sqliteAuthStore) {
+    sqliteAuthStore.deleteSessionByTokenHash(tokenHash);
+    return;
+  }
   const before = sessions.length;
   sessions = sessions.filter((session) => session.tokenHash !== tokenHash);
   if (sessions.length !== before) {
@@ -124,6 +165,23 @@ export async function getAuthenticatedUser(token: string | undefined) {
   if (!token) return undefined;
   const now = Date.now();
   const tokenHash = hashToken(token);
+  if (sqliteAuthStore) {
+    const nowIso = new Date(now).toISOString();
+    const session = sqliteAuthStore.loadSessionByTokenHash(tokenHash, nowIso);
+    if (!session) return undefined;
+    const user = sqliteAuthStore.loadUserById(session.userId);
+    if (!user || !user.active) {
+      sqliteAuthStore.deleteSessionByTokenHash(tokenHash);
+      return undefined;
+    }
+    sqliteAuthStore.touchSession(
+      tokenHash,
+      nowIso,
+      new Date(now - 60_000).toISOString(),
+    );
+    return toPublicUser(user);
+  }
+
   let changed = false;
   sessions = sessions.filter((session) => {
     const valid = new Date(session.expiresAt).getTime() > now;
@@ -150,24 +208,15 @@ export async function getAuthenticatedUser(token: string | undefined) {
 }
 
 export async function createUser(input: CreateUserInput) {
-  const normalized = validateCreateUser(input);
-  const now = new Date().toISOString();
-  const user: StoredUser = {
-    id: input.id ?? `usr_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
-    email: normalized.email,
-    username: normalized.username,
-    name: normalized.displayName,
-    displayName: normalized.displayName,
-    passwordHash: await hashPassword(input.password),
-    role: input.role ?? "user",
-    active: input.active ?? true,
-    avatar: initialsFor(normalized.displayName),
-    avatarColor: safeAvatarColor(input.avatarColor),
-    profileImageUrl: safeOptionalString(input.profileImageUrl, 250000),
-    pinnedProjectIds: sanitizePinnedProjectIds(input.pinnedProjectIds),
-    createdAt: now,
-    updatedAt: now,
-  };
+  const user = await buildStoredUser(input);
+  if (sqliteAuthStore) {
+    try {
+      sqliteAuthStore.insertUser(user);
+    } catch (error) {
+      throwIdentityConstraint(error);
+    }
+    return toPublicUser(user);
+  }
   users = [user, ...users];
   await persistUsers();
   return toPublicUser(user);
@@ -177,19 +226,28 @@ export async function updateOwnProfile(
   userId: string,
   updates: Pick<UpdateUserInput, "name" | "displayName" | "avatarColor" | "profileImageUrl">,
 ) {
+  if (sqliteAuthStore) {
+    const updated = sqliteAuthStore.applyToUser(userId, (user) => {
+      applyOwnProfileUpdates(user, updates);
+    });
+    if (!updated) throw new Error("User not found.");
+    return toPublicUser(updated);
+  }
   const user = findStoredUser(userId);
-  const displayName = safeDisplayName(updates.displayName ?? updates.name ?? user.displayName);
-  user.displayName = displayName;
-  user.name = displayName;
-  user.avatar = initialsFor(displayName);
-  if (updates.avatarColor !== undefined) user.avatarColor = safeAvatarColor(updates.avatarColor);
-  if (updates.profileImageUrl !== undefined) user.profileImageUrl = safeOptionalString(updates.profileImageUrl, 250000);
-  user.updatedAt = new Date().toISOString();
+  applyOwnProfileUpdates(user, updates);
   await persistUsers();
   return toPublicUser(user);
 }
 
 export async function updatePinnedProjects(userId: string, projectIds: string[]) {
+  if (sqliteAuthStore) {
+    const updated = sqliteAuthStore.applyToUser(userId, (user) => {
+      user.pinnedProjectIds = sanitizePinnedProjectIds(projectIds);
+      user.updatedAt = new Date().toISOString();
+    });
+    if (!updated) throw new Error("User not found.");
+    return toPublicUser(updated);
+  }
   const user = findStoredUser(userId);
   user.pinnedProjectIds = sanitizePinnedProjectIds(projectIds);
   user.updatedAt = new Date().toISOString();
@@ -198,7 +256,29 @@ export async function updatePinnedProjects(userId: string, projectIds: string[])
 }
 
 export async function updateUser(userId: string, input: UpdateUserInput) {
+  if (sqliteAuthStore) {
+    try {
+      const updated = sqliteAuthStore.applyToUser(userId, (user) => {
+        applyUserUpdates(user, input);
+      }, { revokeSessions: input.active === false });
+      if (!updated) throw new Error("User not found.");
+      return toPublicUser(updated);
+    } catch (error) {
+      throwIdentityConstraint(error);
+    }
+  }
+
   const user = findStoredUser(userId);
+  applyUserUpdates(user, input);
+  if (input.active === false) {
+    sessions = sessions.filter((session) => session.userId !== user.id);
+    await persistSessions();
+  }
+  await persistUsers();
+  return toPublicUser(user);
+}
+
+function applyUserUpdates(user: StoredUser, input: UpdateUserInput) {
   if (input.email !== undefined) {
     const email = normalizeEmail(input.email);
     if (!email) throw new Error("Enter a valid email address.");
@@ -222,16 +302,10 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
   }
   if (input.active !== undefined) {
     user.active = Boolean(input.active);
-    if (!user.active) {
-      sessions = sessions.filter((session) => session.userId !== user.id);
-      await persistSessions();
-    }
   }
   if (input.avatarColor !== undefined) user.avatarColor = safeAvatarColor(input.avatarColor);
   if (input.profileImageUrl !== undefined) user.profileImageUrl = safeOptionalString(input.profileImageUrl, 250000);
   user.updatedAt = new Date().toISOString();
-  await persistUsers();
-  return toPublicUser(user);
 }
 
 export async function changePassword(userId: string, currentPassword: string, newPassword: string, confirmPassword: string) {
@@ -240,7 +314,19 @@ export async function changePassword(userId: string, currentPassword: string, ne
     throw new Error("Current password is incorrect.");
   }
   validatePasswordPair(newPassword, confirmPassword);
-  user.passwordHash = await hashPassword(newPassword);
+  const passwordHash = await hashPassword(newPassword);
+  if (sqliteAuthStore) {
+    const updated = sqliteAuthStore.applyToUser(userId, (current) => {
+      if (current.passwordHash !== user.passwordHash) {
+        throw new Error("Current password is incorrect.");
+      }
+      current.passwordHash = passwordHash;
+      current.updatedAt = new Date().toISOString();
+    }, { revokeSessions: true });
+    if (!updated) throw new Error("User not found.");
+    return toPublicUser(updated);
+  }
+  user.passwordHash = passwordHash;
   user.updatedAt = new Date().toISOString();
   sessions = sessions.filter((session) => session.userId !== user.id);
   await persistUsers();
@@ -249,9 +335,18 @@ export async function changePassword(userId: string, currentPassword: string, ne
 }
 
 export async function resetPassword(userId: string, password: string, confirmPassword: string) {
-  const user = findStoredUser(userId);
   validatePasswordPair(password, confirmPassword);
-  user.passwordHash = await hashPassword(password);
+  const passwordHash = await hashPassword(password);
+  if (sqliteAuthStore) {
+    const updated = sqliteAuthStore.applyToUser(userId, (current) => {
+      current.passwordHash = passwordHash;
+      current.updatedAt = new Date().toISOString();
+    }, { revokeSessions: true });
+    if (!updated) throw new Error("User not found.");
+    return toPublicUser(updated);
+  }
+  const user = findStoredUser(userId);
+  user.passwordHash = passwordHash;
   user.updatedAt = new Date().toISOString();
   sessions = sessions.filter((session) => session.userId !== user.id);
   await persistUsers();
@@ -279,23 +374,72 @@ function validateCreateUser(input: CreateUserInput) {
   return { email, username, displayName };
 }
 
+async function buildStoredUser(input: CreateUserInput): Promise<StoredUser> {
+  const normalized = validateCreateUser(input);
+  const createdAt = new Date().toISOString();
+  return {
+    id: input.id ?? `usr_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+    email: normalized.email,
+    username: normalized.username,
+    name: normalized.displayName,
+    displayName: normalized.displayName,
+    passwordHash: await hashPassword(input.password),
+    role: input.role ?? "user",
+    active: input.active ?? true,
+    avatar: initialsFor(normalized.displayName),
+    avatarColor: safeAvatarColor(input.avatarColor),
+    profileImageUrl: safeOptionalString(input.profileImageUrl, 250000),
+    pinnedProjectIds: sanitizePinnedProjectIds(input.pinnedProjectIds),
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function applyOwnProfileUpdates(
+  user: StoredUser,
+  updates: Pick<UpdateUserInput, "name" | "displayName" | "avatarColor" | "profileImageUrl">,
+) {
+  const displayName = safeDisplayName(updates.displayName ?? updates.name ?? user.displayName);
+  user.displayName = displayName;
+  user.name = displayName;
+  user.avatar = initialsFor(displayName);
+  if (updates.avatarColor !== undefined) user.avatarColor = safeAvatarColor(updates.avatarColor);
+  if (updates.profileImageUrl !== undefined) user.profileImageUrl = safeOptionalString(updates.profileImageUrl, 250000);
+  user.updatedAt = new Date().toISOString();
+}
+
+function authUsers() {
+  return sqliteAuthStore?.loadUsers() ?? users;
+}
+
 function findStoredUser(userId: string) {
-  const user = users.find((item) => item.id === userId);
+  const user = sqliteAuthStore?.loadUserById(userId) ?? users.find((item) => item.id === userId);
   if (!user) throw new Error("User not found.");
   return user;
 }
 
 function assertUniqueEmail(email: string, exceptUserId?: string) {
-  if (users.some((user) => user.email === email && user.id !== exceptUserId)) {
+  if (authUsers().some((user) => user.email === email && user.id !== exceptUserId)) {
     throw new Error("An account with that email already exists.");
   }
 }
 
 function assertUniqueUsername(username: string | undefined, exceptUserId?: string) {
   if (!username) return;
-  if (users.some((user) => normalizeUsername(user.username) === username && user.id !== exceptUserId)) {
+  if (authUsers().some((user) => normalizeUsername(user.username) === username && user.id !== exceptUserId)) {
     throw new Error("An account with that username already exists.");
   }
+}
+
+function throwIdentityConstraint(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("auth_users.email_norm")) {
+    throw new Error("An account with that email already exists.");
+  }
+  if (message.includes("auth_users.username_norm")) {
+    throw new Error("An account with that username already exists.");
+  }
+  throw error;
 }
 
 function validatePasswordPair(password: string, confirmPassword: string) {
@@ -358,11 +502,11 @@ function randomPassword() {
 }
 
 async function ensureDefaultAdmin() {
-  if (users.length) return;
+  if (sqliteAuthStore ? sqliteAuthStore.countUsers() > 0 : users.length > 0) return;
 
   const production = process.env.NODE_ENV === "production";
   const password = defaultAdminPassword ?? (production ? randomPassword() : devFallbackPassword);
-  const admin = await createUser({
+  const storedAdmin = await buildStoredUser({
     id: "usr_momen",
     email: defaultAdminEmail,
     username: "momen",
@@ -372,6 +516,13 @@ async function ensureDefaultAdmin() {
     active: true,
     avatarColor: "#11b8a5",
   });
+  if (sqliteAuthStore) {
+    if (!sqliteAuthStore.insertFirstUser(storedAdmin)) return;
+  } else {
+    users = [storedAdmin, ...users];
+    await persistUsers();
+  }
+  const admin = toPublicUser(storedAdmin);
 
   if (!defaultAdminPassword) {
     if (production) {
