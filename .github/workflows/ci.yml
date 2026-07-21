@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 matches production (pm2). The backend's better-sqlite3 is a
+      # native module built for this ABI, so CI must run the same major.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm (via corepack, pinned by packageManager)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Backend type-check
+        run: pnpm --filter momi-animation-backend exec tsc --noEmit
+
+      - name: Backend tests
+        run: pnpm --filter momi-animation-backend run test
+
+      - name: Frontend build (type-check + vite)
+        run: pnpm run build

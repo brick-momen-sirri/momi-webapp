@@ -2,6 +2,17 @@
 
 Node/Express backend for routing generation jobs to a RunPod serverless ComfyUI worker.
 
+## Node version
+
+Runs on **Node 24** in production (pm2), pinned via `.nvmrc` and `engines`.
+`better-sqlite3` is a native module compiled for that ABI. If you switch Node
+major versions (dev, CI, or the deploy host), rebuild it or the native binding
+fails to load at startup (`ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION mismatch`):
+
+```powershell
+pnpm rebuild better-sqlite3
+```
+
 ## Run
 
 ```powershell
