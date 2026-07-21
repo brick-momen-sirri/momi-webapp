@@ -24,6 +24,7 @@ process.env.JOBS_ARCHIVED_SQLITE_PATH = path.join(tempDir, "archived-items.sqlit
 writeFileSync(
   jobsJsonPath,
   JSON.stringify([
+    { id: "job_cancel_requested", projectId: "prj_1", userId: "usr_1", status: "running", cancelRequested: true, createdAt: "2026-07-20T00:03:00.000Z", resultUrls: [], thumbnailUrls: [] },
     { id: "job_queued", projectId: "prj_1", userId: "usr_1", status: "queued", createdAt: "2026-07-20T00:02:00.000Z", resultUrls: [], thumbnailUrls: [] },
     { id: "job_archived", projectId: "prj_1", userId: "usr_1", status: "completed", archivedAt: "2026-07-20T00:00:00.000Z", archivedBy: "usr_1", createdAt: "2026-07-20T00:00:00.000Z", resultUrls: [], thumbnailUrls: [] },
   ]),
@@ -51,15 +52,20 @@ after(() => {
   }
 });
 
-test("cancelJob writes the status change as a single SQLite row (no whole-array flush)", async () => {
+test("monolith cancellation requests are settled by the dispatcher path", async () => {
   await jobQueue.loadJobs();
-  assert.equal(jobQueue.getJobs().length, 2);
+  assert.equal(jobQueue.getJobs().length, 3);
+  assert.equal(jobQueue.getJob("job_cancel_requested")?.status, "canceled");
+  assert.equal(sqliteRows().find((j) => j.id === "job_cancel_requested")?.status, "canceled");
 
   await jobQueue.cancelJob("job_queued");
 
   // In-memory reflects it, and the SQLite row was updated per-row synchronously.
   assert.equal(jobQueue.getJobs().find((j) => j.id === "job_queued")?.status, "canceled");
-  assert.equal(sqliteRows().find((j) => j.id === "job_queued")?.status, "canceled");
+  assert.equal(jobQueue.getJobs().find((j) => j.id === "job_queued")?.cancelRequested, true);
+  const persisted = sqliteRows().find((j) => j.id === "job_queued");
+  assert.equal(persisted?.status, "canceled");
+  assert.equal(persisted?.cancelRequested, true);
 });
 
 test("permanentlyDeleteArchivedJob removes exactly that row", async () => {
@@ -67,6 +73,6 @@ test("permanentlyDeleteArchivedJob removes exactly that row", async () => {
 
   assert.equal(jobQueue.getJobs().find((j) => j.id === "job_archived"), undefined);
   const rows = sqliteRows();
-  assert.deepEqual(rows.map((j) => j.id), ["job_queued"]);
+  assert.deepEqual(rows.map((j) => j.id), ["job_cancel_requested", "job_queued"]);
   assert.equal(rows.find((j) => j.id === "job_queued")?.status, "canceled");
 });
