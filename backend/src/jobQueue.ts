@@ -120,58 +120,63 @@ export async function loadJobs() {
   acceptingNewWork = true;
   const rawJobs = await loadRawJobs();
   initializeDispatcherCoordination();
-  const normalizedJobs: Job[] = [];
-  jobs = rawJobs.map((job) => {
-    const normalized: Job = {
-      ...job,
-      userId: typeof job.userId === "string" && job.userId.trim() ? job.userId : "usr_momen",
-      source: job.source ?? "backend_job",
-      folderId: typeof job.folderId === "string" && job.folderId.trim() ? job.folderId : null,
-      title: typeof job.title === "string" && job.title.trim() ? job.title.trim() : undefined,
-    };
-
-    if (
-      ownsDispatcherWork()
-      && generationBackend === "runpod"
-      && (normalized.status === "sending" || normalized.status === "running")
-    ) {
-      if (normalized.runpodJobId) {
-        // Acknowledged async submissions are resumed by ID after the new
-        // dispatcher owns the lease. Never submit their workflow again.
-      } else if (normalized.runpodSubmissionState === "preparing") {
-        normalized.status = normalized.cancelRequested ? "canceled" : "queued";
-        delete normalized.startedAt;
-        delete normalized.completedAt;
-        delete normalized.runpodSubmissionState;
-        normalizedJobs.push(normalized);
-      } else if (shouldNormalizeInterruptedJob(normalized)) {
-        normalized.status = normalized.cancelRequested ? "canceled" : "failed";
-        normalized.completedAt = normalized.completedAt ?? new Date().toISOString();
-        if (!normalized.cancelRequested) {
-          normalized.errorMessage = normalized.errorMessage ?? "Backend restarted before this RunPod job returned. Retry the job if needed.";
-        }
-        normalized.creditsUsed = normalized.creditsUsed ?? 0;
-        normalizedJobs.push(normalized);
-      }
-    }
-
-    return normalized;
-  });
-  if (normalizedJobs.length) {
-    if (jobRowLevelWrites && sqliteStore) {
-      for (const job of normalizedJobs) await persistUpsert(job);
-    } else {
-      // Persist the normalization now rather than via the debounced timer,
-      // which is unref'd and may not fire before boot completes.
-      persistJobs().catch(() => undefined);
-      await flushPersistedJobs();
-    }
-  }
+  jobs = rawJobs.map((job) => ({
+    ...job,
+    userId: typeof job.userId === "string" && job.userId.trim() ? job.userId : "usr_momen",
+    source: job.source ?? "backend_job",
+    folderId: typeof job.folderId === "string" && job.folderId.trim() ? job.folderId : null,
+    title: typeof job.title === "string" && job.title.trim() ? job.title.trim() : undefined,
+  }));
+  await persistNormalizedRunpodJobs(normalizeInterruptedRunpodJobs());
   archivedMediaJobs = await loadRawArchivedJobs();
   resumeAcknowledgedRunpodJobs();
   startDispatcherCoordination();
   if (isDispatcher() && !usesDispatcherCoordination()) void dispatchQueue();
   return jobs;
+}
+
+// A job stuck in "sending"/"running" with no runpodJobId yet was interrupted
+// before (or while) its RunPod submission was acknowledged. This can be
+// observed both at boot and when a live standby dispatcher takes over the
+// lease mid-session (the previous owner's lease expired while its /run POST
+// was still in flight), so callers must run this any time this process
+// starts or resumes owning dispatcher work, not just at boot.
+function normalizeInterruptedRunpodJobs(): Job[] {
+  if (!ownsDispatcherWork() || generationBackend !== "runpod") return [];
+  const normalizedJobs: Job[] = [];
+  for (const job of jobs) {
+    if (job.status !== "sending" && job.status !== "running") continue;
+    if (job.runpodJobId) continue; // Resumed by ID separately; never resubmit.
+
+    if (job.runpodSubmissionState === "preparing") {
+      job.status = job.cancelRequested ? "canceled" : "queued";
+      delete job.startedAt;
+      delete job.completedAt;
+      delete job.runpodSubmissionState;
+      normalizedJobs.push(job);
+    } else if (shouldNormalizeInterruptedJob(job)) {
+      job.status = job.cancelRequested ? "canceled" : "failed";
+      job.completedAt = job.completedAt ?? new Date().toISOString();
+      if (!job.cancelRequested) {
+        job.errorMessage = job.errorMessage ?? "Backend restarted before this RunPod job returned. Retry the job if needed.";
+      }
+      job.creditsUsed = job.creditsUsed ?? 0;
+      normalizedJobs.push(job);
+    }
+  }
+  return normalizedJobs;
+}
+
+async function persistNormalizedRunpodJobs(normalizedJobs: Job[]) {
+  if (!normalizedJobs.length) return;
+  if (jobRowLevelWrites && sqliteStore) {
+    for (const job of normalizedJobs) await persistUpsert(job);
+  } else {
+    // Persist the normalization now rather than via the debounced timer,
+    // which is unref'd and may not fire before boot completes.
+    persistJobs().catch(() => undefined);
+    await flushPersistedJobs();
+  }
 }
 
 // Reads the archived-items list from the configured store, seeding the SQLite
@@ -472,7 +477,10 @@ function maintainDispatcherLease() {
     return false;
   }
   const acquired = tryAcquireDispatcherLease();
-  if (acquired) resumeAcknowledgedRunpodJobs();
+  if (acquired) {
+    void persistNormalizedRunpodJobs(normalizeInterruptedRunpodJobs());
+    resumeAcknowledgedRunpodJobs();
+  }
   return acquired;
 }
 
@@ -481,7 +489,10 @@ function ensureDispatcherLease() {
   if (!usesDispatcherCoordination()) return true;
   if (hasCurrentDispatcherLease()) return true;
   const acquired = tryAcquireDispatcherLease();
-  if (acquired) resumeAcknowledgedRunpodJobs();
+  if (acquired) {
+    void persistNormalizedRunpodJobs(normalizeInterruptedRunpodJobs());
+    resumeAcknowledgedRunpodJobs();
+  }
   return acquired;
 }
 
@@ -752,7 +763,11 @@ async function settleRequestedCancellation(job: Job) {
       const canceled = await cancelComfyWorkflowOnRunpod(job.runpodJobId);
       canceledRunpodStatus = canceled.status;
     } catch (error) {
-      console.warn(`Could not cancel RunPod job ${job.runpodJobId}: ${error instanceof Error ? error.message : "unknown error"}`);
+      // The remote job may still be running (and billing) on RunPod. Leave
+      // the local status as-is and cancelRequested set so this is retried on
+      // the next poll, instead of marking it canceled while it may not be.
+      console.warn(`Could not cancel RunPod job ${job.runpodJobId}, will retry: ${error instanceof Error ? error.message : "unknown error"}`);
+      return false;
     }
   }
 
