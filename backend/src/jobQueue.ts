@@ -9,6 +9,7 @@ import {
   comfyRoot,
   creditBalanceDeltaAccountingEnabled,
   generationBackend,
+  jobRowLevelWrites,
   jobStoreDriver,
   jobsSqlitePath,
   jobsStorePath,
@@ -298,7 +299,7 @@ export async function createJob(request: CreateJobRequest) {
   };
 
   jobs = [job, ...jobs];
-  await persistJobs();
+  await persistUpsert(job);
   void dispatchQueue();
   return job;
 }
@@ -373,7 +374,7 @@ export async function cancelJob(jobId: string) {
   if (!job || job.status === "completed" || job.status === "failed") return job;
   job.status = "canceled";
   job.completedAt = new Date().toISOString();
-  await persistJobs();
+  await persistUpsert(job);
   return job;
 }
 
@@ -383,7 +384,7 @@ export async function archiveJob(jobId: string, userId: string) {
   if (backendJob) {
     backendJob.archivedAt = archivedAt;
     backendJob.archivedBy = userId;
-    await persistJobs();
+    await persistUpsert(backendJob);
     return backendJob;
   }
 
@@ -392,7 +393,7 @@ export async function archiveJob(jobId: string, userId: string) {
 
   const archivedJob = { ...existingJob, source: "existing_project_media" as const, archivedAt, archivedBy: userId };
   archivedMediaJobs = [archivedJob, ...archivedMediaJobs.filter((job) => job.id !== jobId)];
-  await persistArchivedMediaJobs();
+  await persistArchivedUpsert(archivedJob);
   return archivedJob;
 }
 
@@ -401,14 +402,14 @@ export async function restoreArchivedJob(jobId: string) {
   if (backendJob?.archivedAt) {
     delete backendJob.archivedAt;
     delete backendJob.archivedBy;
-    await persistJobs();
+    await persistUpsert(backendJob);
     return backendJob;
   }
 
   const archivedJob = archivedMediaJobs.find((job) => job.id === jobId);
   if (!archivedJob) return undefined;
   archivedMediaJobs = archivedMediaJobs.filter((job) => job.id !== jobId);
-  await persistArchivedMediaJobs();
+  await persistArchivedRemove(jobId);
   const restored = { ...archivedJob };
   delete restored.archivedAt;
   delete restored.archivedBy;
@@ -419,14 +420,14 @@ export async function permanentlyDeleteArchivedJob(jobId: string) {
   const backendJob = getJob(jobId);
   if (backendJob?.archivedAt) {
     jobs = jobs.filter((job) => job.id !== jobId);
-    await persistJobs();
+    await persistRemove(jobId);
     return backendJob;
   }
 
   const archivedJob = archivedMediaJobs.find((job) => job.id === jobId);
   if (!archivedJob) return undefined;
   archivedMediaJobs = archivedMediaJobs.filter((job) => job.id !== jobId);
-  await persistArchivedMediaJobs();
+  await persistArchivedRemove(jobId);
   return archivedJob;
 }
 
@@ -448,7 +449,7 @@ export async function renameJob(projectId: string, jobId: string, title: string,
   const oldTitle = existingJob.title || existingJob.fileName || existingJob.prompt || "Untitled Job";
   if (backendJob) {
     backendJob.title = cleanTitle;
-    await persistJobs();
+    await persistUpsert(backendJob);
     await saveJobMetadata(backendJob, project);
   }
 
@@ -501,7 +502,7 @@ export async function updateJobSaveNumber(projectId: string, jobId: string, valu
 
   if (backendJob) {
     backendJob.workflowOptions = workflowOptions;
-    await persistJobs();
+    await persistUpsert(backendJob);
     await saveJobMetadata(backendJob, project);
   }
 
@@ -558,7 +559,7 @@ export async function moveJobResult(
 
       try {
         await saveJobMetadata(job, project);
-        await persistJobs();
+        await persistUpsert(job);
       } catch (error) {
         let rollbackError: unknown;
         try {
@@ -568,7 +569,7 @@ export async function moveJobResult(
         }
         Object.assign(job, originalJob);
         await saveJobMetadata(job, project).catch(() => undefined);
-        await persistJobs().catch(() => undefined);
+        await persistUpsert(job).catch(() => undefined);
         if (rollbackError) {
           throw new Error(
             `Could not persist result move: ${error instanceof Error ? error.message : "metadata write failed"}. `
@@ -663,7 +664,7 @@ async function runRunpodJob(job: Job) {
   if (!project || !model) {
     job.status = "failed";
     job.errorMessage = "Missing project or workflow model.";
-    await persistJobs();
+    await persistUpsert(job);
     return;
   }
 
@@ -672,11 +673,11 @@ async function runRunpodJob(job: Job) {
   try {
     job.status = "sending";
     job.startedAt = new Date().toISOString();
-    await persistJobs();
+    await persistUpsert(job);
 
     job.creditBalanceBefore = await captureCreditBalanceSnapshot();
     if (job.creditBalanceBefore) {
-      await persistJobs();
+      await persistUpsert(job);
     }
 
     const folders = await ensureJobFolders(project, job.id);
@@ -704,7 +705,7 @@ async function runRunpodJob(job: Job) {
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
     job.status = "running";
-    await persistJobs();
+    await persistUpsert(job);
 
     logMemory("before-runpod-request", job.id);
     const result = await runComfyWorkflowOnRunpod({
@@ -783,7 +784,7 @@ async function runRunpodJob(job: Job) {
     logMemory("job-failed", job.id);
   } finally {
     endBillableOperation();
-    await persistJobs();
+    await persistUpsert(job);
     await saveJobMetadata(job, project);
   }
 }
@@ -842,7 +843,7 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
   if (!project || !model) {
     job.status = "failed";
     job.errorMessage = "Missing project or workflow model.";
-    await persistJobs();
+    await persistUpsert(job);
     return;
   }
 
@@ -850,7 +851,7 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
     job.status = "sending";
     job.comfyServerUrl = serverUrl;
     job.startedAt = new Date().toISOString();
-    await persistJobs();
+    await persistUpsert(job);
 
     const folders = await ensureJobFolders(project, job.id);
     await ensureWorkerProjectFolder(serverUrl, project.folderName ?? path.basename(project.folderPath));
@@ -877,7 +878,7 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
     const queued = await queuePrompt(serverUrl, workflow, `momi-${job.id}`);
     job.comfyPromptId = queued.prompt_id;
     job.status = "running";
-    await persistJobs();
+    await persistUpsert(job);
 
     const history = await waitForHistory(serverUrl, queued.prompt_id, job);
     const resultUrls = extractResultUrls(serverUrl, history, queued.prompt_id);
@@ -896,7 +897,7 @@ async function runLocalComfyJob(job: Job, serverUrl: string) {
       job.completedAt = new Date().toISOString();
     }
   } finally {
-    await persistJobs();
+    await persistUpsert(job);
     await saveJobMetadata(job, project);
   }
 }
@@ -1026,7 +1027,7 @@ export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) 
   try {
     let recovered = 0;
     let failed = 0;
-    let changed = false;
+    const changedJobs = new Set<Job>();
 
     for (const job of jobs) {
       const entries = jobRemoteMediaEntries(job);
@@ -1059,11 +1060,11 @@ export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) 
           job.thumbnailUrls[entry.index] = localUrl;
         }
         recovered += 1;
-        changed = true;
+        changedJobs.add(job);
       }
     }
 
-    if (changed) await persistJobs();
+    for (const job of changedJobs) await persistUpsert(job);
     if (recovered || failed) {
       console.info(`[recovery] Remote result media pass: recovered ${recovered}, failed ${failed}.`);
     }
@@ -1514,6 +1515,45 @@ async function ensureWorkerProjectFolder(serverUrl: string, projectFolderName: s
   }
 }
 
+// Web/worker split Stage A: when JOBS_ROW_LEVEL_WRITES is on (SQLite driver),
+// each job change is written as a single row instead of the debounced
+// whole-array replaceAll. The in-memory array is still mutated by the caller
+// (unchanged); only the persistence call differs. With the flag off (default),
+// these delegate to persistJobs()/persistArchivedMediaJobs(), so behavior is
+// byte-identical to today. insertJob is an upsert-by-id, so it serves both
+// create and update; it keeps the store row in lockstep with the array.
+async function persistUpsert(job: Job): Promise<void> {
+  if (jobRowLevelWrites && sqliteStore) {
+    sqliteStore.insertJob(job);
+    return;
+  }
+  await persistJobs();
+}
+
+async function persistRemove(id: string): Promise<void> {
+  if (jobRowLevelWrites && sqliteStore) {
+    sqliteStore.deleteJob(id);
+    return;
+  }
+  await persistJobs();
+}
+
+async function persistArchivedUpsert(job: Job): Promise<void> {
+  if (jobRowLevelWrites && archivedStore) {
+    archivedStore.insertJob(job);
+    return;
+  }
+  await persistArchivedMediaJobs();
+}
+
+async function persistArchivedRemove(id: string): Promise<void> {
+  if (jobRowLevelWrites && archivedStore) {
+    archivedStore.deleteJob(id);
+    return;
+  }
+  await persistArchivedMediaJobs();
+}
+
 // Job status transitions and concurrent jobs would otherwise rewrite the whole
 // jobs file many times per second. Coalesce rapid writes into one: callers keep
 // awaiting persistJobs() (the in-memory array is the source of truth for reads),
@@ -1607,17 +1647,17 @@ async function runCreditReconcile() {
   if (!promptIds.length) return;
 
   const actualCredits = await getActualCreditsByPromptIds(promptIds);
-  let changed = false;
+  const changedJobs: Job[] = [];
   for (const job of jobs) {
     if (!job.comfyPromptId) continue;
     const credits = actualCredits.get(job.comfyPromptId);
     if (credits == null || job.creditsUsed === credits) continue;
     job.creditsUsed = credits;
-    changed = true;
+    changedJobs.push(job);
   }
 
-  if (changed) {
-    await persistJobs();
+  for (const job of changedJobs) {
+    await persistUpsert(job);
   }
 }
 

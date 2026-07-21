@@ -57,6 +57,12 @@ export const jobsStorePath = process.env.JOBS_STORE_PATH?.trim() || path.join(ba
 export const jobStoreDriver: "json" | "sqlite" =
   (process.env.JOB_STORE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
 export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "jobs.sqlite");
+// Web/worker split, Stage A: write each job change as a single SQLite row
+// instead of the debounced whole-array replaceAll. Only meaningful with the
+// SQLite driver. Off by default — this is dormant prep for the topology split
+// and must be load-tested before it is relied on. See docs/web-worker-split.md.
+export const jobRowLevelWrites = jobStoreDriver === "sqlite"
+  && ["1", "true", "yes", "on"].includes((process.env.JOBS_ROW_LEVEL_WRITES ?? "").trim().toLowerCase());
 export const archivedItemsStorePath = process.env.JOBS_ARCHIVED_PATH?.trim() || path.join(backendRoot, "data", "archived-items.json");
 export const archivedItemsSqlitePath = process.env.JOBS_ARCHIVED_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "archived-items.sqlite");
 export const projectsStorePath = path.join(backendRoot, "data", "projects.json");
