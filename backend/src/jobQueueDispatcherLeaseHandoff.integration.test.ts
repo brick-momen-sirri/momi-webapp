@@ -45,16 +45,19 @@ const orphaned = job("job_orphaned_submission", {
 });
 seeded.insertJob(orphaned);
 
-// Still valid at boot, held by a different process, expiring shortly after.
-// This process must NOT win it during loadJobs() -- the takeover has to
-// happen later, through the poll/heartbeat timers, to exercise the
-// mid-session path instead of the already-covered boot path.
+// Still valid at boot, held by a different process, expiring a few seconds
+// later. This process must NOT win it during loadJobs() -- the takeover has
+// to happen later, through the poll/heartbeat timers, to exercise the
+// mid-session path instead of the already-covered boot path. The window is
+// generous because loadJobs() runs after the dynamic import of jobQueue.js
+// below, whose module-graph compile time (via tsx) is not free.
+const priorLeaseExpiresAt = Date.now() + 4_000;
 seeded.tryAcquireDispatcherLease({
   ownerId: "prior-host:123:prior-owner",
   ownerPid: 123,
   ownerHost: "prior-host",
   heartbeatAt: Date.now(),
-  expiresAt: Date.now() + 150,
+  expiresAt: priorLeaseExpiresAt,
   now: Date.now(),
 });
 seeded.close();
@@ -73,10 +76,18 @@ after(() => {
 test("a mid-session lease takeover normalizes a job orphaned by the prior owner", async () => {
   await jobQueue.loadJobs();
 
-  assert.equal(jobQueue.getQueueSnapshot().dispatcher.heldByThisProcess, false);
+  assert.ok(
+    Date.now() < priorLeaseExpiresAt,
+    "test setup: the prior lease must still have time left when loadJobs() runs -- increase the buffer above if this fails on a slow machine",
+  );
+  assert.equal(
+    jobQueue.getQueueSnapshot().dispatcher.heldByThisProcess,
+    false,
+    "boot must not win a still-valid lease held by another owner",
+  );
   assert.equal(jobQueue.getJob(orphaned.id)?.status, "running");
 
-  const tookOver = await waitFor(() => jobQueue.getQueueSnapshot().dispatcher.heldByThisProcess, 2_000);
+  const tookOver = await waitFor(() => jobQueue.getQueueSnapshot().dispatcher.heldByThisProcess, 8_000);
   assert.equal(tookOver, true, "the poll/heartbeat timer should win the lease once it expires");
 
   const reader = openSqliteJobStore(jobsSqlitePath, "jobs", { readonly: true });
