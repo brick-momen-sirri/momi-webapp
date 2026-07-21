@@ -13,6 +13,7 @@ import {
 } from "./mediaIndexCoordinator.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
 import { isDispatcher } from "./processRole.js";
+import { projectFolderName } from "./projectFolderName.js";
 import { getProjects } from "./projectService.js";
 import { loadProjectFolders, resolveProjectMediaPath } from "./projectMetadataService.js";
 import type { Job, Project, ProjectFolder, Resolution } from "./types.js";
@@ -365,7 +366,7 @@ async function sequenceJob(project: Project, target: ScanTarget, sequence: { fol
     ...(workflowOptions ? { workflowOptions } : {}),
     createdAt,
     completedAt: createdAt,
-    fileName: path.basename(sequence.folderPath),
+    fileName: projectFolderName(sequence.folderPath),
     source: "existing_project_media",
     missingMetadata,
   };
