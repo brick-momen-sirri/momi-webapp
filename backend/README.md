@@ -37,6 +37,7 @@ RUNPOD_API_KEY=<your RunPod API key>
 COMFY_ORG_API_KEY=<your Comfy org API key>
 RUNPOD_POLL_INTERVAL_MS=5000
 RUNPOD_TIMEOUT_MS=2400000
+RUNPOD_SUBMISSION_MODE=async
 SERVERLESS_WORKFLOW_ROOT=C:\Momi-Animation\workflow
 CREDIT_TRACKER_URLS=http://127.0.0.1:8188
 ```
@@ -63,7 +64,53 @@ pm2 start backend\ecosystem.config.cjs
 pm2 save
 ```
 
-The PM2 config keeps one backend instance, restarts after crashes, and restarts on high RSS memory. Use one instance unless the queue is moved to a database-backed worker lock.
+The PM2 config defaults to the existing one-process monolith. The tested split
+topology is available behind `MOMI_TOPOLOGY_SPLIT=true`; it starts one
+`momi-dispatcher` fork on internal port 3334 and two clustered `momi-api`
+workers on port 3333. The split config forces the shared SQLite stores,
+row-level job writes, async RunPod submission, and disables process-local
+balance-delta accounting.
+
+Run the isolated topology gate before a deployment (it uses a local mock and
+temporary state, so no RunPod credits or production data are touched):
+
+```powershell
+cd backend
+pnpm test:topology
+```
+
+First back up the JSON stores, then migrate them while still running one
+monolith. Keep `MOMI_SHARED_STATE=true` through the split and any topology-only
+rollback so the current SQLite users, sessions, projects, and jobs remain the
+source of truth:
+
+```powershell
+$env:MOMI_SHARED_STATE='true'
+$env:MOMI_TOPOLOGY_SPLIT='false'
+pm2 start backend\ecosystem.config.cjs --update-env
+pm2 save
+```
+
+After validating the migrated monolith and rerunning the gate, flip topology:
+
+```powershell
+$env:MOMI_SHARED_STATE='true'
+$env:MOMI_TOPOLOGY_SPLIT='true'
+pm2 delete momi-backend
+pm2 start backend\ecosystem.config.cjs --update-env
+pm2 save
+```
+
+Rollback is explicit because PM2 does not prune app names omitted by a changed
+ecosystem file:
+
+```powershell
+$env:MOMI_SHARED_STATE='true'
+$env:MOMI_TOPOLOGY_SPLIT='false'
+pm2 delete momi-api momi-dispatcher
+pm2 start backend\ecosystem.config.cjs --update-env
+pm2 save
+```
 
 ## Local ComfyUI Development
 

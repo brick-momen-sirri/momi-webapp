@@ -1,6 +1,6 @@
 # Web/Worker Split (Stage 0c) — Design Doc
 
-**Status:** proposed · **Scope:** backend horizontal scale · **Prereqs landed:** SQLite job store (live), per-row write primitives (0a), `dataVersion()` read-discovery (0b)
+**Status:** implemented and topology-gate tested; production flag remains off · **Scope:** backend horizontal scale
 
 Goal: serve up to ~100 concurrent artists by scaling the stateless HTTP tier
 horizontally, while keeping RunPod job dispatch exactly-once. This doc is the
@@ -213,22 +213,28 @@ All stages default to `ROLE=monolith` (today's behavior) until explicitly flippe
 - **A.** jobQueue per-row write conversion behind a flag; single process; load-test
   equivalence. *(the ~20-site rewire, done with §3 ownership in mind)*
 - **B.** Dispatcher-only guards (boot-normalization, reconcile, recovery, media
-  timers) + `cancelRequested` flow; still one process.
+  timers) + `cancelRequested` flow; still one process. *(implemented; default
+  remains `ROLE=monolith`)*
 - **C.** Incremental `data_version` read cache wired into `getJobs` /
-  `getJobsWithExistingMedia`; merge-by-id; still one process.
+  `getJobsWithExistingMedia`; merge-by-id; still one process. *(implemented
+  with per-store revisions + tombstones; default remains `ROLE=monolith`)*
 - **D.** Dispatcher lease + atomic claim + SQL concurrency cap + dispatch poll;
-  still one process (lone process always wins the lease).
+  still one process (lone process always wins the lease). *(implemented; claims
+  verify the current lease owner inside the same `IMMEDIATE` transaction as the
+  SQL capacity check and queued-to-sending transition)*
 - **E.** (Only if enabling balance-delta) shared `runpod_activity` table; else skip.
-- **F.** Topology flip behind the flag: `dispatcher:1` + `api:2`. **Load-test
-  first** (see §10). Assert every §8 criterion.
+- **F.** Topology flip behind `MOMI_TOPOLOGY_SPLIT`: `dispatcher:1` + `api:2`.
+  *(implemented; production default remains the monolith)*
 - **G.** Scale `api` instances; dispatcher stays at 1.
 
-**Companion prerequisite before instances>1:** audit other in-memory singletons —
-sessions (`sessions.json`), projects, workflow models, `comfyPool`, media cache.
-A login served on worker A then a request on worker B must still work. Token auth
-that reads `sessions.json` read-through per request is tolerable; anything
-cached-and-mutated in memory needs the same `data_version` refresh or sticky
-sessions.
+**Companion prerequisite before instances>1:** the
+[singleton audit](./topology-singleton-audit.md) is complete. The auth/session
+and project/ACL P0 blockers are closed behind `APP_STATE_DRIVER=sqlite`,
+including migration, rollback export, split-role guard, and cross-connection
+tests. The media-index and output-reservation P1 blockers are also closed with
+dispatcher-published revisions and project-locked atomic reservations. The
+100-client topology gate now passes; see
+[topology-load-test.md](./topology-load-test.md).
 
 ---
 
@@ -246,29 +252,42 @@ job creation, plus a full queue draining through the 10-cap. Assert:
 Watch the existing `[memory]` logs and the richer `/api/health` (queue depth,
 RunPod active, memory, disk) throughout.
 
+The isolated gate is `pnpm test:topology`. It uses temporary SQLite/app state,
+a temporary project tree, and a local mock RunPod/Credit Tracker, so it spends
+no production credits and cannot mutate production data. The 2026-07-21 run
+passed with 100 clients, 32 jobs, a competing standby dispatcher, forced leader
+death, zero duplicate submissions, an exact observed cap of 10, enqueue p99 of
+251ms, and maximum cross-worker visibility delay of 6ms. Full output and
+coverage are recorded in [topology-load-test.md](./topology-load-test.md).
+
 ---
 
 ## 11. Rollback
 
-- **Topology:** set `ROLE=monolith` (or `api` instances → 1 + stop dispatcher) and
-  `pm2 reload`. Per-row writes are a strict superset of single-process behavior.
+- **Topology:** keep `MOMI_SHARED_STATE=true`, set
+  `MOMI_TOPOLOGY_SPLIT=false`, delete `momi-api` and `momi-dispatcher`, then
+  start `backend/ecosystem.config.cjs` again. PM2 does not automatically delete
+  apps omitted by a changed ecosystem file. Keeping the shared-state flag is
+  required so rollback reads the current SQLite users/projects/jobs rather than
+  their frozen pre-migration JSON sources.
 - **Schema:** `meta`, `runpod_activity`, `cancelRequested` are all additive — no
   destructive change, so a code revert needs no migration.
 - **Whole-system floor:** `pnpm export:job-store` (SQLite → JSON) then
   `JOB_STORE_DRIVER=json` returns to the frozen `jobs.json`. Frozen
   `jobs.json`/`archived-items.json` from the migration remain the ultimate floor.
+- **App-state floor:** `pnpm export:app-state` (SQLite → JSON), then
+  `APP_STATE_DRIVER=json`, returns a monolith to the JSON users, sessions, and
+  projects stores. Migration leaves the original JSON files frozen until this
+  explicit export. The derived media index is rebuilt from the project tree.
 - **Guardrail:** refuse to boot in split topology with row-level writes off (so a
-  panicked flag flip can't unleash `replaceAll`'s prune under multi-writer).
+  panicked flag flip can't unleash `replaceAll`'s prune under multi-writer), or
+  with the process-local JSON auth store enabled.
 
 ---
 
 ## 12. Effort & risk
 
-~1 focused week. Bulk is Stage A (per-row write conversion + ownership) — the
-highest-risk change, landed and load-tested single-process before any topology.
-No new infrastructure. Every stage is flag-reversible. Recommend a short design
-pass to finalize the §3 ownership table (esp. archive-of-live-jobs and the exact
-`cancelRequested` protocol) before writing Stage A.
-
-**Do not** rush this onto a freshly-migrated live system. Each stage is its own
-PR with tests; Stage F is gated on the §10 load test.
+The implementation is complete with no new infrastructure and remains
+flag-reversible. Production should still use a short canary after the shared
+SQLite stores have been migrated and backed up; the local gate validates the
+topology and failure protocol, not the production proxy or disk hardware.
