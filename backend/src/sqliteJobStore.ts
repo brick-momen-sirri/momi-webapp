@@ -42,6 +42,11 @@ export type SqliteJobStore = {
   applyToJob(id: string, mutate: (job: Job) => Job | void): Job | undefined;
   deleteJob(id: string): boolean;
   count(): number;
+  // SQLite's data_version: unchanged by this connection's own commits, but
+  // bumped when ANOTHER connection commits. The cross-process change signal a
+  // reader (API worker / dispatcher) polls to know when to reload its cache,
+  // instead of re-reading the whole table on every request.
+  dataVersion(): number;
   close(): void;
 };
 
@@ -112,6 +117,9 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       updateJob: readonlyError,
       applyToJob: readonlyError,
       deleteJob: readonlyError,
+      dataVersion() {
+        return db.pragma("data_version", { simple: true }) as number;
+      },
       close() {
         db.close();
       },
@@ -256,6 +264,9 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     },
     count() {
       return countStmt.get()?.n ?? 0;
+    },
+    dataVersion() {
+      return db.pragma("data_version", { simple: true }) as number;
     },
     close() {
       db.close();

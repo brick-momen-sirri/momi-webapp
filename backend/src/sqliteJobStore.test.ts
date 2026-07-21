@@ -246,6 +246,29 @@ test("per-row writes enforce the no-embedded-media contract", async () => {
   });
 });
 
+test("a reader observes another connection's writes via data_version", async () => {
+  await withStore((dbPath) => {
+    const writer = openSqliteJobStore(dbPath, "jobs");
+    writer.insertJob(job("job_seed"));
+    const reader = openSqliteJobStore(dbPath, "jobs", { readonly: true });
+
+    const v0 = reader.dataVersion();
+    assert.deepEqual(reader.loadAll().map((j) => j.id), ["job_seed"]);
+    // The reader's own repeated reads never move its data_version.
+    assert.equal(reader.dataVersion(), v0);
+
+    // Another connection commits -> the reader's data_version changes, which is
+    // the signal to reload.
+    writer.insertJob(job("job_new"));
+    const v1 = reader.dataVersion();
+    assert.notEqual(v1, v0, "data_version must change after another connection commits");
+    assert.deepEqual(reader.loadAll().map((j) => j.id).sort(), ["job_new", "job_seed"]);
+
+    writer.close();
+    reader.close();
+  });
+});
+
 test("concurrent per-row inserts from two connections keep all rows and unique seq", async () => {
   await withStore((dbPath) => {
     // Two independent connections to the SAME file — the multi-process model.
