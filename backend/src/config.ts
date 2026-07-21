@@ -2,6 +2,7 @@ import "./env.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BackendHttpError } from "./httpError.js";
+import { backendProcessRole } from "./processRole.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const backendRoot = path.resolve(here, "..");
@@ -63,26 +64,47 @@ export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(
 // and must be load-tested before it is relied on. See docs/web-worker-split.md.
 export const jobRowLevelWrites = jobStoreDriver === "sqlite"
   && ["1", "true", "yes", "on"].includes((process.env.JOBS_ROW_LEVEL_WRITES ?? "").trim().toLowerCase());
+// Stage D dispatcher coordination. These defaults keep lease writes infrequent
+// while ensuring a standby notices new queue work within half a second.
+export const dispatcherPollIntervalMs = positiveNumber(process.env.DISPATCHER_POLL_INTERVAL_MS, 350);
+export const dispatcherLeaseTtlMs = positiveNumber(process.env.DISPATCHER_LEASE_TTL_MS, 15_000);
+export const dispatcherLeaseHeartbeatMs = Math.min(
+  positiveNumber(process.env.DISPATCHER_LEASE_HEARTBEAT_MS, 5_000),
+  Math.max(100, Math.floor(dispatcherLeaseTtlMs / 2)),
+);
+export const dispatcherWalCheckpointMs = process.env.DISPATCHER_WAL_CHECKPOINT_MS?.trim() === "0"
+  ? 0
+  : positiveNumber(process.env.DISPATCHER_WAL_CHECKPOINT_MS, 30_000);
 export const archivedItemsStorePath = process.env.JOBS_ARCHIVED_PATH?.trim() || path.join(backendRoot, "data", "archived-items.json");
 export const archivedItemsSqlitePath = process.env.JOBS_ARCHIVED_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "archived-items.sqlite");
-export const projectsStorePath = path.join(backendRoot, "data", "projects.json");
-export const usersStorePath = path.join(backendRoot, "data", "users.json");
-export const sessionsStorePath = path.join(backendRoot, "data", "sessions.json");
-export const initialAdminPath = path.join(backendRoot, "data", "initial-admin.txt");
+export const projectsStorePath = process.env.PROJECTS_STORE_PATH?.trim() || path.join(backendRoot, "data", "projects.json");
+export const usersStorePath = process.env.USERS_STORE_PATH?.trim() || path.join(backendRoot, "data", "users.json");
+export const sessionsStorePath = process.env.SESSIONS_STORE_PATH?.trim() || path.join(backendRoot, "data", "sessions.json");
+// Shared users/sessions store for horizontally scaled API workers. JSON stays
+// the default and migration source until this flag is deliberately enabled.
+export const appStateDriver: "json" | "sqlite" =
+  (process.env.APP_STATE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
+export const appStateSqlitePath = process.env.APP_STATE_SQLITE_PATH?.trim()
+  || path.join(backendRoot, "data", "app-state.sqlite");
+export const initialAdminPath = process.env.INITIAL_ADMIN_PATH?.trim() || path.join(backendRoot, "data", "initial-admin.txt");
 
 export const authSessionDays = Number(process.env.AUTH_SESSION_DAYS ?? 14);
 export const defaultAdminEmail = process.env.MOMI_ADMIN_EMAIL ?? process.env.ADMIN_EMAIL ?? "momen@brickvisual.com";
 export const defaultAdminPassword = process.env.MOMI_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD;
 
 export const runpodEndpointId = process.env.RUNPOD_ENDPOINT_ID?.trim() ?? "";
+export const runpodSubmissionMode: "sync" | "async" =
+  (process.env.RUNPOD_SUBMISSION_MODE ?? "").trim().toLowerCase() === "async" ? "async" : "sync";
 export const runpodEndpointBaseUrl =
   process.env.RUNPOD_ENDPOINT_BASE_URL?.replace(/\/$/, "") ??
   (runpodEndpointId ? `https://api.runpod.ai/v2/${runpodEndpointId}` : "");
 export const runpodEndpointUrl =
   process.env.RUNPOD_ENDPOINT_URL?.replace(/\/$/, "") ??
-  (runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/runsync` : "");
+  (runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/${runpodSubmissionMode === "async" ? "run" : "runsync"}` : "");
 export const runpodStatusUrl = (jobId: string) =>
   `${runpodEndpointBaseUrl}/status/${encodeURIComponent(jobId)}`;
+export const runpodCancelUrl = (jobId: string) =>
+  `${runpodEndpointBaseUrl}/cancel/${encodeURIComponent(jobId)}`;
 export const runpodHealthUrl = runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/health` : "";
 export const runpodApiKey = process.env.RUNPOD_API_KEY?.trim() ?? "";
 export const comfyOrgApiKey = process.env.COMFY_ORG_API_KEY?.trim() ?? "";
@@ -113,8 +135,24 @@ export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "e
 export const mediaUploadMaxBytes = positiveNumber(process.env.MEDIA_UPLOAD_MAX_BYTES, 1024 * 1024 * 1024);
 export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
+export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
 
 export function validateRuntimeConfigForStartup() {
+  if (backendProcessRole !== "monolith" && !jobRowLevelWrites) {
+    throw new Error("ROLE=dispatcher/api requires JOB_STORE_DRIVER=sqlite and JOBS_ROW_LEVEL_WRITES=true.");
+  }
+  if (backendProcessRole !== "monolith" && appStateDriver !== "sqlite") {
+    throw new Error("ROLE=dispatcher/api requires APP_STATE_DRIVER=sqlite for shared app state and media indexing.");
+  }
+  if (backendProcessRole !== "monolith" && generationBackend === "local_comfy") {
+    throw new Error("ROLE=dispatcher/api does not support GENERATION_BACKEND=local_comfy until Comfy ownership is shared.");
+  }
+  if (backendProcessRole !== "monolith" && creditBalanceDeltaAccountingEnabled) {
+    throw new Error("ROLE=dispatcher/api requires CREDIT_BALANCE_DELTA_ACCOUNTING to remain disabled.");
+  }
+  if (backendProcessRole !== "monolith" && generationBackend === "runpod" && runpodSubmissionMode !== "async") {
+    throw new Error("ROLE=dispatcher/api requires RUNPOD_SUBMISSION_MODE=async so acknowledged RunPod jobs can resume after dispatcher failover.");
+  }
   if (generationBackend !== "runpod") return;
   const missing = missingRunpodEnvVars();
   if (!missing.length) return;

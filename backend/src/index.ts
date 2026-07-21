@@ -5,6 +5,8 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { projectFolderName } from "./projectFolderName.js";
+import { backendProcessRole, isDispatcher } from "./processRole.js";
 import {
   brickProjectsRoot,
   comfyRoot,
@@ -18,12 +20,14 @@ import {
   resultRecoveryIntervalMs,
   PORT,
   runpodPollIntervalMs,
+  runpodSubmissionMode,
   runpodTimeoutMs,
   uploadedMediaRoot,
   validateRuntimeConfigForStartup,
 } from "./config.js";
 import {
   changePassword,
+  closeAuthStore,
   createUser,
   getUserById,
   listUsers,
@@ -67,6 +71,7 @@ import {
   addProjectMember,
   createProjectFolder,
   createProject,
+  closeProjectStore,
   deleteProjectFolder,
   getProject,
   getProjects,
@@ -88,6 +93,7 @@ import { getWorkflowModel, getWorkflowModels, loadWorkflowModels } from "./workf
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { assertMetadataHealth } from "./metadataHealthService.js";
 import { logMemory, startMemoryLogging } from "./memoryLogger.js";
+import { closeMediaIndex, getMediaIndexStatus, initializeMediaIndex } from "./mediaService.js";
 import { safeSegment } from "./storageService.js";
 import { writeStreamAtomically } from "./streamingMediaService.js";
 
@@ -103,6 +109,7 @@ app.get("/api/health", async (_req, res) => {
   res.json({
     ok: true,
     service: "momi-animation-backend",
+    role: backendProcessRole,
     time: new Date().toISOString(),
     generationBackend,
     uptimeSeconds: Math.round(process.uptime()),
@@ -111,7 +118,9 @@ app.get("/api/health", async (_req, res) => {
       active: queue.active,
       runpodActive: queue.runpodActive,
       capacity: queue.capacity,
+      dispatcher: queue.dispatcher,
     },
+    mediaIndex: getMediaIndexStatus(),
     memory: {
       rssMiB: Math.round(memory.rss / 1024 / 1024),
       heapUsedMiB: Math.round(memory.heapUsed / 1024 / 1024),
@@ -177,6 +186,7 @@ function runtimeInfo() {
     generationBackend,
     localComfyEnabled,
     runpodConfigured: Boolean(process.env.RUNPOD_ENDPOINT_ID && process.env.RUNPOD_API_KEY && process.env.COMFY_ORG_API_KEY),
+    runpodSubmissionMode,
     runpodPollIntervalMs,
     runpodTimeoutMs,
   };
@@ -1253,7 +1263,7 @@ app.post("/api/jobs/:jobId/archive", async (req, res) => {
     if (!job) return res.status(404).json({ error: "Job not found" });
     res.json({ job });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : "Could not archive job" });
+    res.status(httpStatusFromError(error, 500)).json({ error: error instanceof Error ? error.message : "Could not archive job" });
   }
 });
 
@@ -1321,25 +1331,32 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 async function boot() {
   validateRuntimeConfigForStartup();
-  startMemoryLogging(memoryLogIntervalMs);
+  if (isDispatcher()) startMemoryLogging(memoryLogIntervalMs);
   logMemory("boot-start");
+  // Auth and projects share app-state.sqlite. Initialize its auth schema and
+  // one-time migration before opening the project connection.
+  await loadAuthData();
   await Promise.all([
-    loadAuthData(),
     loadWorkflowModels(),
     loadProjects(),
-    loadJobs(),
-    localComfyEnabled ? refreshServers() : Promise.resolve([]),
+    isDispatcher() && localComfyEnabled ? refreshServers() : Promise.resolve([]),
   ]);
+  // Dispatcher startup may immediately resume acknowledged RunPod jobs. Load
+  // shared projects and workflows first so those runners cannot observe an
+  // empty project/model cache during lease takeover.
+  await loadJobs();
+  await initializeMediaIndex();
   await assertMetadataHealth();
   const server = app.listen(PORT, HOST, () => {
     console.log(`Momi backend listening on http://${HOST}:${PORT}`);
+    console.log(`Process role: ${backendProcessRole}`);
     console.log(`Generation backend: ${generationBackend}`);
     logMemory("boot-listening");
   });
 
   installGracefulShutdown(server);
 
-  if (resultRecoveryIntervalMs > 0) {
+  if (isDispatcher() && resultRecoveryIntervalMs > 0) {
     // Re-download completed results that are still remote-only (failed or
     // skipped persists) while their signed URLs are valid: once shortly after
     // boot, then periodically.
@@ -1371,6 +1388,9 @@ function installGracefulShutdown(server: import("node:http").Server) {
       try {
         await flushPersistedJobs();
         closeJobStore();
+        closeAuthStore();
+        closeProjectStore();
+        closeMediaIndex();
         console.log("Pending job state flushed.");
       } catch (error) {
         console.error("Failed to flush job state on shutdown:", error);
@@ -1734,7 +1754,7 @@ function findCreditTrackerProjectStats(
 }
 
 function projectStatNameCandidates(project: Project) {
-  const folderName = project.folderName || path.basename(project.folderPath || "");
+  const folderName = project.folderName || projectFolderName(project.folderPath);
   return [
     folderName,
     `${project.shortName}_${project.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`,

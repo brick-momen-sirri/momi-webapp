@@ -1,8 +1,11 @@
+import { isDispatcher } from "./processRole.js";
+
 function bytesToMiB(bytes: number) {
   return Math.round((bytes / 1024 / 1024) * 10) / 10;
 }
 
 export function logMemory(stage: string, jobId?: string) {
+  if (!isDispatcher()) return;
   const memory = process.memoryUsage();
   console.info("[memory]", {
     stage,

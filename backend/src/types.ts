@@ -231,6 +231,7 @@ export type Job = {
   comfyServerUrl?: string;
   runpodJobId?: string;
   runpodStatus?: string;
+  runpodSubmissionState?: "preparing" | "submitting" | "submitted";
   projectId: string;
   folderId?: string | null;
   folderName?: string;
@@ -248,6 +249,7 @@ export type Job = {
   generatedPrompt?: string;
   textArtifacts?: JobTextArtifact[];
   status: JobStatus;
+  cancelRequested?: boolean;
   inputImages: string[];
   inputVideo?: string;
   resultUrls: string[];
