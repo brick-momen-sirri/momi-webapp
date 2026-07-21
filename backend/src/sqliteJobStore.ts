@@ -31,6 +31,16 @@ export type OpenOptions = {
 export type SqliteJobStore = {
   loadAll(): Job[];
   replaceAll(jobs: Job[]): SyncStats;
+  // Per-row writes for the multi-process (web/worker) model: each mutation
+  // touches only its own row, so a second process's concurrent writes are never
+  // clobbered the way a whole-array replaceAll would. seq is assigned in-DB
+  // under an IMMEDIATE transaction, so inserts from different processes never
+  // collide. Not yet on the live path — replaceAll remains the default writer
+  // until jobQueue is switched over.
+  insertJob(job: Job): void;
+  updateJob(job: Job): boolean;
+  applyToJob(id: string, mutate: (job: Job) => Job | void): Job | undefined;
+  deleteJob(id: string): boolean;
   count(): number;
   close(): void;
 };
@@ -49,6 +59,11 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   // fileMustExist stops better-sqlite3 from silently creating an empty DB when
   // the path is wrong or the store was never initialized.
   const db = new Database(dbPath, readonly ? { readonly: true, fileMustExist: true } : {});
+  // Wait (rather than throw SQLITE_BUSY) when another connection/process holds
+  // the write lock. Harmless single-process; required once the web tier and the
+  // dispatcher write the same file. Keep write transactions tiny so this wait
+  // (which blocks the synchronous better-sqlite3 call) stays sub-millisecond.
+  db.pragma("busy_timeout = 5000");
   if (!readonly) {
     db.pragma("journal_mode = WAL");
     db.pragma("synchronous = NORMAL");
@@ -82,6 +97,9 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   const countStmt = db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
 
   if (readonly) {
+    const readonlyError = () => {
+      throw new Error("Cannot write to a read-only SQLite job store.");
+    };
     return {
       loadAll() {
         return selectAll.all().map((row) => JSON.parse(row.data) as Job);
@@ -89,9 +107,11 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       count() {
         return countStmt.get()?.n ?? 0;
       },
-      replaceAll() {
-        throw new Error("Cannot write to a read-only SQLite job store.");
-      },
+      replaceAll: readonlyError,
+      insertJob: readonlyError,
+      updateJob: readonlyError,
+      applyToJob: readonlyError,
+      deleteJob: readonlyError,
       close() {
         db.close();
       },
@@ -113,6 +133,15 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       data = excluded.data
   `);
   const deleteById = db.prepare<[string]>(`DELETE FROM ${table} WHERE id = ?`);
+  const selectOne = db.prepare<[string], JobRow>(`SELECT data FROM ${table} WHERE id = ?`);
+  const maxSeqStmt = db.prepare<[], { m: number }>(`SELECT COALESCE(MAX(seq), 0) AS m FROM ${table}`);
+  const updateColumns = db.prepare(`
+    UPDATE ${table} SET
+      status = @status, project_id = @project_id, user_id = @user_id,
+      created_at = @created_at, completed_at = @completed_at,
+      comfy_prompt_id = @comfy_prompt_id, credits_used = @credits_used, data = @data
+    WHERE id = @id
+  `);
 
   // Last-synced state, seeded from the DB on open. Hashes start empty, so the
   // first sync after boot rewrites row data once (seq is preserved); every
@@ -165,12 +194,65 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     return { written, deleted };
   });
 
+  const updateParams = (job: Job, data: string) => {
+    const { seq: _seq, ...rest } = toRow(job, 0, data);
+    return rest;
+  };
+
+  // Insert a new row (or refresh an existing id's data), assigning seq = MAX+1
+  // inside an IMMEDIATE transaction so two processes can never collide on seq.
+  const insertJobTx = db.transaction((job: Job) => {
+    const data = JSON.stringify(job);
+    assertNoEmbeddedMedia(job, `job ${job.id}`);
+    const seq = knownSeq.get(job.id) ?? maxSeqStmt.get()!.m + 1;
+    upsert.run(toRow(job, seq, data));
+    knownSeq.set(job.id, seq);
+    knownHash.set(job.id, hashString(data));
+    if (seq >= nextSeq) nextSeq = seq + 1;
+  });
+
+  // Read-modify-write a single row atomically (forward-safe for cross-process:
+  // never writes a cache-built blob over a row another process may have edited).
+  const applyToJobTx = db.transaction((id: string, mutate: (job: Job) => Job | void) => {
+    const row = selectOne.get(id);
+    if (!row) return undefined;
+    const current = JSON.parse(row.data) as Job;
+    const next = (mutate(current) ?? current) as Job;
+    const data = JSON.stringify(next);
+    assertNoEmbeddedMedia(next, `job ${id}`);
+    updateColumns.run(updateParams(next, data));
+    knownHash.set(id, hashString(data));
+    return next;
+  });
+
   return {
     loadAll() {
       return selectAll.all().map((row) => JSON.parse(row.data) as Job);
     },
     replaceAll(jobs: Job[]) {
       return syncTx(jobs);
+    },
+    insertJob(job: Job) {
+      insertJobTx.immediate(job);
+    },
+    updateJob(job: Job) {
+      const data = JSON.stringify(job);
+      assertNoEmbeddedMedia(job, `job ${job.id}`);
+      const info = updateColumns.run(updateParams(job, data));
+      if (info.changes > 0) {
+        knownHash.set(job.id, hashString(data));
+        return true;
+      }
+      return false;
+    },
+    applyToJob(id: string, mutate: (job: Job) => Job | void) {
+      return applyToJobTx.immediate(id, mutate);
+    },
+    deleteJob(id: string) {
+      const info = deleteById.run(id);
+      knownSeq.delete(id);
+      knownHash.delete(id);
+      return info.changes > 0;
     },
     count() {
       return countStmt.get()?.n ?? 0;

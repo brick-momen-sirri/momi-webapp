@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import Database from "better-sqlite3";
 import { openSqliteJobStore } from "./sqliteJobStore.js";
 import type { Job } from "./types.js";
 
@@ -180,5 +181,90 @@ test("seq is stable across reopen so order survives later updates", async () => 
     assert.deepEqual(second.loadAll().map((j) => j.id), ["job_2", "job_1"]);
     assert.equal(second.loadAll().find((j) => j.id === "job_1")?.status, "failed");
     second.close();
+  });
+});
+
+// --- Per-row writes (foundation for the web/worker split) ---
+
+test("insertJob assigns increasing seq and loadAll returns newest-first", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    store.insertJob(job("job_1"));
+    store.insertJob(job("job_2"));
+    store.insertJob(job("job_3"));
+    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_3", "job_2", "job_1"]);
+    assert.equal(store.count(), 3);
+    store.close();
+  });
+});
+
+test("updateJob rewrites content, preserves order, and reports missing ids", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    store.insertJob(job("job_1", { status: "running" }));
+    store.insertJob(job("job_2"));
+    assert.equal(store.updateJob(job("job_1", { status: "completed" })), true);
+    assert.equal(store.updateJob(job("ghost")), false);
+    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_2", "job_1"]);
+    assert.equal(store.loadAll().find((j) => j.id === "job_1")?.status, "completed");
+    store.close();
+  });
+});
+
+test("applyToJob does an atomic read-modify-write and no-ops on missing ids", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    store.insertJob(job("job_1", { status: "queued" }));
+    const updated = store.applyToJob("job_1", (j) => { j.status = "canceled"; });
+    assert.equal(updated?.status, "canceled");
+    assert.equal(store.loadAll()[0].status, "canceled");
+    assert.equal(store.applyToJob("ghost", (j) => j), undefined);
+    store.close();
+  });
+});
+
+test("deleteJob removes a row and reports whether it existed", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    store.insertJob(job("job_1"));
+    store.insertJob(job("job_2"));
+    assert.equal(store.deleteJob("job_1"), true);
+    assert.equal(store.deleteJob("job_1"), false);
+    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_2"]);
+    store.close();
+  });
+});
+
+test("per-row writes enforce the no-embedded-media contract", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    assert.throws(() => store.insertJob(job("bad", { prompt: "data:image/png;base64,AAAA" } as Partial<Job>)), /embedded media/i);
+    store.insertJob(job("job_1"));
+    assert.throws(() => store.updateJob(job("job_1", { prompt: "data:video/mp4;base64,AAAA" } as Partial<Job>)), /embedded media/i);
+    assert.equal(store.count(), 1);
+    store.close();
+  });
+});
+
+test("concurrent per-row inserts from two connections keep all rows and unique seq", async () => {
+  await withStore((dbPath) => {
+    // Two independent connections to the SAME file — the multi-process model.
+    const a = openSqliteJobStore(dbPath, "jobs");
+    const b = openSqliteJobStore(dbPath, "jobs");
+    a.insertJob(job("job_a1"));
+    b.insertJob(job("job_b1")); // interleaved writer must not clobber a's row
+    a.insertJob(job("job_a2"));
+    b.insertJob(job("job_b2"));
+    a.close();
+    b.close();
+
+    const raw = new Database(dbPath, { readonly: true });
+    const rows = raw.prepare("SELECT id, seq FROM jobs ORDER BY seq").all() as Array<{ id: string; seq: number }>;
+    raw.close();
+
+    // No clobber: all four rows survive.
+    assert.deepEqual(rows.map((r) => r.id).sort(), ["job_a1", "job_a2", "job_b1", "job_b2"]);
+    // DB-authoritative seq: every seq is unique (no cross-connection collision).
+    assert.equal(new Set(rows.map((r) => r.seq)).size, 4);
   });
 });
