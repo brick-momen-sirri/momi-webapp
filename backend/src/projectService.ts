@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { brickProjectsRoot, localProjectsRoot, projectsStorePath } from "./config.js";
+import { appStateDriver, appStateSqlitePath, brickProjectsRoot, localProjectsRoot, projectsStorePath } from "./config.js";
+import { invalidateSharedMediaIndex } from "./mediaIndexCoordinator.js";
+import { projectFolderName } from "./projectFolderName.js";
 import {
   buildProjectDiskName,
   createProjectFolder as createProjectFolderRecord,
@@ -12,8 +14,10 @@ import {
   renameProjectFolder as renameProjectFolderRecord,
   renameProjectOnDisk,
   validateDisplayName,
+  withProjectRegistryMutationLock,
 } from "./projectMetadataService.js";
 import { readJsonFile, safeSegment, writeJsonFile } from "./storageService.js";
+import { openSqliteProjectStore, type SqliteProjectStore } from "./sqliteProjectStore.js";
 import type { Project, ProjectFolder, ProjectMember } from "./types.js";
 
 const now = () => new Date().toISOString();
@@ -46,15 +50,58 @@ function seedProjects(): Project[] {
 }
 
 let projects: Project[] = [];
+let sqliteProjectStore: SqliteProjectStore | undefined;
 
 export async function loadProjects() {
-  await ensureProjectFolder(path.join(brickProjectsRoot, PLAYGROUND_FOLDER_NAME));
-  const storedProjects = await readJsonFile<Project[]>(projectsStorePath, []);
-  const discoveredProjects = await discoverBrickProjects();
-  projects = normalizeProjects(mergeProjects(storedProjects, discoveredProjects));
-  projects = await Promise.all(projects.map(ensureProjectMetadata));
-  await saveProjects();
-  return projects;
+  sqliteProjectStore?.close();
+  sqliteProjectStore = undefined;
+  return withProjectRegistryMutationLock(brickProjectsRoot, async () => {
+    await ensureProjectFolder(path.join(brickProjectsRoot, PLAYGROUND_FOLDER_NAME));
+    const storedProjects = await readJsonFile<Project[]>(projectsStorePath, []);
+    const discoveredProjects = await discoverBrickProjects();
+    projects = normalizeProjects(mergeProjects(storedProjects, discoveredProjects));
+
+    if (appStateDriver === "sqlite") {
+      sqliteProjectStore = openSqliteProjectStore(appStateSqlitePath);
+      const migrated = sqliteProjectStore.migrateFromJsonIfNeeded(projects);
+      if (migrated && projects.length) {
+        console.log(`Migrated ${projects.length} projects into app-state SQLite.`);
+      }
+
+      const discovered = normalizeProjects(discoveredProjects);
+      for (const project of discovered) {
+        const existing = sqliteProjectStore.loadProjectById(project.id);
+        if (existing && !sameProjectPath(existing.folderPath, project.folderPath)) {
+          const [existingPathPresent, discoveredPathPresent] = await Promise.all([
+            projectPathExists(existing.folderPath),
+            projectPathExists(project.folderPath),
+          ]);
+          if (!existingPathPresent && discoveredPathPresent) {
+            sqliteProjectStore.applyToProject(existing.id, (current) => mergeHydratedProject(current, project));
+          }
+        }
+        sqliteProjectStore.insertDiscoveredProject(project);
+      }
+
+      // Complete an interrupted create and refresh filesystem-owned folder
+      // metadata without replacing row-owned ACL fields.
+      for (const project of sqliteProjectStore.loadProjects()) {
+        const hydrated = await ensureProjectMetadata(project);
+        sqliteProjectStore.applyToProject(project.id, (current) => mergeHydratedProject(current, hydrated));
+      }
+      projects = [];
+      return getProjects();
+    }
+
+    projects = await Promise.all(projects.map(ensureProjectMetadata));
+    await saveProjects();
+    return projects;
+  });
+}
+
+export function closeProjectStore() {
+  sqliteProjectStore?.close();
+  sqliteProjectStore = undefined;
 }
 
 export async function discoverBrickProjects() {
@@ -94,26 +141,26 @@ export async function discoverBrickProjects() {
 }
 
 export function getProjects() {
-  return projects;
+  return sqliteProjectStore?.loadProjects() ?? projects;
 }
 
 export function getProject(id: string) {
-  return projects.find((project) => project.id === id);
+  return sqliteProjectStore?.loadProjectById(id) ?? projects.find((project) => project.id === id);
 }
 
 export async function createProject(input: Partial<Project>) {
   const createdAt = now();
   const shortName = (input.shortName || input.code || safeSegment(input.name || "Project").slice(0, 8)).trim().toUpperCase();
-  const parsed = parseProjectDiskName(input.folderName || path.basename(input.folderPath || ""), input.name || "Project", shortName);
+  const parsed = parseProjectDiskName(input.folderName || projectFolderName(input.folderPath), input.name || "Project", shortName);
   const client = validateDisplayName(input.client || parsed.client || "Client", "Client");
   const projectName = validateDisplayName(input.name || parsed.name || "New Project", "Project name");
   const requestedFolderName =
     input.folderName?.trim() ||
-    path.basename(input.folderPath || "").trim() ||
+    projectFolderName(input.folderPath).trim() ||
     buildProjectDiskName(shortName, client, projectName);
   const folderName = validateBrickProjectFolderName(requestedFolderName);
   const folderPath =
-    input.folderPath && path.basename(input.folderPath) === folderName
+    input.folderPath && projectFolderName(input.folderPath) === folderName
       ? input.folderPath
       : path.join(brickProjectsRoot, folderName);
   const project: Project = {
@@ -125,39 +172,50 @@ export async function createProject(input: Partial<Project>) {
     displayName: `${client} - ${projectName}`,
     diskName: folderName,
     description: input.description,
-    folderName: folderName || path.basename(folderPath),
+    folderName: folderName || projectFolderName(folderPath),
     folderPath,
     ownerId: input.ownerId || "usr_momen",
     members: input.members || [{ userId: input.ownerId || "usr_momen", role: "owner", addedAt: createdAt, addedBy: input.ownerId || "usr_momen" }],
     groupMembers: input.groupMembers || [],
-    jobCount: input.jobCount ?? 0,
+    jobCount: 0,
     createdAt,
     updatedAt: createdAt,
   };
-  await ensureProjectFolder(folderPath);
-  const hydrated = await ensureProjectMetadata(project);
-  projects = [hydrated, ...projects];
-  await saveProjects();
-  return hydrated;
+  return withProjectRegistryMutationLock(brickProjectsRoot, async () => {
+    if (sqliteProjectStore) {
+      try {
+        sqliteProjectStore.insertProject(project);
+      } catch (error) {
+        throwProjectIdentityConstraint(error);
+      }
+    }
+
+    try {
+      await ensureProjectFolder(folderPath);
+    } catch (error) {
+      sqliteProjectStore?.deleteProject(project.id);
+      throw error;
+    }
+    const hydrated = await ensureProjectMetadata(project);
+    if (sqliteProjectStore) {
+      return sqliteProjectStore.applyToProject(project.id, (current) => mergeHydratedProject(current, hydrated)) ?? hydrated;
+    }
+    projects = [hydrated, ...projects];
+    await saveProjects();
+    return hydrated;
+  });
 }
 
 export async function updateProject(projectId: string, input: Partial<Project>) {
+  if (sqliteProjectStore) {
+    return sqliteProjectStore.applyToProject(projectId, (current) => updatedProject(current, input));
+  }
   const current = getProject(projectId);
   if (!current) {
     return undefined;
   }
 
-  const members = normalizeMembers(input.members ?? current.members, current.ownerId);
-  const updated: Project = {
-    ...current,
-    name: current.name,
-    shortName: current.shortName,
-    description: input.description ?? current.description,
-    ownerId: input.ownerId || current.ownerId,
-    members,
-    groupMembers: input.groupMembers ?? current.groupMembers ?? [],
-    updatedAt: now(),
-  };
+  const updated = updatedProject(current, input);
 
   projects = projects.map((project) => (project.id === projectId ? updated : project));
   await saveProjects();
@@ -165,27 +223,35 @@ export async function updateProject(projectId: string, input: Partial<Project>) 
 }
 
 export async function renameProject(projectId: string, input: { client?: string; name?: string }, userId: string) {
-  const current = getProject(projectId);
-  if (!current) {
-    return undefined;
-  }
+  return withProjectRegistryMutationLock(brickProjectsRoot, async () => {
+    const current = getProject(projectId);
+    if (!current) {
+      return undefined;
+    }
 
-  const renamed = await renameProjectOnDisk(current, input, userId);
-  const updated = await ensureProjectMetadata({
-    ...current,
-    name: renamed.metadata.name,
-    shortName: renamed.metadata.code,
-    code: renamed.metadata.code,
-    client: renamed.metadata.client,
-    displayName: renamed.metadata.displayName,
-    diskName: renamed.folderName,
-    folderName: renamed.folderName,
-    folderPath: renamed.folderPath,
-    updatedAt: renamed.metadata.updatedAt,
+    const renamed = await renameProjectOnDisk(current, input, userId);
+    const updated = await ensureProjectMetadata({
+      ...current,
+      name: renamed.metadata.name,
+      shortName: renamed.metadata.code,
+      code: renamed.metadata.code,
+      client: renamed.metadata.client,
+      displayName: renamed.metadata.displayName,
+      diskName: renamed.folderName,
+      folderName: renamed.folderName,
+      folderPath: renamed.folderPath,
+      updatedAt: renamed.metadata.updatedAt,
+    });
+    if (sqliteProjectStore) {
+      const stored = sqliteProjectStore.applyToProject(projectId, (latest) => mergeHydratedProject(latest, updated));
+      invalidateSharedMediaIndex();
+      return stored;
+    }
+    projects = projects.map((project) => (project.id === projectId ? updated : project));
+    await saveProjects();
+    invalidateSharedMediaIndex();
+    return updated;
   });
-  projects = projects.map((project) => (project.id === projectId ? updated : project));
-  await saveProjects();
-  return updated;
 }
 
 export async function createProjectFolder(projectId: string, input: { name: string; parentId?: string | null }, userId: string) {
@@ -201,6 +267,7 @@ export async function renameProjectFolder(projectId: string, folderId: string, i
   if (!project) return undefined;
   const folder = await renameProjectFolderRecord(project, folderId, input, userId);
   await refreshProjectFolders(projectId);
+  invalidateSharedMediaIndex();
   return folder;
 }
 
@@ -220,12 +287,21 @@ export async function listProjectFolders(projectId: string): Promise<ProjectFold
 }
 
 export async function addProjectMember(projectId: string, member: ProjectMember) {
+  if (!isProjectRole(member.role)) {
+    throw new Error("Project role must be owner, editor, or viewer.");
+  }
+  if (sqliteProjectStore) {
+    return sqliteProjectStore.applyToProject(projectId, (project) => {
+      project.members = normalizeMembers([
+        ...project.members.filter((item) => item.userId !== member.userId),
+        { ...member, addedAt: member.addedAt || now(), addedBy: member.addedBy || project.ownerId },
+      ], project.ownerId);
+      project.updatedAt = now();
+    });
+  }
   const project = getProject(projectId);
   if (!project) {
     return undefined;
-  }
-  if (!isProjectRole(member.role)) {
-    throw new Error("Project role must be owner, editor, or viewer.");
   }
   project.members = [
     ...project.members.filter((item) => item.userId !== member.userId),
@@ -238,6 +314,12 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
 }
 
 export async function removeProjectMember(projectId: string, userId: string) {
+  if (sqliteProjectStore) {
+    return sqliteProjectStore.applyToProject(projectId, (project) => {
+      project.members = project.members.filter((item) => item.userId !== userId || item.role === "owner");
+      project.updatedAt = now();
+    });
+  }
   const project = getProject(projectId);
   if (!project) {
     return undefined;
@@ -248,17 +330,50 @@ export async function removeProjectMember(projectId: string, userId: string) {
   return project;
 }
 
-export async function incrementProjectJobCount(projectId: string) {
-  const project = getProject(projectId);
-  if (project) {
-    project.jobCount += 1;
-    project.updatedAt = now();
-    await saveProjects();
-  }
+async function saveProjects() {
+  if (sqliteProjectStore) return;
+  await writeJsonFile(projectsStorePath, projects);
 }
 
-async function saveProjects() {
-  await writeJsonFile(projectsStorePath, projects);
+function updatedProject(current: Project, input: Partial<Project>): Project {
+  const ownerId = input.ownerId || current.ownerId;
+  return {
+    ...current,
+    name: current.name,
+    shortName: current.shortName,
+    description: input.description ?? current.description,
+    ownerId,
+    members: normalizeMembers(input.members ?? current.members, ownerId),
+    groupMembers: input.groupMembers ?? current.groupMembers ?? [],
+    updatedAt: now(),
+  };
+}
+
+function mergeHydratedProject(current: Project, hydrated: Project): Project {
+  return {
+    ...current,
+    name: hydrated.name,
+    shortName: hydrated.shortName,
+    code: hydrated.code,
+    client: hydrated.client,
+    displayName: hydrated.displayName,
+    diskName: hydrated.diskName,
+    folderName: hydrated.folderName,
+    folderPath: hydrated.folderPath,
+    folders: hydrated.folders,
+    updatedAt: hydrated.updatedAt,
+  };
+}
+
+function throwProjectIdentityConstraint(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("app_projects.folder_path_norm") || message.includes("app_projects.folder_name_norm")) {
+    throw new Error("A project already uses that folder.");
+  }
+  if (message.includes("app_projects.id")) {
+    throw new Error("A project with that ID already exists.");
+  }
+  throw error;
 }
 
 function normalizeProjects(input: Project[]) {
@@ -267,11 +382,15 @@ function normalizeProjects(input: Project[]) {
     .filter((project) => project.id && project.name && project.folderPath)
     .map((project) => {
       if (project.id === seed.id) {
-        return { ...seed, members: project.members?.length ? project.members : seed.members, groupMembers: project.groupMembers ?? [] };
+        return withoutDerivedProjectStats({
+          ...seed,
+          members: project.members?.length ? project.members : seed.members,
+          groupMembers: project.groupMembers ?? [],
+        });
       }
-      const folderName = project.folderName || path.basename(project.folderPath || "");
+      const folderName = project.folderName || projectFolderName(project.folderPath);
       const parsed = parseProjectDiskName(folderName, project.name, project.shortName);
-      return {
+      return withoutDerivedProjectStats({
         ...project,
         shortName: project.shortName || parsed.code,
         code: project.code || project.shortName || parsed.code,
@@ -279,12 +398,19 @@ function normalizeProjects(input: Project[]) {
         displayName: project.displayName || `${project.client || parsed.client} - ${project.name || parsed.name}`,
         diskName: project.diskName || folderName,
         folderName,
-      };
+      });
     });
   if (!valid.some((project) => project.id === seed.id)) {
     valid.unshift(seed);
   }
   return valid;
+}
+
+function withoutDerivedProjectStats(project: Project): Project {
+  const normalized = { ...project, jobCount: 0 };
+  delete normalized.creditsUsed;
+  delete normalized.monthCreditsUsed;
+  return normalized;
 }
 
 function normalizeMembers(members: ProjectMember[], ownerId: string) {
@@ -334,13 +460,25 @@ function sameProjectRecord(left: Project, right: Project) {
   const leftPath = normalizeProjectPath(left.folderPath);
   const rightPath = normalizeProjectPath(right.folderPath);
   if (leftPath && rightPath && leftPath === rightPath) return true;
-  const leftFolder = left.folderName || path.basename(left.folderPath || "");
-  const rightFolder = right.folderName || path.basename(right.folderPath || "");
+  const leftFolder = left.folderName || projectFolderName(left.folderPath);
+  const rightFolder = right.folderName || projectFolderName(right.folderPath);
   return Boolean(leftFolder && rightFolder && leftFolder.toLowerCase() === rightFolder.toLowerCase());
 }
 
 function normalizeProjectPath(folderPath: string | undefined) {
   return folderPath ? path.resolve(folderPath).toLowerCase() : "";
+}
+
+function sameProjectPath(left: string, right: string) {
+  return normalizeProjectPath(left) === normalizeProjectPath(right);
+}
+
+async function projectPathExists(folderPath: string) {
+  try {
+    return (await fs.stat(folderPath)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export function isBrickProjectFolder(folderName: string) {
@@ -372,6 +510,13 @@ async function refreshProjectFolders(projectId: string) {
   const project = getProject(projectId);
   if (!project) return;
   const hydrated = await ensureProjectMetadata(project);
+  if (sqliteProjectStore) {
+    sqliteProjectStore.applyToProject(projectId, (current) => {
+      current.folders = hydrated.folders;
+      current.updatedAt = now();
+    });
+    return;
+  }
   projects = projects.map((item) => (item.id === projectId ? hydrated : item));
   await saveProjects();
 }

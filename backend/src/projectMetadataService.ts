@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { projectFolderName } from "./projectFolderName.js";
 import { assertManifestRecordSafe, readJsonFile, writeJsonFile } from "./storageService.js";
 import type { Project, ProjectFolder, ProjectMetadata } from "./types.js";
 
@@ -51,7 +52,8 @@ export async function ensureProjectMetadata(project: Project): Promise<Project> 
   await ensureProjectFolderStructure(project.folderPath);
   const metadataPath = projectMetadataPath(project.folderPath);
   const existing = await readProjectMetadata(project.folderPath);
-  const parsed = parseProjectDiskName(path.basename(project.folderPath), project.name, project.shortName);
+  const folderName = projectFolderName(project.folderPath);
+  const parsed = parseProjectDiskName(folderName, project.name, project.shortName);
   const code = existing?.code || parsed.code || project.shortName || "0000";
   const client = existing?.client || project.client || parsed.client || project.shortName || "Client";
   const projectName = existing?.name || project.name || parsed.name || "Project";
@@ -62,7 +64,7 @@ export async function ensureProjectMetadata(project: Project): Promise<Project> 
     client,
     name: projectName,
     displayName: displayName(client, projectName),
-    diskName: path.basename(project.folderPath),
+    diskName: folderName,
     createdAt: existing?.createdAt || project.createdAt || now(),
     updatedAt: existing?.updatedAt || project.updatedAt || now(),
     renamedFrom: Array.isArray(existing?.renamedFrom) ? existing.renamedFrom.filter((item): item is string => typeof item === "string") : [],
@@ -255,7 +257,7 @@ export async function renameProjectOnDisk(
 
   try {
     const existing = await readProjectMetadata(oldRoot);
-    const parsed = parseProjectDiskName(path.basename(oldRoot), project.name, project.shortName);
+    const parsed = parseProjectDiskName(projectFolderName(oldRoot), project.name, project.shortName);
     const code = existing?.code || project.shortName || parsed.code || "0000";
     const client = validateDisplayName(input.client ?? existing?.client ?? project.client ?? parsed.client ?? "Client", "Client");
     const name = validateDisplayName(input.name ?? existing?.name ?? project.name ?? parsed.name ?? "Project", "Project name");
@@ -269,7 +271,7 @@ export async function renameProjectOnDisk(
     currentRoot = newRoot;
     await ensureProjectFolderStructure(newRoot);
 
-    const oldDiskName = path.basename(oldRoot);
+    const oldDiskName = projectFolderName(oldRoot);
     const metadata: ProjectMetadata = {
       version: 1,
       projectId: existing?.projectId || project.id,
@@ -322,6 +324,15 @@ export async function appendManifestEvent(project: Project, record: Record<strin
 
 export async function withProjectMutationLock<T>(project: Project, operation: () => Promise<T>) {
   return withProjectLock(project, operation);
+}
+
+export async function withProjectRegistryMutationLock<T>(projectsRoot: string, operation: () => Promise<T>) {
+  const lock = await acquireProjectLock(projectsRoot, 800);
+  try {
+    return await operation();
+  } finally {
+    await releaseProjectLock(lock, projectsRoot);
+  }
 }
 
 export function validateDisplayName(name: unknown, label = "Name") {
@@ -430,10 +441,10 @@ async function withProjectLock<T>(project: Project, fn: () => Promise<T>) {
   }
 }
 
-async function acquireProjectLock(projectRoot: string): Promise<ProjectLock> {
+async function acquireProjectLock(projectRoot: string, maxAttempts = 80): Promise<ProjectLock> {
   await fs.mkdir(path.join(projectRoot, "metadata"), { recursive: true });
   const lockPath = path.join(projectRoot, "metadata", ".lock");
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const handle = await fs.open(lockPath, "wx");
       await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: now() }), "utf8");
