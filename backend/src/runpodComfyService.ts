@@ -1,6 +1,7 @@
 import {
   assertRunpodConfig,
   comfyOrgApiKey,
+  runpodCancelUrl,
   runpodApiKey,
   runpodEndpointUrl,
   runpodPollIntervalMs,
@@ -49,6 +50,14 @@ type RunpodComfyInput = {
   images: RunpodComfyImageInput[];
   videos?: RunpodComfyImageInput[];
   fetchImpl?: typeof fetch;
+  shouldCancel?: () => boolean;
+  onSubmitted?: (submission: { jobId: string; status: string }) => void | Promise<void>;
+};
+
+type ResumeRunpodComfyInput = {
+  jobId: string;
+  fetchImpl?: typeof fetch;
+  shouldCancel?: () => boolean;
 };
 
 type RunpodResponse = {
@@ -81,8 +90,23 @@ export class RunpodComfyError extends Error {
   }
 }
 
-export async function runComfyWorkflowOnRunpod({ workflow, images, videos = [], fetchImpl = fetch }: RunpodComfyInput): Promise<RunpodComfyResult> {
+export class RunpodComfyCanceledError extends Error {
+  constructor() {
+    super("RunPod job canceled by request.");
+    this.name = "RunpodComfyCanceledError";
+  }
+}
+
+export async function runComfyWorkflowOnRunpod({
+  workflow,
+  images,
+  videos = [],
+  fetchImpl = fetch,
+  shouldCancel,
+  onSubmitted,
+}: RunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
+  throwIfCancellationRequested(shouldCancel);
   const startedAt = Date.now();
   const inputFiles = [...images, ...videos];
   const body = JSON.stringify({
@@ -99,9 +123,39 @@ export async function runComfyWorkflowOnRunpod({ workflow, images, videos = [], 
     method: "POST",
     headers: runpodHeaders(),
     body,
-  }, startedAt);
+  }, startedAt, shouldCancel);
 
-  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt);
+  const submittedJobId = runpodJobId(firstResponse);
+  if (submittedJobId && onSubmitted) {
+    await onSubmitted({
+      jobId: submittedJobId,
+      status: normalizeStatus(firstResponse.status ?? "IN_QUEUE"),
+    });
+  }
+
+  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt, shouldCancel);
+}
+
+export async function resumeComfyWorkflowOnRunpod({
+  jobId,
+  fetchImpl = fetch,
+  shouldCancel,
+}: ResumeRunpodComfyInput): Promise<RunpodComfyResult> {
+  assertRunpodConfig();
+  throwIfCancellationRequested(shouldCancel);
+  return resolveRunpodResponse({ id: jobId, status: "IN_PROGRESS" }, fetchImpl, Date.now(), shouldCancel);
+}
+
+export async function cancelComfyWorkflowOnRunpod(jobId: string, fetchImpl: typeof fetch = fetch) {
+  assertRunpodConfig();
+  const response = await runpodFetch(fetchImpl, runpodCancelUrl(jobId), {
+    method: "POST",
+    headers: runpodHeaders(),
+  }, Date.now());
+  return {
+    jobId: runpodJobId(response) ?? jobId,
+    status: normalizeStatus(response.status ?? "CANCELLED"),
+  };
 }
 
 export function extractRunpodMedia(output: unknown): RunpodMediaResult[] {
@@ -178,9 +232,15 @@ export function creditUsageFromRunpodOutput(output: unknown) {
   return normalizeRunpodCreditUsage((output as Record<string, unknown>).credit_usage);
 }
 
-async function resolveRunpodResponse(response: RunpodResponse, fetchImpl: typeof fetch, startedAt: number): Promise<RunpodComfyResult> {
+async function resolveRunpodResponse(
+  response: RunpodResponse,
+  fetchImpl: typeof fetch,
+  startedAt: number,
+  shouldCancel?: () => boolean,
+): Promise<RunpodComfyResult> {
   let current = response;
   while (true) {
+    throwIfCancellationRequested(shouldCancel);
     const status = normalizeStatus(current.status ?? (current.output as Record<string, unknown> | undefined)?.status ?? "COMPLETED");
     if (pendingStatuses.has(status)) {
       const jobId = runpodJobId(current);
@@ -188,11 +248,11 @@ async function resolveRunpodResponse(response: RunpodResponse, fetchImpl: typeof
         throw new RunpodComfyError("RunPod returned a pending status without a job id.", { response: current, status });
       }
 
-      await waitBeforePoll(startedAt);
+      await waitBeforePoll(startedAt, shouldCancel);
       current = await runpodFetch(fetchImpl, runpodStatusUrl(jobId), {
         method: "GET",
         headers: runpodHeaders(),
-      }, startedAt);
+      }, startedAt, shouldCancel);
       continue;
     }
 
@@ -238,9 +298,31 @@ function logTextArtifacts(textArtifacts: RunpodTextArtifact[]) {
   console.info(`[runpod] Found ${textArtifacts.length} text artifact(s)${labels ? `: ${labels}` : "."}`);
 }
 
-async function runpodFetch(fetchImpl: typeof fetch, url: string, init: RequestInit, startedAt: number) {
+async function runpodFetch(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  startedAt: number,
+  shouldCancel?: () => boolean,
+) {
+  throwIfCancellationRequested(shouldCancel);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), remainingTimeoutMs(startedAt));
+  let canceled = false;
+  let cancellationError: unknown;
+  const cancellationTimer = shouldCancel
+    ? setInterval(() => {
+        try {
+          if (!shouldCancel()) return;
+          canceled = true;
+          controller.abort();
+        } catch (error) {
+          cancellationError = error;
+          controller.abort();
+        }
+      }, Math.min(1000, Math.max(50, runpodPollIntervalMs)))
+    : undefined;
+  cancellationTimer?.unref?.();
   logRunpodRequest(url, init);
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal });
@@ -255,6 +337,10 @@ async function runpodFetch(fetchImpl: typeof fetch, url: string, init: RequestIn
     }
     return data;
   } catch (error) {
+    if (cancellationError) throw cancellationError;
+    if (error instanceof Error && error.name === "AbortError" && canceled) {
+      throw new RunpodComfyCanceledError();
+    }
     if (!(error instanceof RunpodComfyError)) {
       logRunpodFetchError(url, error);
     }
@@ -265,6 +351,7 @@ async function runpodFetch(fetchImpl: typeof fetch, url: string, init: RequestIn
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (cancellationTimer) clearInterval(cancellationTimer);
   }
 }
 
@@ -307,9 +394,17 @@ function remainingTimeoutMs(startedAt: number) {
   return remaining;
 }
 
-async function waitBeforePoll(startedAt: number) {
+async function waitBeforePoll(startedAt: number, shouldCancel?: () => boolean) {
+  throwIfCancellationRequested(shouldCancel);
   const interval = Math.min(runpodPollIntervalMs, remainingTimeoutMs(startedAt));
   await new Promise((resolve) => setTimeout(resolve, interval));
+  throwIfCancellationRequested(shouldCancel);
+}
+
+function throwIfCancellationRequested(shouldCancel?: () => boolean) {
+  if (shouldCancel?.()) {
+    throw new RunpodComfyCanceledError();
+  }
 }
 
 function normalizeStatus(status: unknown) {

@@ -42,11 +42,13 @@ test("runsync returns COMPLETED", async () => {
 
 test("runsync returns IN_PROGRESS then status COMPLETED", async () => {
   const calls: string[] = [];
+  const submissions: Array<{ jobId: string; status: string }> = [];
   const fetchImpl = async (url: string | URL | Request) => {
     calls.push(String(url));
     if (calls.length === 1) {
       return jsonResponse({ id: "job-progress", status: "IN_PROGRESS" });
     }
+    assert.deepEqual(submissions, [{ jobId: "job-progress", status: "IN_PROGRESS" }]);
     return jsonResponse({
       id: "job-progress",
       status: "COMPLETED",
@@ -58,11 +60,74 @@ test("runsync returns IN_PROGRESS then status COMPLETED", async () => {
     workflow: {},
     images: [],
     fetchImpl: fetchImpl as typeof fetch,
+    onSubmitted: (submission) => {
+      submissions.push(submission);
+    },
   });
 
   assert.equal(calls.length, 2);
   assert.match(calls[1] ?? "", /\/status\/job-progress$/);
   assert.equal(result.media[0]?.isVideo, true);
+});
+
+test("resume polls an acknowledged job id without submitting the workflow again", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), method: init?.method });
+    return jsonResponse({
+      id: "job-resume",
+      status: "COMPLETED",
+      output: { images: [{ filename: "result.png", url: "https://cdn.example/result.png" }] },
+    });
+  };
+
+  const result = await service.resumeComfyWorkflowOnRunpod({
+    jobId: "job-resume",
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.method, "GET");
+  assert.match(calls[0]?.url ?? "", /\/status\/job-resume$/);
+  assert.equal(result.jobId, "job-resume");
+});
+
+test("cancel posts to the acknowledged RunPod job without resubmitting", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), method: init?.method });
+    return jsonResponse({ id: "job-cancel-remote", status: "CANCELLED" });
+  };
+
+  const result = await service.cancelComfyWorkflowOnRunpod("job-cancel-remote", fetchImpl as typeof fetch);
+
+  assert.deepEqual(calls, [{
+    url: "https://api.runpod.ai/v2/endpoint-test/cancel/job-cancel-remote",
+    method: "POST",
+  }]);
+  assert.equal(result.status, "CANCELLED");
+});
+
+test("cancellation is checked before every RunPod status poll", async () => {
+  let cancelRequested = false;
+  const calls: string[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    calls.push(String(url));
+    cancelRequested = true;
+    return jsonResponse({ id: "job-cancel", status: "IN_PROGRESS" });
+  };
+
+  await assert.rejects(
+    service.runComfyWorkflowOnRunpod({
+      workflow: {},
+      images: [],
+      fetchImpl: fetchImpl as typeof fetch,
+      shouldCancel: () => cancelRequested,
+    }),
+    (error) => error instanceof service.RunpodComfyCanceledError,
+  );
+
+  assert.equal(calls.length, 1, "no status request should be sent after cancellation");
 });
 
 test("video inputs are submitted as named worker input files", async () => {
