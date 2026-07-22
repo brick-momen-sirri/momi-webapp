@@ -18,6 +18,16 @@ const commonEnv = {
   // Observability: optional outbound alert webhook (empty = structured logs only).
   ALERT_WEBHOOK_URL: process.env.ALERT_WEBHOOK_URL || "",
   ALERT_WEBHOOK_FORMAT: process.env.ALERT_WEBHOOK_FORMAT || "json",
+  // SQLite DR backups (dispatcher/monolith only; see config.ts). Off by
+  // default. BACKUP_AZURE_SAS_URL is a secret -- set it in the shell
+  // environment before starting pm2, never commit it here.
+  SQLITE_BACKUP_ENABLED: process.env.SQLITE_BACKUP_ENABLED || "false",
+  SQLITE_BACKUP_INTERVAL_MS: process.env.SQLITE_BACKUP_INTERVAL_MS || "3600000",
+  SQLITE_BACKUP_RETENTION_COUNT: process.env.SQLITE_BACKUP_RETENTION_COUNT || "48",
+  SQLITE_BACKUP_STAGING_DIR: process.env.SQLITE_BACKUP_STAGING_DIR || "",
+  BACKUP_AZURE_SAS_URL: process.env.BACKUP_AZURE_SAS_URL || "",
+  BACKUP_AZURE_PREFIX: process.env.BACKUP_AZURE_PREFIX || "momi-backend",
+  AZCOPY_PATH: process.env.AZCOPY_PATH || "azcopy",
 };
 
 const processSafety = {

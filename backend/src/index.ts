@@ -9,6 +9,9 @@ import { projectFolderName } from "./projectFolderName.js";
 import { backendProcessRole, isDispatcher } from "./processRole.js";
 import { renderPrometheusMetrics, type ObservabilitySnapshot } from "./observabilityMetrics.js";
 import { createHealthWatchdog } from "./healthWatchdog.js";
+import { startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
+import { getRecentAlerts } from "./alertHistory.js";
+import { OPS_DASHBOARD_HTML } from "./opsDashboardPage.js";
 import {
   brickProjectsRoot,
   comfyRoot,
@@ -32,6 +35,18 @@ import {
   watchdogMemoryHighMiB,
   alertWebhookUrl,
   alertWebhookFormat,
+  backupEnabled,
+  backupIntervalMs,
+  backupRetentionCount,
+  backupStagingDir,
+  backupAzureSasUrl,
+  backupAzurePrefix,
+  azcopyPath,
+  jobsSqlitePath,
+  archivedItemsSqlitePath,
+  appStateSqlitePath,
+  jobStoreDriver,
+  appStateDriver,
 } from "./config.js";
 import {
   changePassword,
@@ -118,6 +133,7 @@ app.get("/api/health", async (_req, res) => {
     ok: true,
     service: "momi-animation-backend",
     role: backendProcessRole,
+    pid: process.pid,
     time: new Date().toISOString(),
     generationBackend,
     uptimeSeconds: Math.round(process.uptime()),
@@ -192,6 +208,35 @@ async function buildObservabilitySnapshot(): Promise<ObservabilitySnapshot> {
 app.get("/metrics", async (_req, res) => {
   const snapshot = await buildObservabilitySnapshot();
   res.type("text/plain; version=0.0.4; charset=utf-8").send(renderPrometheusMetrics(snapshot));
+});
+
+// Static config the ops dashboard needs to color its own gauges the same way
+// the real watchdog would judge them -- fetched once on load, not polled.
+app.get("/api/ops-config", (_req, res) => {
+  res.json({
+    role: backendProcessRole,
+    watchdogMemoryHighMiB,
+    watchdogDiskFreeMinBytes,
+    watchdogQueueStallEvals,
+    backupEnabled,
+  });
+});
+
+app.get("/api/alerts/recent", (_req, res) => {
+  res.json({ alerts: getRecentAlerts() });
+});
+
+app.get("/api/backup-status", async (_req, res) => {
+  try {
+    const raw = await fs.readFile(path.join(backupStagingDir, "backup-status.json"), "utf8");
+    res.json({ status: JSON.parse(raw) });
+  } catch {
+    res.json({ status: null });
+  }
+});
+
+app.get("/ops-dashboard", (_req, res) => {
+  res.type("html").send(OPS_DASHBOARD_HTML);
 });
 
 app.get("/api/runpod-input", async (req, res) => {
@@ -1425,6 +1470,42 @@ async function boot() {
   await loadJobs();
   await initializeMediaIndex();
   await assertMetadataHealth();
+  // SQLite DR backups: dispatcher/monolith only. Running this on every API
+  // worker too would multiply backup cycles by instance count for no benefit
+  // (they'd all snapshot the same shared databases) and race on the same
+  // staging directory and offsite prefix. Started only after the stores above
+  // are loaded/migrated, so a fresh environment's first boot can't fire a
+  // spurious "database missing" alert before migration has even run. Each
+  // target is gated on the driver actually being sqlite (not just "the flag is
+  // on"), since e.g. a monolith without MOMI_SHARED_STATE never creates
+  // app-state.sqlite at all.
+  if (isDispatcher() && backupEnabled) {
+    const backupTargets = [
+      ...(jobStoreDriver === "sqlite"
+        ? [
+            { name: "jobs", sourcePath: jobsSqlitePath },
+            { name: "archived-items", sourcePath: archivedItemsSqlitePath },
+          ]
+        : []),
+      ...(appStateDriver === "sqlite" ? [{ name: "app-state", sourcePath: appStateSqlitePath }] : []),
+    ];
+    if (backupTargets.length) {
+      startScheduledBackups({
+        targets: backupTargets,
+        stagingDir: backupStagingDir,
+        retention: backupRetentionCount,
+        intervalMs: backupIntervalMs,
+        uploader: backupAzureSasUrl
+          ? (files) => uploadViaAzcopy(files, backupAzureSasUrl, backupAzurePrefix, azcopyPath)
+          : undefined,
+        role: backendProcessRole,
+        webhookUrl: alertWebhookUrl || undefined,
+        webhookFormat: alertWebhookFormat,
+      });
+    } else {
+      console.warn(`SQLITE_BACKUP_ENABLED is set but no target uses the sqlite driver (JOB_STORE_DRIVER=${jobStoreDriver}, APP_STATE_DRIVER=${appStateDriver}); no backups will run.`);
+    }
+  }
   const server = app.listen(PORT, HOST, () => {
     console.log(`Momi backend listening on http://${HOST}:${PORT}`);
     console.log(`Process role: ${backendProcessRole}`);

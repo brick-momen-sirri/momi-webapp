@@ -5,9 +5,10 @@
 // hidden clock; the runner is a thin timer around it.
 
 import type { ObservabilitySnapshot } from "./observabilityMetrics.js";
+import { recordAlert } from "./alertHistory.js";
 
 export type AlertSeverity = "warning" | "critical";
-export type AlertRule = "queue_stall" | "dispatch_outage" | "memory_high" | "disk_low";
+export type AlertRule = "queue_stall" | "dispatch_outage" | "memory_high" | "disk_low" | "backup_failed" | "backup_upload_failed";
 export type AlertPhase = "firing" | "resolved";
 
 export type AlertEvent = {
@@ -158,6 +159,7 @@ async function postWebhook(url: string, format: WebhookFormat, event: AlertEvent
 }
 
 export function emitAlert(event: AlertEvent, opts: { webhookUrl?: string; webhookFormat?: WebhookFormat }): void {
+  recordAlert(event);
   const line = { rule: event.rule, phase: event.phase, severity: event.severity, role: event.role, pid: event.pid, detail: event.detail };
   if (event.phase === "firing") {
     console.warn("[alert]", line);

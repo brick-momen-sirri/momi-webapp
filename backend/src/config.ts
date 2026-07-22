@@ -155,6 +155,21 @@ export const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL?.trim() || "";
 export const alertWebhookFormat: "json" | "slack" =
   process.env.ALERT_WEBHOOK_FORMAT?.trim().toLowerCase() === "slack" ? "slack" : "json";
 
+// --- SQLite disaster recovery ---
+// This host has a single local volume, so a snapshot alone only protects
+// against corruption/accidental deletion. Real DR requires shipping snapshots
+// offsite; set BACKUP_AZURE_SAS_URL (a container SAS URL) to enable that leg.
+// Off by default: no backups run until a driver actually needs them.
+export const backupEnabled = ["1", "true", "yes", "on"].includes(String(process.env.SQLITE_BACKUP_ENABLED ?? "").trim().toLowerCase());
+export const backupIntervalMs = positiveNumber(process.env.SQLITE_BACKUP_INTERVAL_MS, 60 * 60 * 1000);
+export const backupRetentionCount = Math.max(1, Math.floor(positiveNumber(process.env.SQLITE_BACKUP_RETENTION_COUNT, 48)));
+export const backupStagingDir = process.env.SQLITE_BACKUP_STAGING_DIR?.trim() || path.join(backendRoot, "data", "backups");
+// Container SAS URL, e.g. https://<account>.blob.core.windows.net/<container>?<sas>.
+// Never logged. Empty = local snapshots only (no offsite leg).
+export const backupAzureSasUrl = process.env.BACKUP_AZURE_SAS_URL?.trim() || "";
+export const backupAzurePrefix = process.env.BACKUP_AZURE_PREFIX?.trim() || "momi-backend";
+export const azcopyPath = process.env.AZCOPY_PATH?.trim() || "azcopy";
+
 export function validateRuntimeConfigForStartup() {
   if (backendProcessRole !== "monolith" && !jobRowLevelWrites) {
     throw new Error("ROLE=dispatcher/api requires JOB_STORE_DRIVER=sqlite and JOBS_ROW_LEVEL_WRITES=true.");
