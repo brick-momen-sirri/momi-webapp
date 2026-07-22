@@ -15,6 +15,9 @@ const commonEnv = {
   RUNPOD_OUTPUT_MAX_BYTES: String(1024 * 1024 * 1024),
   JOB_STORE_DRIVER: "sqlite",
   UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || "12",
+  // Observability: optional outbound alert webhook (empty = structured logs only).
+  ALERT_WEBHOOK_URL: process.env.ALERT_WEBHOOK_URL || "",
+  ALERT_WEBHOOK_FORMAT: process.env.ALERT_WEBHOOK_FORMAT || "json",
 };
 
 const processSafety = {

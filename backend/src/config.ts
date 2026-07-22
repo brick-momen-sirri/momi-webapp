@@ -137,6 +137,24 @@ export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
 
+// --- Observability / health watchdog (web/worker split) ---
+// How often the dispatch/queue watchdog evaluates its rules.
+export const watchdogIntervalMs = positiveNumber(process.env.WATCHDOG_INTERVAL_MS, 30_000);
+// Consecutive evaluations with a non-draining backlog (queued > 0 while RunPod
+// capacity is free) before we alert that dispatch is stuck. 4 × 30s ≈ 2 minutes.
+export const watchdogQueueStallEvals = Math.max(1, Math.floor(positiveNumber(process.env.WATCHDOG_QUEUE_STALL_EVALS, 4)));
+// Alert when free space on the output volume drops below this. Default 5 GiB.
+export const watchdogDiskFreeMinBytes = positiveNumber(process.env.WATCHDOG_DISK_FREE_MIN_BYTES, 5 * 1024 * 1024 * 1024);
+// Alert when a process RSS exceeds this. Default 1275 MiB ≈ 85% of the 1500M
+// pm2 max_memory_restart, so we warn before pm2 force-restarts the process.
+export const watchdogMemoryHighMiB = positiveNumber(process.env.WATCHDOG_MEMORY_HIGH_MIB, 1275);
+// Optional outbound alert webhook. Empty = structured logs only. Format "slack"
+// sends a single { text } (also works for Teams/Mattermost/Google Chat incoming
+// webhooks); "json" sends the raw structured event.
+export const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL?.trim() || "";
+export const alertWebhookFormat: "json" | "slack" =
+  process.env.ALERT_WEBHOOK_FORMAT?.trim().toLowerCase() === "slack" ? "slack" : "json";
+
 export function validateRuntimeConfigForStartup() {
   if (backendProcessRole !== "monolith" && !jobRowLevelWrites) {
     throw new Error("ROLE=dispatcher/api requires JOB_STORE_DRIVER=sqlite and JOBS_ROW_LEVEL_WRITES=true.");

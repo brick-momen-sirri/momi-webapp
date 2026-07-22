@@ -7,6 +7,8 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { projectFolderName } from "./projectFolderName.js";
 import { backendProcessRole, isDispatcher } from "./processRole.js";
+import { renderPrometheusMetrics, type ObservabilitySnapshot } from "./observabilityMetrics.js";
+import { createHealthWatchdog } from "./healthWatchdog.js";
 import {
   brickProjectsRoot,
   comfyRoot,
@@ -24,6 +26,12 @@ import {
   runpodTimeoutMs,
   uploadedMediaRoot,
   validateRuntimeConfigForStartup,
+  watchdogIntervalMs,
+  watchdogQueueStallEvals,
+  watchdogDiskFreeMinBytes,
+  watchdogMemoryHighMiB,
+  alertWebhookUrl,
+  alertWebhookFormat,
 } from "./config.js";
 import {
   changePassword,
@@ -137,6 +145,54 @@ async function freeDiskBytes(targetPath: string) {
     return null;
   }
 }
+
+// Single source of truth for /metrics and the health watchdog, mirroring the
+// signals /api/health exposes so scrape data and alert decisions never diverge.
+async function buildObservabilitySnapshot(): Promise<ObservabilitySnapshot> {
+  const queue = getQueueSnapshot();
+  const memory = process.memoryUsage();
+  const outputDiskFreeBytes = await freeDiskBytes(brickProjectsRoot);
+  const media = getMediaIndexStatus();
+  return {
+    role: backendProcessRole,
+    pid: process.pid,
+    instance: process.env.NODE_APP_INSTANCE ?? null,
+    uptimeSeconds: Math.round(process.uptime()),
+    nowMs: Date.now(),
+    queue: {
+      queued: queue.queued,
+      active: queue.active,
+      runpodActive: queue.runpodActive,
+      capacity: queue.capacity,
+      dispatcher: {
+        enabled: !!queue.dispatcher.enabled,
+        active: !!queue.dispatcher.active,
+        heldByThisProcess: !!queue.dispatcher.heldByThisProcess,
+        ownerId: queue.dispatcher.ownerId ?? null,
+        heartbeatAt: queue.dispatcher.heartbeatAt ?? null,
+        expiresAt: queue.dispatcher.expiresAt ?? null,
+      },
+    },
+    mediaIndex: media
+      ? {
+          dirtyRevision: media.dirtyRevision ?? 0,
+          builtRevision: media.builtRevision ?? 0,
+          cachedRevision: media.cachedRevision ?? 0,
+          cachedItems: media.cachedItems ?? 0,
+        }
+      : null,
+    memory: {
+      rssMiB: Math.round(memory.rss / 1024 / 1024),
+      heapUsedMiB: Math.round(memory.heapUsed / 1024 / 1024),
+    },
+    outputDiskFreeBytes,
+  };
+}
+
+app.get("/metrics", async (_req, res) => {
+  const snapshot = await buildObservabilitySnapshot();
+  res.type("text/plain; version=0.0.4; charset=utf-8").send(renderPrometheusMetrics(snapshot));
+});
 
 app.get("/api/runpod-input", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
@@ -1332,6 +1388,28 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 async function boot() {
   validateRuntimeConfigForStartup();
   if (isDispatcher()) startMemoryLogging(memoryLogIntervalMs);
+  // Health watchdog: the dispatcher/monolith judges dispatch stalls; the
+  // lowest-id API worker watches for a dead dispatcher lease (a dispatcher
+  // cannot alert on its own death). Other API workers stay quiet to avoid N
+  // duplicate pages. Runs on a self-unref'd timer so it never blocks shutdown.
+  const isDesignatedApiWatcher = backendProcessRole === "api" && (process.env.NODE_APP_INSTANCE ?? "0") === "0";
+  if (backendProcessRole !== "api" || isDesignatedApiWatcher) {
+    createHealthWatchdog({
+      getSnapshot: buildObservabilitySnapshot,
+      thresholds: {
+        queueStallEvals: watchdogQueueStallEvals,
+        diskFreeMinBytes: watchdogDiskFreeMinBytes,
+        memoryHighMiB: watchdogMemoryHighMiB,
+      },
+      flags: {
+        evaluatesQueueStall: backendProcessRole !== "api",
+        evaluatesOutage: backendProcessRole === "api",
+      },
+      intervalMs: watchdogIntervalMs,
+      webhookUrl: alertWebhookUrl || undefined,
+      webhookFormat: alertWebhookFormat,
+    }).start();
+  }
   logMemory("boot-start");
   // Auth and projects share app-state.sqlite. Initialize its auth schema and
   // one-time migration before opening the project connection.
