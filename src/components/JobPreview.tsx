@@ -181,7 +181,9 @@ export function JobPreview({ job }: JobPreviewProps) {
       {result && isVideoOutput && !isGifMedia(result, job.fileName) ? (
         <video
           src={withFirstFrameHint(result)}
-          poster={thumbnailMediaUrl(videoPoster, THUMBNAIL_WIDTH.preview) ?? undefined}
+          // No image poster exists for video-only jobs, so fall back to the
+          // video itself — the backend extracts a frame for it.
+          poster={thumbnailMediaUrl(videoPoster ?? result, THUMBNAIL_WIDTH.preview) ?? undefined}
           className="h-full w-full object-contain"
           controls
           preload="auto"

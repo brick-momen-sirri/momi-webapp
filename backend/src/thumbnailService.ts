@@ -1,8 +1,11 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import sharp from "sharp";
 import {
+  ffmpegPath,
   thumbnailBufferRetryMaxBytes,
   thumbnailCacheDir,
   thumbnailCacheMaxBytes,
@@ -10,7 +13,11 @@ import {
   thumbnailPassthroughMaxBytes,
   thumbnailQuality,
   thumbnailWidths,
+  videoPosterSeekSeconds,
+  videoPosterTimeoutMs,
 } from "./config.js";
+
+const execFileAsync = promisify(execFile);
 
 // Part of every cache key: bump it when the encoder settings below change, so
 // existing renditions regenerate instead of being served with stale settings.
@@ -36,8 +43,17 @@ export type ThumbnailRendition =
   // caller streams the original instead.
   | { kind: "passthrough" };
 
+// Video results get a poster frame rather than a passthrough: a <video> element
+// with no poster shows a blank box until the first frame decodes, and the
+// originals average ~12 MiB.
+const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi"]);
+
 export function isThumbnailableSource(filePath: string) {
   return THUMBNAILABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+export function isVideoSource(filePath: string) {
+  return VIDEO_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
 // Snap to a whitelisted width so an arbitrary ?w= cannot fan the cache out into
@@ -93,7 +109,8 @@ function cachePathFor(cacheKey: string) {
  */
 export async function getOrCreateThumbnail(sourcePath: string, requestedWidth: number | undefined): Promise<ThumbnailRendition> {
   const resolvedPath = path.resolve(sourcePath);
-  if (!isThumbnailableSource(resolvedPath)) {
+  const video = isVideoSource(resolvedPath);
+  if (!video && !isThumbnailableSource(resolvedPath)) {
     return { kind: "passthrough" };
   }
 
@@ -101,7 +118,9 @@ export async function getOrCreateThumbnail(sourcePath: string, requestedWidth: n
   if (!stat.isFile()) {
     throw new Error("Thumbnail source is not a file");
   }
-  if (stat.size <= thumbnailPassthroughMaxBytes) {
+  // Only images can be streamed as-is when small; handing a caller the video
+  // itself would not serve as a poster no matter how small the file is.
+  if (!video && stat.size <= thumbnailPassthroughMaxBytes) {
     return { kind: "passthrough" };
   }
 
@@ -122,7 +141,7 @@ export async function getOrCreateThumbnail(sourcePath: string, requestedWidth: n
     // find the rendition already written by the one it was waiting on.
     const raced = await fs.stat(cachePath).catch(() => undefined);
     if (!(raced?.isFile() && raced.size > 0)) {
-      await encodeRendition(resolvedPath, cachePath, width);
+      await encodeRendition(resolvedPath, cachePath, width, video);
     }
     return { kind: "rendition", filePath: cachePath, contentType: "image/webp", width, cacheKey } satisfies ThumbnailRendition;
   }).finally(() => {
@@ -133,7 +152,7 @@ export async function getOrCreateThumbnail(sourcePath: string, requestedWidth: n
   return generation;
 }
 
-async function encodeRendition(sourcePath: string, cachePath: string, width: number) {
+async function encodeRendition(sourcePath: string, cachePath: string, width: number, video: boolean) {
   await fs.mkdir(path.dirname(cachePath), { recursive: true });
   // Write to a unique temp name and rename into place, so a concurrent reader
   // (or another backend process encoding the same key) never sees a half file.
@@ -147,6 +166,23 @@ async function encodeRendition(sourcePath: string, cachePath: string, width: num
       .resize({ width, height: width, fit: "inside", withoutEnlargement: true })
       .webp({ quality: thumbnailQuality, effort: 4 })
       .toFile(tempPath);
+
+  // Videos go through ffmpeg for the frame, then the same sharp pipeline as
+  // images so a poster and a thumbnail share one set of encoder settings.
+  if (video) {
+    const framePath = `${cachePath}.${process.pid}.${Math.random().toString(36).slice(2)}.frame.png`;
+    try {
+      await extractVideoFrame(sourcePath, framePath);
+      await encode(framePath);
+      await fs.rename(tempPath, cachePath);
+    } catch (error) {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      await fs.rm(framePath, { force: true }).catch(() => undefined);
+    }
+    return;
+  }
 
   try {
     try {
@@ -165,6 +201,55 @@ async function encodeRendition(sourcePath: string, cachePath: string, width: num
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Writes a single frame of `sourcePath` to `framePath` as PNG.
+ *
+ * Tries a small seek offset first because frame 0 of a render is often black or
+ * mid fade-in; a clip shorter than the offset produces no frame, so it falls
+ * back to frame 0. Throws if neither attempt yields a frame, letting the caller
+ * fall back to serving the original.
+ */
+async function extractVideoFrame(sourcePath: string, framePath: string) {
+  const attempts = videoPosterSeekSeconds > 0 ? [videoPosterSeekSeconds, 0] : [0];
+  let lastError: unknown;
+
+  for (const seek of attempts) {
+    await fs.rm(framePath, { force: true }).catch(() => undefined);
+    try {
+      await execFileAsync(
+        ffmpegPath,
+        [
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          // Before -i, so ffmpeg seeks by keyframe instead of decoding forward.
+          "-ss",
+          String(seek),
+          "-i",
+          sourcePath,
+          "-frames:v",
+          "1",
+          framePath,
+        ],
+        { timeout: videoPosterTimeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 },
+      );
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+
+    // ffmpeg can exit 0 while writing nothing when the seek lands past the end.
+    const stat = await fs.stat(framePath).catch(() => undefined);
+    if (stat?.isFile() && stat.size > 0) return;
+  }
+
+  throw new Error(
+    `Could not extract a poster frame from ${path.basename(sourcePath)}`
+    + (lastError instanceof Error ? `: ${lastError.message}` : ""),
+  );
 }
 
 // Guards the buffer retry: only worth attempting for a file that exists and is

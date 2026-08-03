@@ -11,6 +11,7 @@ import { renderPrometheusMetrics, type ObservabilitySnapshot } from "./observabi
 import { createHealthWatchdog } from "./healthWatchdog.js";
 import { startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
 import { getOrCreateThumbnail, pruneThumbnailCache } from "./thumbnailService.js";
+import { uploadedMediaBaseName } from "./uploadedMediaName.js";
 import { getRecentAlerts } from "./alertHistory.js";
 import { OPS_DASHBOARD_HTML } from "./opsDashboardPage.js";
 import {
@@ -2266,7 +2267,7 @@ function isAllowedUploadContentType(kind: "image" | "video", contentType: string
 
 function uploadedMediaFileName(rawName: string, kind: "image" | "video", contentType: string) {
   const parsed = path.parse(rawName || `${kind}-upload`);
-  const baseName = safeSegment(parsed.name || `${kind}-upload`);
+  const baseName = uploadedMediaBaseName(parsed.name, `${kind}-upload`);
   const extension = cleanMediaExtension(parsed.ext) || extensionFromContentType(contentType) || (kind === "image" ? ".png" : ".mp4");
   return `${baseName}${extension}`;
 }

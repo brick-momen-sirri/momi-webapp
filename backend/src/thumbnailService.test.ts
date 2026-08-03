@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "momi-thumbnails-"));
 process.env.THUMBNAIL_CACHE_DIR = path.join(tempRoot, "cache");
@@ -13,6 +17,7 @@ const sharp = (await import("sharp")).default;
 const {
   getOrCreateThumbnail,
   isThumbnailableSource,
+  isVideoSource,
   normalizeThumbnailWidth,
   pruneThumbnailCache,
 } = await import("./thumbnailService.js");
@@ -96,12 +101,66 @@ test("passes through sources already smaller than the threshold", async () => {
   assert.equal((await getOrCreateThumbnail(tiny, 480)).kind, "passthrough");
 });
 
-test("passes through non-image sources instead of trying to decode them", async () => {
-  const video = path.join(tempRoot, "clip.mp4");
-  await fs.writeFile(video, Buffer.alloc(4096, 7));
+test("passes through non-image, non-video sources instead of trying to decode them", async () => {
+  const document = path.join(tempRoot, "notes.txt");
+  await fs.writeFile(document, "not media");
 
-  assert.equal(isThumbnailableSource(video), false);
-  assert.equal((await getOrCreateThumbnail(video, 480)).kind, "passthrough");
+  assert.equal(isThumbnailableSource(document), false);
+  assert.equal(isVideoSource(document), false);
+  assert.equal((await getOrCreateThumbnail(document, 480)).kind, "passthrough");
+});
+
+test("extracts a poster frame from a video instead of passing it through", async (t) => {
+  const clip = path.join(tempRoot, "clip.mp4");
+  // A real 2-second clip: colour bars, so a decoded frame is non-empty.
+  try {
+    await execFileAsync(
+      process.env.FFMPEG_PATH?.trim() || "ffmpeg",
+      ["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10:duration=2", clip],
+      { timeout: 30_000, windowsHide: true },
+    );
+  } catch {
+    t.skip("ffmpeg unavailable");
+    return;
+  }
+
+  assert.equal(isVideoSource(clip), true);
+  const rendition = await getOrCreateThumbnail(clip, 480);
+  assert.equal(rendition.kind, "rendition", "a video should yield a poster, not a passthrough");
+  if (rendition.kind !== "rendition") return;
+
+  const metadata = await sharp(rendition.filePath).metadata();
+  assert.equal(metadata.format, "webp");
+  assert.equal(metadata.width, 480);
+  assert.equal(metadata.height, 270);
+});
+
+test("falls back to frame 0 for a clip shorter than the seek offset", async (t) => {
+  const shortClip = path.join(tempRoot, "short.mp4");
+  // 0.2s is well under the 1s default seek, so the first attempt finds nothing.
+  try {
+    await execFileAsync(
+      process.env.FFMPEG_PATH?.trim() || "ffmpeg",
+      ["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=0.2", shortClip],
+      { timeout: 30_000, windowsHide: true },
+    );
+  } catch {
+    t.skip("ffmpeg unavailable");
+    return;
+  }
+
+  const rendition = await getOrCreateThumbnail(shortClip, 240);
+  assert.equal(rendition.kind, "rendition", "a sub-second clip should still yield a poster");
+  if (rendition.kind !== "rendition") return;
+  assert.equal((await sharp(rendition.filePath).metadata()).format, "webp");
+});
+
+test("rejects a video that holds no decodable frame so the route can fall back", async () => {
+  const broken = path.join(tempRoot, "broken.mp4");
+  await fs.writeFile(broken, Buffer.alloc(4096, 7));
+
+  assert.equal(isVideoSource(broken), true);
+  await assert.rejects(() => getOrCreateThumbnail(broken, 480));
 });
 
 test("snaps requested widths onto the whitelist", () => {

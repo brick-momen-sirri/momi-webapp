@@ -164,6 +164,13 @@ export const thumbnailBufferRetryMaxBytes = positiveNumber(process.env.THUMBNAIL
 // pressure, so the cache is pruned rather than left to grow unbounded.
 export const thumbnailCacheMaxBytes = positiveNumber(process.env.THUMBNAIL_CACHE_MAX_BYTES, 8 * 1024 * 1024 * 1024);
 export const thumbnailPruneIntervalMs = positiveNumber(process.env.THUMBNAIL_PRUNE_INTERVAL_MS, 6 * 60 * 60 * 1000);
+// Video posters: a frame is extracted with ffmpeg, then encoded through the same
+// sharp pipeline as images so both share one set of encoder settings.
+export const ffmpegPath = process.env.FFMPEG_PATH?.trim() || "ffmpeg";
+// Frame 0 of a render is often black or mid fade-in, so seek in slightly first.
+// Clips shorter than this yield no frame and fall back to frame 0.
+export const videoPosterSeekSeconds = Math.max(0, positiveNumber(process.env.VIDEO_POSTER_SEEK_SECONDS, 1));
+export const videoPosterTimeoutMs = positiveNumber(process.env.VIDEO_POSTER_TIMEOUT_MS, 20_000);
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
 
