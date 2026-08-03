@@ -725,6 +725,45 @@ export function backendResultMediaUrl(jobId: string, index = 0) {
   return withMediaAccessToken(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/result-media?${params.toString()}`);
 }
 
+// Widths the backend will actually render (THUMBNAIL_WIDTHS). Anything else is
+// snapped server-side, so asking for an off-list width just wastes a round trip.
+export const THUMBNAIL_WIDTH = { chip: 240, grid: 480, preview: 960 } as const;
+
+/**
+ * Rewrites a backend media URL to ask for a downscaled WebP rendition instead of
+ * the full-size original — image results average ~1.7 MiB, which is wasteful for
+ * a grid cell or a video poster.
+ *
+ * Only rewrites URLs the backend can actually re-encode (`/api/media` and the
+ * inline result-media proxy); data:, blob:, and remote URLs pass through
+ * untouched. Use the original URL for downloads and fullscreen views.
+ */
+export function thumbnailMediaUrl(url: string, width: number): string;
+export function thumbnailMediaUrl(url: string | undefined, width: number): string | undefined;
+export function thumbnailMediaUrl(url: string | undefined, width: number) {
+  if (!url || /^(data|blob):/i.test(url)) return url;
+
+  try {
+    const parsed = new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.origin);
+    if (parsed.pathname === "/api/media") {
+      parsed.pathname = "/api/media/thumbnail";
+    } else if (
+      // Already rewritten: fall through so re-applying updates the width rather
+      // than silently keeping the one from the first call.
+      parsed.pathname !== "/api/media/thumbnail" &&
+      !/^\/api\/jobs\/[^/]+\/result-media$/.test(parsed.pathname)
+    ) {
+      // Not a shape the backend can thumbnail (e.g. a remote signed URL).
+      return url;
+    }
+    parsed.searchParams.set("w", String(width));
+    // Preserve whether the caller had a root-relative or absolute URL.
+    return url.startsWith("/") ? `${parsed.pathname}${parsed.search}` : parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function fetchBackendClipboardImage() {
   const data = await api<{ image: BackendClipboardImage }>("/api/clipboard/image");
   return data.image;

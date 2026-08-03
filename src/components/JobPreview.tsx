@@ -1,6 +1,7 @@
 import { AlertTriangle, ExternalLink, Loader2, Maximize2, PlayCircle, X } from "lucide-react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import type { Job } from "../types";
+import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { setResultImageDragData } from "../utils/resultDrag";
 import { ImageCompareSlider } from "./ImageCompareSlider";
 
@@ -110,7 +111,13 @@ export function JobPreview({ job }: JobPreviewProps) {
   if (job.status === "completed" && isImageOutput && imageResults.length <= 1 && result) {
     return (
       <div ref={previewRef} className="relative">
-        <ImageCompareSlider beforeImage={job.inputImages[0]} afterImage={result} onResultDragStart={(event) => handleResultDragStart(event, result, 0)} />
+        {/* Preview renditions, not originals: the fullscreen button and the drag
+            payload below both still carry the full-resolution result. */}
+        <ImageCompareSlider
+          beforeImage={thumbnailMediaUrl(job.inputImages[0], THUMBNAIL_WIDTH.preview)}
+          afterImage={thumbnailMediaUrl(result, THUMBNAIL_WIDTH.preview)}
+          onResultDragStart={(event) => handleResultDragStart(event, result, 0)}
+        />
         <FullscreenImageButton onClick={() => setFullscreenImage({ url: result, name: resultName })} />
         {fullscreenImage ? <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} /> : null}
       </div>
@@ -126,7 +133,7 @@ export function JobPreview({ job }: JobPreviewProps) {
             return (
               <div key={`${url}:${index}`} className="relative aspect-square overflow-hidden rounded-lg border border-line bg-stone-100">
                 <img
-                  src={url}
+                  src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
                   alt={name}
                   loading="lazy"
                   decoding="async"
@@ -151,7 +158,7 @@ export function JobPreview({ job }: JobPreviewProps) {
     <div ref={previewRef} className="relative aspect-video w-full overflow-hidden rounded-lg bg-stone-100">
       {result && isImageOutput ? (
         <img
-          src={result}
+          src={thumbnailMediaUrl(result, THUMBNAIL_WIDTH.preview)}
           alt=""
           loading="lazy"
           decoding="async"
@@ -174,7 +181,7 @@ export function JobPreview({ job }: JobPreviewProps) {
       {result && isVideoOutput && !isGifMedia(result, job.fileName) ? (
         <video
           src={withFirstFrameHint(result)}
-          poster={videoPoster ?? undefined}
+          poster={thumbnailMediaUrl(videoPoster, THUMBNAIL_WIDTH.preview) ?? undefined}
           className="h-full w-full object-contain"
           controls
           preload="auto"
@@ -182,7 +189,7 @@ export function JobPreview({ job }: JobPreviewProps) {
       ) : null}
       {result && isSequenceOutput ? (
         <img
-          src={result}
+          src={thumbnailMediaUrl(result, THUMBNAIL_WIDTH.preview)}
           alt=""
           loading="lazy"
           decoding="async"

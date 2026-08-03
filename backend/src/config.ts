@@ -134,6 +134,36 @@ export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "e
 );
 export const mediaUploadMaxBytes = positiveNumber(process.env.MEDIA_UPLOAD_MAX_BYTES, 1024 * 1024 * 1024);
 export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
+
+// --- Result thumbnails ---
+// Grid and feed views ask for a downscaled WebP rendition instead of the
+// full-size original (image results average ~2.8 MiB). Renditions are generated
+// on demand and cached on disk keyed by source path + mtime + size, so the
+// existing library is covered without a backfill pass and a re-rendered result
+// invalidates itself.
+export const thumbnailCacheDir = process.env.THUMBNAIL_CACHE_DIR?.trim() || path.join(backendRoot, "data", "thumbnail-cache");
+// Whitelisted widths. Requests for anything else snap to the nearest allowed
+// width, so an arbitrary ?w= cannot fan the cache out to unbounded variants.
+export const thumbnailWidths = (process.env.THUMBNAIL_WIDTHS?.trim()
+  ? process.env.THUMBNAIL_WIDTHS.split(",").map((value) => Math.floor(Number(value.trim()))).filter((value) => Number.isFinite(value) && value >= 32 && value <= 4096)
+  : [240, 480, 960, 1440]
+).sort((left, right) => left - right);
+export const thumbnailQuality = boundedNumber(process.env.THUMBNAIL_QUALITY, 72, 20, 95);
+// Sharp is multithreaded internally, so keep per-process concurrency modest;
+// three backend processes share the box with nothing else CPU-bound.
+export const thumbnailMaxConcurrency = Math.max(1, Math.floor(positiveNumber(process.env.THUMBNAIL_MAX_CONCURRENCY, 4)));
+// Sources already at or below this size are streamed as-is: no rendition can
+// meaningfully beat them over the wire, and caching a copy would only add IO.
+export const thumbnailPassthroughMaxBytes = positiveNumber(process.env.THUMBNAIL_PASSTHROUGH_MAX_BYTES, 96 * 1024);
+// Cap on the buffer retry used when sharp cannot open a source by path (e.g. a
+// path over the Windows 260-char MAX_PATH limit). Sources larger than this are
+// left to fail so the route falls back to streaming the original, rather than
+// reading a huge file into every concurrent encode slot.
+export const thumbnailBufferRetryMaxBytes = positiveNumber(process.env.THUMBNAIL_BUFFER_RETRY_MAX_BYTES, 256 * 1024 * 1024);
+// Disk budget for the cache. This host has a single volume under real space
+// pressure, so the cache is pruned rather than left to grow unbounded.
+export const thumbnailCacheMaxBytes = positiveNumber(process.env.THUMBNAIL_CACHE_MAX_BYTES, 8 * 1024 * 1024 * 1024);
+export const thumbnailPruneIntervalMs = positiveNumber(process.env.THUMBNAIL_PRUNE_INTERVAL_MS, 6 * 60 * 60 * 1000);
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
 

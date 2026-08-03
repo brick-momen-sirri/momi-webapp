@@ -10,6 +10,7 @@ import { backendProcessRole, isDispatcher } from "./processRole.js";
 import { renderPrometheusMetrics, type ObservabilitySnapshot } from "./observabilityMetrics.js";
 import { createHealthWatchdog } from "./healthWatchdog.js";
 import { startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
+import { getOrCreateThumbnail, pruneThumbnailCache } from "./thumbnailService.js";
 import { getRecentAlerts } from "./alertHistory.js";
 import { OPS_DASHBOARD_HTML } from "./opsDashboardPage.js";
 import {
@@ -27,6 +28,7 @@ import {
   runpodPollIntervalMs,
   runpodSubmissionMode,
   runpodTimeoutMs,
+  thumbnailPruneIntervalMs,
   uploadedMediaRoot,
   validateRuntimeConfigForStartup,
   watchdogIntervalMs,
@@ -1126,33 +1128,95 @@ app.get("/api/jobs", async (req, res) => {
   }
 });
 
-app.get("/api/media", async (req, res) => {
-  const user = getRequestUser(req);
-  const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+// Shared gate for the media read routes: confirms the path is inside an allowed
+// project root and that the caller may view the owning project. Both /api/media
+// and its thumbnail variant go through this, so the two can never drift apart
+// into an access-control gap.
+function authorizeMediaRead(req: express.Request, rawPath: string):
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string } {
   const resolvedPath = path.resolve(rawPath);
-  const allowedRoots = [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
-    .map((root) => path.resolve(root).toLowerCase());
-
-  if (!allowedRoots.some((root) => resolvedPath.toLowerCase().startsWith(root))) {
-    return res.status(403).json({ error: "Media path is outside allowed project roots" });
+  if (!isAllowedMediaPath(resolvedPath)) {
+    return { ok: false, status: 403, error: "Media path is outside allowed project roots" };
   }
 
   const project = getProjects().find((item) => {
     const folderPath = item.folderPath ? path.resolve(item.folderPath).toLowerCase() : "";
     return folderPath && resolvedPath.toLowerCase().startsWith(folderPath);
   });
-  if (project && !canViewProject(user, project)) {
-    return res.status(404).json({ error: "Media file not found" });
+  if (project && !canViewProject(getRequestUser(req), project)) {
+    return { ok: false, status: 404, error: "Media file not found" };
+  }
+
+  return { ok: true, resolvedPath };
+}
+
+app.get("/api/media", async (req, res) => {
+  const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+  const access = authorizeMediaRead(req, rawPath);
+  if (!access.ok) {
+    return res.status(access.status).json({ error: access.error });
   }
 
   try {
-    await fs.access(resolvedPath);
-    await streamLocalFile(req, res, resolvedPath, {
-      contentType: contentTypeFromFilePath(resolvedPath),
-      disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+    await fs.access(access.resolvedPath);
+    await streamLocalFile(req, res, access.resolvedPath, {
+      contentType: contentTypeFromFilePath(access.resolvedPath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(access.resolvedPath))}"`,
     });
   } catch {
     res.status(404).json({ error: "Media file not found" });
+  }
+});
+
+// Downscaled WebP rendition of an image result, for grid and feed views. Falls
+// back to streaming the original whenever a rendition cannot be produced, so a
+// decode failure degrades to "slow" rather than "broken image".
+app.get("/api/media/thumbnail", async (req, res) => {
+  const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+  const access = authorizeMediaRead(req, rawPath);
+  if (!access.ok) {
+    return res.status(access.status).json({ error: access.error });
+  }
+
+  const requestedWidth = Number(req.query.w);
+  try {
+    const rendition = await getOrCreateThumbnail(access.resolvedPath, Number.isFinite(requestedWidth) ? requestedWidth : undefined);
+    if (rendition.kind === "rendition") {
+      res.setHeader("ETag", `"${rendition.cacheKey}"`);
+      if (req.headers["if-none-match"] === `"${rendition.cacheKey}"`) {
+        return res.status(304).end();
+      }
+      await streamLocalFile(req, res, rendition.filePath, {
+        contentType: rendition.contentType,
+        disposition: `inline; filename="${safeHeaderFileName(`${path.parse(access.resolvedPath).name}.webp`)}"`,
+        // The cache key covers the source's mtime and size, so a regenerated
+        // result yields a different URL-independent ETag and a new rendition.
+        cacheControl: "private, max-age=604800, immutable",
+      });
+      return;
+    }
+
+    // Passthrough: source is already small, or not an image we can re-encode.
+    await streamLocalFile(req, res, access.resolvedPath, {
+      contentType: contentTypeFromFilePath(access.resolvedPath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(access.resolvedPath))}"`,
+    });
+  } catch (error) {
+    // Never fail the request on a thumbnailing problem: serve the original.
+    try {
+      await fs.access(access.resolvedPath);
+      console.warn(
+        `Could not build thumbnail for ${path.basename(access.resolvedPath)}, serving original:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      await streamLocalFile(req, res, access.resolvedPath, {
+        contentType: contentTypeFromFilePath(access.resolvedPath),
+        disposition: `inline; filename="${safeHeaderFileName(path.basename(access.resolvedPath))}"`,
+      });
+    } catch {
+      res.status(404).json({ error: "Media file not found" });
+    }
   }
 });
 
@@ -1215,6 +1279,25 @@ app.get("/api/jobs/:jobId/result-media", async (req, res) => {
     if (localPath) {
       try {
         await fs.access(localPath);
+        // ?w= asks for a downscaled rendition for grid/feed display. Ignored for
+        // remote-only results below, which have no local file to re-encode.
+        const requestedWidth = Number(req.query.w);
+        if (Number.isFinite(requestedWidth) && requestedWidth > 0) {
+          const rendition = await getOrCreateThumbnail(localPath, requestedWidth).catch(() => undefined);
+          if (rendition?.kind === "rendition") {
+            res.setHeader("ETag", `"${rendition.cacheKey}"`);
+            if (req.headers["if-none-match"] === `"${rendition.cacheKey}"`) {
+              return res.status(304).end();
+            }
+            await streamLocalFile(req, res, rendition.filePath, {
+              contentType: rendition.contentType,
+              disposition: `inline; filename="${safeHeaderFileName(`${path.parse(localPath).name}.webp`)}"`,
+              cacheControl: "private, max-age=604800, immutable",
+            });
+            return;
+          }
+        }
+
         const contentType = contentTypeFromFilePath(localPath);
         await streamLocalFile(req, res, localPath, {
           contentType,
@@ -1523,6 +1606,23 @@ async function boot() {
     setInterval(() => {
       void recoverRemoteResultMedia().catch(() => undefined);
     }, resultRecoveryIntervalMs).unref();
+  }
+
+  // Keep the thumbnail cache inside its disk budget. Dispatcher-only so the two
+  // API workers do not race each other deleting the same entries; any worker's
+  // renditions are pruned all the same since the cache is one shared directory.
+  if (isDispatcher() && thumbnailPruneIntervalMs > 0) {
+    setInterval(() => {
+      void pruneThumbnailCache()
+        .then((result) => {
+          if (result.deletedFiles > 0) {
+            console.log(
+              `Pruned thumbnail cache: removed ${result.deletedFiles} renditions (${Math.round(result.deletedBytes / 1048576)} MiB).`,
+            );
+          }
+        })
+        .catch(() => undefined);
+    }, thumbnailPruneIntervalMs).unref();
   }
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Calendar, Check, ChevronDown, ChevronUp, Film, Hash, Images, Loader2, Pencil, UserRound, X } from "lucide-react";
 import type { Job, Project, User } from "../types";
+import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { JobActions } from "./JobActions";
@@ -233,7 +234,13 @@ export function JobCard({
                     key={`${job.id}-${image}`}
                     className="relative h-20 w-32 overflow-hidden rounded-md border border-line bg-stone-100"
                   >
-                    <img src={image} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                    <img
+                      src={thumbnailMediaUrl(image, THUMBNAIL_WIDTH.chip)}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                    />
                     {job.inputImages.length > 1 ? (
                       <span className="absolute left-1.5 top-1.5 rounded-full bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold">
                         {job.inputType === "start_end_frames" ? (index === 0 ? "Start frame" : "End frame") : `Input ${index + 1}`}
