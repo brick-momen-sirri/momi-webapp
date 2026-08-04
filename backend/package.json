@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "comment": "Runs on Node 24 in production (pm2). better-sqlite3 is a native module built for that ABI; if you change the Node major version, run `pnpm rebuild better-sqlite3` or the native binding will fail to load (ERR_DLOPEN_FAILED / NODE_MODULE_VERSION mismatch).",
-  "comment:coverage": "The --check-coverage thresholds in test:coverage are a regression ratchet, not a target. Measured baseline is 69.47/74.30/77.91/69.47; the gates sit ~3 points below it because c8 output drifts by hundredths between runs and a gate inside that drift fails CI on unrelated changes. Raise them deliberately as coverage improves.",
+  "comment:coverage": "The --check-coverage thresholds in test:coverage are a regression ratchet, not a target. Measured baseline is 75.29/74.00/80.92/75.29; the gates sit ~3 points below it because c8 output drifts by hundredths between runs and a gate inside that drift fails CI on unrelated changes. Raise them deliberately as coverage improves. Note that adding a test which loads a previously-unloaded module can LOWER the branch percentage: c8 --all undercounts branches it never executes, so newly loaded files enlarge the denominator faster than the new tests cover it. Judge a change by absolute covered counts, not the percentage alone.",
   "comment:coverage-exclusions": "Two files are excluded because they contain no executable application code, not because they are hard to test. types.ts is pure type declarations and emits no JavaScript at all, so its lines can never be covered by any test. opsDashboardPage.ts is a single exported template literal holding the ops dashboard's static HTML -- importing it once would 'cover' 499 lines without asserting anything, which is coverage theatre. Together they were 769 uncovered lines (~4 points) that no test could ever legitimately reach. Do NOT add exclusions here for code that is merely awkward to test.",
   "engines": {
     "node": ">=24.0.0 <25.0.0"
@@ -19,7 +19,7 @@
     "export:app-state": "tsx src/exportSqliteAuthStore.ts",
     "test": "node scripts/runBackendTests.mjs",
     "test:list": "node scripts/runBackendTests.mjs --list",
-    "test:coverage": "c8 --all --src src --include \"src/**/*.ts\" --exclude \"src/**/*.test.ts\" --exclude \"src/**/*.integration.test.ts\" --exclude \"src/topologyLoadTest.ts\" --exclude \"src/types.ts\" --exclude \"src/opsDashboardPage.ts\" --reporter text-summary --reporter json-summary --reporter lcov --reporter html --report-dir coverage/backend --check-coverage --statements 66 --branches 71 --functions 74 --lines 66 node scripts/runBackendTests.mjs"
+    "test:coverage": "c8 --all --src src --include \"src/**/*.ts\" --exclude \"src/**/*.test.ts\" --exclude \"src/**/*.integration.test.ts\" --exclude \"src/topologyLoadTest.ts\" --exclude \"src/types.ts\" --exclude \"src/opsDashboardPage.ts\" --reporter text-summary --reporter json-summary --reporter lcov --reporter html --report-dir coverage/backend --check-coverage --statements 72 --branches 70 --functions 77 --lines 72 node scripts/runBackendTests.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
