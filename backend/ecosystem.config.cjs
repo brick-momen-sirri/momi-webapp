@@ -1,9 +1,15 @@
 const splitTopology = ["1", "true", "yes", "on"].includes(
-  String(process.env.MOMI_TOPOLOGY_SPLIT || "").trim().toLowerCase(),
+  String(process.env.MOMI_TOPOLOGY_SPLIT || "")
+    .trim()
+    .toLowerCase(),
 );
-const sharedStateEnabled = splitTopology || ["1", "true", "yes", "on"].includes(
-  String(process.env.MOMI_SHARED_STATE || "").trim().toLowerCase(),
-);
+const sharedStateEnabled =
+  splitTopology ||
+  ["1", "true", "yes", "on"].includes(
+    String(process.env.MOMI_SHARED_STATE || "")
+      .trim()
+      .toLowerCase(),
+  );
 
 const commonEnv = {
   NODE_ENV: "production",

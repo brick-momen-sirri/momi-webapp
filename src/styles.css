@@ -54,13 +54,17 @@ select {
   background-image:
     radial-gradient(circle at 1px 1px, rgba(39, 36, 31, 0.12) 1px, transparent 0),
     linear-gradient(180deg, #f8f6f1 0%, #f0ede6 100%);
-  background-size: 20px 20px, 100% 100%;
+  background-size:
+    20px 20px,
+    100% 100%;
 }
 
 .login-background {
   position: relative;
   overflow: hidden;
-  background-position: 0 0, center;
+  background-position:
+    0 0,
+    center;
   isolation: isolate;
   animation: login-background-drift 28s ease-in-out infinite alternate;
 }
@@ -76,7 +80,13 @@ select {
     radial-gradient(circle at 45% 12%, rgba(99, 102, 241, 0.13), transparent 28%),
     radial-gradient(circle at 78% 70%, rgba(255, 107, 53, 0.16), transparent 32%),
     radial-gradient(circle at 62% 88%, rgba(168, 85, 247, 0.11), transparent 30%),
-    conic-gradient(from 120deg at 50% 50%, rgba(17, 184, 165, 0.12), rgba(255, 107, 53, 0.08), rgba(99, 102, 241, 0.11), rgba(17, 184, 165, 0.12));
+    conic-gradient(
+      from 120deg at 50% 50%,
+      rgba(17, 184, 165, 0.12),
+      rgba(255, 107, 53, 0.08),
+      rgba(99, 102, 241, 0.11),
+      rgba(17, 184, 165, 0.12)
+    );
   filter: blur(58px) saturate(112%);
   mix-blend-mode: multiply;
   opacity: 0.42;
@@ -111,7 +121,13 @@ select {
     radial-gradient(circle at 18% 16%, rgba(17, 184, 165, 0.24), transparent 28%),
     radial-gradient(circle at 78% 24%, rgba(255, 107, 53, 0.16), transparent 30%),
     radial-gradient(circle at 48% 82%, rgba(99, 102, 241, 0.18), transparent 34%),
-    conic-gradient(from 230deg at 45% 50%, rgba(17, 184, 165, 0.16), rgba(255, 107, 53, 0.08), rgba(245, 243, 238, 0.06), rgba(17, 184, 165, 0.16));
+    conic-gradient(
+      from 230deg at 45% 50%,
+      rgba(17, 184, 165, 0.16),
+      rgba(255, 107, 53, 0.08),
+      rgba(245, 243, 238, 0.06),
+      rgba(17, 184, 165, 0.16)
+    );
   filter: blur(46px) saturate(118%);
   opacity: 0.38;
   transform: translate3d(0, 0, 0);
@@ -228,10 +244,14 @@ select {
 
 @keyframes login-background-drift {
   from {
-    background-position: 0 0, center;
+    background-position:
+      0 0,
+      center;
   }
   to {
-    background-position: 18px 12px, center;
+    background-position:
+      18px 12px,
+      center;
   }
 }
 
@@ -268,7 +288,9 @@ select {
   }
 
   .login-button {
-    transition: background-color 120ms ease, opacity 120ms ease;
+    transition:
+      background-color 120ms ease,
+      opacity 120ms ease;
   }
 
   .login-button:hover:not(:disabled),

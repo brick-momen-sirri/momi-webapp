@@ -79,7 +79,10 @@ export function CreateProjectModal({ users, ownerId, onCreate, onClose }: Create
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-sm">
-      <form onSubmit={handleSubmit} className="relative z-[1010] max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-2xl">
+      <form
+        onSubmit={handleSubmit}
+        className="relative z-[1010] max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-2xl"
+      >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-4 py-3">
           <div className="flex items-center gap-2">
             <FolderPlus className="h-4 w-4 text-accent" />
@@ -142,12 +145,7 @@ export function CreateProjectModal({ users, ownerId, onCreate, onClose }: Create
         </div>
 
         <div className="border-t border-line px-4 py-4">
-          <TeamSelector
-            users={users}
-            ownerId={ownerId}
-            members={members}
-            onMembersChange={setMembers}
-          />
+          <TeamSelector users={users} ownerId={ownerId} members={members} onMembersChange={setMembers} />
         </div>
 
         {error ? <p className="px-4 text-xs font-semibold text-red-600">{error}</p> : null}

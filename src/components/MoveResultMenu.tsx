@@ -20,21 +20,14 @@ export function MoveResultMenu({ job, project, onMove }: MoveResultMenuProps) {
   const [query, setQuery] = useState("");
   const [movingTo, setMovingTo] = useState<string | null | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
-  const destinations = useMemo(
-    () => buildDestinations(project, job.folderId),
-    [job.folderId, project],
+  const destinations = useMemo(() => buildDestinations(project, job.folderId), [job.folderId, project]);
+  const filteredDestinations = destinations.filter((destination) =>
+    `${destination.name} ${destination.path}`.toLowerCase().includes(query.trim().toLowerCase()),
   );
-  const filteredDestinations = destinations.filter((destination) => (
-    `${destination.name} ${destination.path}`.toLowerCase().includes(query.trim().toLowerCase())
-  ));
   const currentLocation = currentFolderLabel(project?.folders ?? [], job.folderId);
   const result = job.resultUrl ?? job.thumbnailUrl;
   const canMove = Boolean(
-    result
-    && job.status === "completed"
-    && job.source !== "existing_project_media"
-    && project
-    && destinations.length,
+    result && job.status === "completed" && job.source !== "existing_project_media" && project && destinations.length,
   );
 
   useEffect(() => {
@@ -67,13 +60,14 @@ export function MoveResultMenu({ job, project, onMove }: MoveResultMenuProps) {
     }
   }
 
-  const unavailableReason = job.source === "existing_project_media"
-    ? "Only generated results with saved job metadata can be moved"
-    : job.status !== "completed"
-      ? "The result can be moved after generation completes"
-      : destinations.length
-        ? "Move result to another project folder"
-        : "No other project folders are available";
+  const unavailableReason =
+    job.source === "existing_project_media"
+      ? "Only generated results with saved job metadata can be moved"
+      : job.status !== "completed"
+        ? "The result can be moved after generation completes"
+        : destinations.length
+          ? "Move result to another project folder"
+          : "No other project folders are available";
 
   return (
     <div ref={menuRef} className="relative">
@@ -82,11 +76,7 @@ export function MoveResultMenu({ job, project, onMove }: MoveResultMenuProps) {
         onClick={() => canMove && setOpen((value) => !value)}
         disabled={!canMove}
         className={`flex h-8 w-8 items-center justify-center rounded-md border border-line transition ${
-          open
-            ? "bg-cyan-50 text-cyan-700"
-            : canMove
-              ? "text-stone-600 hover:bg-stone-50"
-              : "cursor-not-allowed text-stone-300"
+          open ? "bg-cyan-50 text-cyan-700" : canMove ? "text-stone-600 hover:bg-stone-50" : "cursor-not-allowed text-stone-300"
         }`}
         title={unavailableReason}
         aria-label="Move result to another folder"
@@ -138,33 +128,39 @@ export function MoveResultMenu({ job, project, onMove }: MoveResultMenuProps) {
           </div>
 
           <div className="max-h-72 overflow-y-auto p-2">
-            {filteredDestinations.length ? filteredDestinations.map((destination) => {
-              const isMovingHere = movingTo !== undefined && movingTo === destination.folderId;
-              return (
-                <button
-                  key={destination.folderId ?? "project-root"}
-                  type="button"
-                  onClick={() => void moveTo(destination)}
-                  disabled={movingTo !== undefined}
-                  className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gradient-to-r hover:from-cyan-50 hover:to-teal-50 disabled:cursor-wait disabled:opacity-60"
-                >
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${
-                    destination.isRoot
-                      ? "bg-violet-50 text-violet-600 group-hover:bg-violet-100"
-                      : "bg-cyan-50 text-cyan-700 group-hover:bg-cyan-100"
-                  }`}>
-                    {destination.isRoot ? <FolderRoot className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-stone-800">{destination.name}</span>
-                    <span className="mt-0.5 block truncate text-[11px] text-stone-500">{destination.path}</span>
-                  </span>
-                  {isMovingHere
-                    ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cyan-600" />
-                    : <ArrowRight className="h-4 w-4 shrink-0 text-stone-300 transition group-hover:translate-x-0.5 group-hover:text-cyan-600" />}
-                </button>
-              );
-            }) : (
+            {filteredDestinations.length ? (
+              filteredDestinations.map((destination) => {
+                const isMovingHere = movingTo !== undefined && movingTo === destination.folderId;
+                return (
+                  <button
+                    key={destination.folderId ?? "project-root"}
+                    type="button"
+                    onClick={() => void moveTo(destination)}
+                    disabled={movingTo !== undefined}
+                    className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gradient-to-r hover:from-cyan-50 hover:to-teal-50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${
+                        destination.isRoot
+                          ? "bg-violet-50 text-violet-600 group-hover:bg-violet-100"
+                          : "bg-cyan-50 text-cyan-700 group-hover:bg-cyan-100"
+                      }`}
+                    >
+                      {destination.isRoot ? <FolderRoot className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-stone-800">{destination.name}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-stone-500">{destination.path}</span>
+                    </span>
+                    {isMovingHere ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cyan-600" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4 shrink-0 text-stone-300 transition group-hover:translate-x-0.5 group-hover:text-cyan-600" />
+                    )}
+                  </button>
+                );
+              })
+            ) : (
               <div className="px-4 py-8 text-center">
                 <Folder className="mx-auto h-7 w-7 text-stone-300" />
                 <p className="mt-2 text-xs font-semibold text-stone-500">No folders match your search.</p>
@@ -188,15 +184,17 @@ function buildDestinations(project: Project | undefined, currentFolderId: string
   const destinations: Destination[] = currentFolderId
     ? [{ folderId: null, name: "Project root", path: project.name, isRoot: true }]
     : [];
-  destinations.push(...folders
-    .filter((folder) => folder.folderId !== currentFolderId)
-    .map((folder) => ({
-      folderId: folder.folderId,
-      name: folder.name,
-      path: folderPathLabel(folder, folders),
-      isRoot: false,
-    }))
-    .sort((left, right) => left.path.localeCompare(right.path)));
+  destinations.push(
+    ...folders
+      .filter((folder) => folder.folderId !== currentFolderId)
+      .map((folder) => ({
+        folderId: folder.folderId,
+        name: folder.name,
+        path: folderPathLabel(folder, folders),
+        isRoot: false,
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path)),
+  );
   return destinations;
 }
 

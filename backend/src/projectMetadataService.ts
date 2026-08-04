@@ -67,7 +67,9 @@ export async function ensureProjectMetadata(project: Project): Promise<Project> 
     diskName: folderName,
     createdAt: existing?.createdAt || project.createdAt || now(),
     updatedAt: existing?.updatedAt || project.updatedAt || now(),
-    renamedFrom: Array.isArray(existing?.renamedFrom) ? existing.renamedFrom.filter((item): item is string => typeof item === "string") : [],
+    renamedFrom: Array.isArray(existing?.renamedFrom)
+      ? existing.renamedFrom.filter((item): item is string => typeof item === "string")
+      : [],
   };
 
   if (!existing || needsProjectMetadataWrite(existing, metadata)) {
@@ -88,11 +90,7 @@ export async function loadProjectFolders(project: Project): Promise<ProjectFolde
   return ensureProjectFoldersFile(project.folderPath);
 }
 
-export async function createProjectFolder(
-  project: Project,
-  input: { name: string; parentId?: string | null },
-  userId: string,
-) {
+export async function createProjectFolder(project: Project, input: { name: string; parentId?: string | null }, userId: string) {
   return withProjectLock(project, async () => {
     const folders = await ensureProjectFoldersFile(project.folderPath);
     const cleanName = validateDisplayName(input.name);
@@ -136,12 +134,7 @@ export async function createProjectFolder(
   });
 }
 
-export async function renameProjectFolder(
-  project: Project,
-  folderId: string,
-  input: { name: string },
-  userId: string,
-) {
+export async function renameProjectFolder(project: Project, folderId: string, input: { name: string }, userId: string) {
   return withProjectLock(project, async () => {
     const folders = await ensureProjectFoldersFile(project.folderPath);
     const folder = folders.find((item) => item.folderId === folderId && !item.archived);
@@ -246,11 +239,7 @@ export async function resolveProjectMediaPath(project: Project, folderId: string
   return fullPath;
 }
 
-export async function renameProjectOnDisk(
-  project: Project,
-  input: { client?: string; name?: string },
-  userId: string,
-) {
+export async function renameProjectOnDisk(project: Project, input: { client?: string; name?: string }, userId: string) {
   const oldRoot = project.folderPath;
   const lock = await acquireProjectLock(oldRoot);
   let currentRoot = oldRoot;
@@ -404,7 +393,9 @@ async function ensureProjectFoldersFile(projectRoot: string): Promise<ProjectFol
   const foldersPath = projectFoldersPath(projectRoot);
   const exists = await fileExists(foldersPath);
   const data = await readJsonFile<ProjectFoldersFile>(foldersPath, { version: 1, folders: [] });
-  const folders = Array.isArray(data.folders) ? data.folders.map(normalizeFolder).filter((item): item is ProjectFolder => Boolean(item)) : [];
+  const folders = Array.isArray(data.folders)
+    ? data.folders.map(normalizeFolder).filter((item): item is ProjectFolder => Boolean(item))
+    : [];
   if (!exists) {
     await writeProjectFolders(projectRoot, folders);
   }
@@ -423,7 +414,8 @@ function normalizeFolder(folder: ProjectFolder): ProjectFolder | undefined {
     parentId: typeof folder.parentId === "string" && folder.parentId ? folder.parentId : null,
     name: cleanName,
     slug: typeof folder.slug === "string" && folder.slug ? folder.slug : toSlug(cleanName),
-    diskName: typeof folder.diskName === "string" && folder.diskName ? folder.diskName : buildFolderDiskName(folder.folderId, cleanName),
+    diskName:
+      typeof folder.diskName === "string" && folder.diskName ? folder.diskName : buildFolderDiskName(folder.folderId, cleanName),
     createdAt: typeof folder.createdAt === "string" ? folder.createdAt : now(),
     updatedAt: typeof folder.updatedAt === "string" ? folder.updatedAt : now(),
     createdBy: typeof folder.createdBy === "string" ? folder.createdBy : undefined,
@@ -514,7 +506,15 @@ async function appendJsonl(filePath: string, record: Record<string, unknown>) {
 
 function assertUniqueFolderName(folders: ProjectFolder[], name: string, parentId: string | null, exceptFolderId?: string) {
   const normalized = name.trim().toLowerCase();
-  if (folders.some((folder) => !folder.archived && folder.folderId !== exceptFolderId && folder.parentId === parentId && folder.name.trim().toLowerCase() === normalized)) {
+  if (
+    folders.some(
+      (folder) =>
+        !folder.archived &&
+        folder.folderId !== exceptFolderId &&
+        folder.parentId === parentId &&
+        folder.name.trim().toLowerCase() === normalized,
+    )
+  ) {
     throw new Error("A folder with that name already exists in this project.");
   }
 }
@@ -546,13 +546,15 @@ function applyProjectMetadata(project: Project, metadata: ProjectMetadata, folde
 }
 
 function needsProjectMetadataWrite(current: ProjectMetadata, next: ProjectMetadata) {
-  return current.projectId !== next.projectId
-    || current.code !== next.code
-    || current.client !== next.client
-    || current.name !== next.name
-    || current.displayName !== next.displayName
-    || current.diskName !== next.diskName
-    || !Array.isArray(current.renamedFrom);
+  return (
+    current.projectId !== next.projectId ||
+    current.code !== next.code ||
+    current.client !== next.client ||
+    current.name !== next.name ||
+    current.displayName !== next.displayName ||
+    current.diskName !== next.diskName ||
+    !Array.isArray(current.renamedFrom)
+  );
 }
 
 function projectMetadataPath(projectRoot: string) {
@@ -589,7 +591,7 @@ async function directoryContainsFiles(folderPath: string): Promise<boolean> {
   for (const entry of entries) {
     const fullPath = path.join(folderPath, entry.name);
     if (entry.isFile()) return true;
-    if (entry.isDirectory() && await directoryContainsFiles(fullPath)) return true;
+    if (entry.isDirectory() && (await directoryContainsFiles(fullPath))) return true;
   }
   return false;
 }

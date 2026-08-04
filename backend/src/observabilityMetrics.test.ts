@@ -15,7 +15,14 @@ function snap(overrides: Partial<ObservabilitySnapshot> = {}): ObservabilitySnap
       active: 2,
       runpodActive: 2,
       capacity: 10,
-      dispatcher: { enabled: true, active: true, heldByThisProcess: true, ownerId: "host:1:abc", heartbeatAt: 9_000, expiresAt: 25_000 },
+      dispatcher: {
+        enabled: true,
+        active: true,
+        heldByThisProcess: true,
+        ownerId: "host:1:abc",
+        heartbeatAt: 9_000,
+        expiresAt: 25_000,
+      },
     },
     mediaIndex: { dirtyRevision: 170, builtRevision: 168, cachedRevision: 167, cachedItems: 7491 },
     memory: { rssMiB: 398, heapUsedMiB: 70 },
@@ -37,7 +44,13 @@ test("renders gauges with role/pid labels and expected values", () => {
 });
 
 test("lease_held is 0 on an API worker that does not own the lease", () => {
-  const text = renderPrometheusMetrics(snap({ role: "api", pid: 7, queue: { ...snap().queue, dispatcher: { ...snap().queue.dispatcher, heldByThisProcess: false } } }));
+  const text = renderPrometheusMetrics(
+    snap({
+      role: "api",
+      pid: 7,
+      queue: { ...snap().queue, dispatcher: { ...snap().queue.dispatcher, heldByThisProcess: false } },
+    }),
+  );
   assert.match(text, /momi_dispatcher_lease_held\{role="api",pid="7"\} 0/);
 });
 

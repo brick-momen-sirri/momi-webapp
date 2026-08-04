@@ -10,10 +10,11 @@ type DurationSelectorProps = {
 
 export function DurationSelector({ selectedModel, value, onChange }: DurationSelectorProps) {
   const isVideoModel = selectedModel.category === "video";
-  const options = isVideoModel ? selectedModel.supportedDurations ?? [5, 8, 10] : [];
-  const fallbackValue = selectedModel.defaultDurationSeconds && options.includes(selectedModel.defaultDurationSeconds)
-    ? selectedModel.defaultDurationSeconds
-    : options[0] ?? value;
+  const options = isVideoModel ? (selectedModel.supportedDurations ?? [5, 8, 10]) : [];
+  const fallbackValue =
+    selectedModel.defaultDurationSeconds && options.includes(selectedModel.defaultDurationSeconds)
+      ? selectedModel.defaultDurationSeconds
+      : (options[0] ?? value);
   const normalizedValue = options.includes(value) ? value : fallbackValue;
   const [selectedValue, setSelectedValue] = useState(normalizedValue);
   const displayValue = options.includes(selectedValue) ? selectedValue : normalizedValue;
@@ -99,7 +100,8 @@ export function DurationSelector({ selectedModel, value, onChange }: DurationSel
             </div>
           )}
           <p className="mt-2 text-[11px] font-medium text-stone-500">
-            Valid: {isContiguous ? `${options[0]}-${options[options.length - 1]}s` : options.map((option) => `${option}s`).join(" / ")}
+            Valid:{" "}
+            {isContiguous ? `${options[0]}-${options[options.length - 1]}s` : options.map((option) => `${option}s`).join(" / ")}
           </p>
         </div>
       )}

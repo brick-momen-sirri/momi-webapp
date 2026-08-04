@@ -29,25 +29,27 @@ export async function getCredits(): Promise<CreditInfo> {
     ...comfyServers.map((server) => ({ source: `${server}/abuomar_credit_proxy`, load: () => fetchComfyCredit(server) })),
   ];
 
-  const results = await Promise.all(candidates.map(async (candidate) => {
-    try {
-      const data = await candidate.load();
-      const nestedData = objectFrom(data.data);
-      const credits = creditNumberFrom(data) ?? (nestedData ? creditNumberFrom(nestedData) : undefined);
-      if (credits == null) {
+  const results = await Promise.all(
+    candidates.map(async (candidate) => {
+      try {
+        const data = await candidate.load();
+        const nestedData = objectFrom(data.data);
+        const credits = creditNumberFrom(data) ?? (nestedData ? creditNumberFrom(nestedData) : undefined);
+        if (credits == null) {
+          return undefined;
+        }
+        return {
+          creditsLeft: credits,
+          creditsUsed: numberFrom(data.creditsUsed) ?? numberFrom(nestedData?.creditsUsed),
+          currency: stringFrom(data.currency) ?? stringFrom(nestedData?.currency),
+          updatedAt: stringFrom(data.updatedAt) ?? stringFrom(nestedData?.updatedAt) ?? new Date().toISOString(),
+          source: candidate.source,
+        } satisfies CreditInfo;
+      } catch {
         return undefined;
       }
-      return {
-        creditsLeft: credits,
-        creditsUsed: numberFrom(data.creditsUsed) ?? numberFrom(nestedData?.creditsUsed),
-        currency: stringFrom(data.currency) ?? stringFrom(nestedData?.currency),
-        updatedAt: stringFrom(data.updatedAt) ?? stringFrom(nestedData?.updatedAt) ?? new Date().toISOString(),
-        source: candidate.source,
-      } satisfies CreditInfo;
-    } catch {
-      return undefined;
-    }
-  }));
+    }),
+  );
 
   for (const result of results) {
     if (result) return result;
@@ -71,7 +73,7 @@ function stringFrom(value: unknown) {
 }
 
 function objectFrom(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function creditNumberFrom(data: Record<string, unknown>) {

@@ -19,17 +19,19 @@ const THRESHOLDS: WatchdogThresholds = {
 const DISPATCHER: WatchdogFlags = { evaluatesQueueStall: true, evaluatesOutage: false };
 const API: WatchdogFlags = { evaluatesQueueStall: false, evaluatesOutage: true };
 
-function makeSnap(o: {
-  queued?: number;
-  runpodActive?: number;
-  capacity?: number;
-  leaseActive?: boolean;
-  expiresAt?: number | null;
-  rssMiB?: number;
-  diskFreeBytes?: number | null;
-  role?: string;
-  nowMs?: number;
-} = {}): MetricsSnapshot {
+function makeSnap(
+  o: {
+    queued?: number;
+    runpodActive?: number;
+    capacity?: number;
+    leaseActive?: boolean;
+    expiresAt?: number | null;
+    rssMiB?: number;
+    diskFreeBytes?: number | null;
+    role?: string;
+    nowMs?: number;
+  } = {},
+): MetricsSnapshot {
   return {
     role: o.role ?? "dispatcher",
     pid: 1,
@@ -129,7 +131,13 @@ test("dispatch_outage fires on an API worker when the lease is stale with queued
 
 test("dispatch_outage does not fire when there is no queued work", () => {
   const state = initialWatchdogState();
-  const r = evaluateAlerts(makeSnap({ role: "api", queued: 0, leaseActive: false, expiresAt: 0, nowMs: 10_000 }), state, THRESHOLDS, API, 10_000);
+  const r = evaluateAlerts(
+    makeSnap({ role: "api", queued: 0, leaseActive: false, expiresAt: 0, nowMs: 10_000 }),
+    state,
+    THRESHOLDS,
+    API,
+    10_000,
+  );
   assert.equal(r.events.length, 0);
 });
 
@@ -159,13 +167,27 @@ test("disk_low fires below the floor and never fires when disk is unknown", () =
 
 test("independent rules fire together and are tracked separately", () => {
   const state = initialWatchdogState();
-  const r = evaluateAlerts(makeSnap({ rssMiB: 1300, diskFreeBytes: 1 * 1024 * 1024 * 1024 }), state, THRESHOLDS, DISPATCHER, 1000);
+  const r = evaluateAlerts(
+    makeSnap({ rssMiB: 1300, diskFreeBytes: 1 * 1024 * 1024 * 1024 }),
+    state,
+    THRESHOLDS,
+    DISPATCHER,
+    1000,
+  );
   const rules = r.events.map((e) => e.rule).sort();
   assert.deepEqual(rules, ["disk_low", "memory_high"]);
 });
 
 test("slack webhook payload is a single text field; json payload is structured", () => {
-  const event = { rule: "queue_stall" as const, phase: "firing" as const, severity: "critical" as const, detail: "stuck", role: "dispatcher", pid: 1, atMs: 5 };
+  const event = {
+    rule: "queue_stall" as const,
+    phase: "firing" as const,
+    severity: "critical" as const,
+    detail: "stuck",
+    role: "dispatcher",
+    pid: 1,
+    atMs: 5,
+  };
   const slack = buildWebhookPayload(event, "slack");
   assert.equal(Object.keys(slack).join(","), "text");
   assert.match(String(slack.text), /queue_stall firing on dispatcher/);

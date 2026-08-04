@@ -2,7 +2,9 @@ import type { CreditBalanceSnapshot, CreditUsageSummary, Job } from "./types.js"
 
 export const COMPANY_BALANCE_DELTA_SOURCE = "company_balance_delta";
 
-export function creditsSpentForAccounting(job: Pick<Job, "source" | "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage">) {
+export function creditsSpentForAccounting(
+  job: Pick<Job, "source" | "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage">,
+) {
   if (job.source === "existing_project_media") return 0;
 
   const actualCredits = positiveNumber(job.creditsActual);

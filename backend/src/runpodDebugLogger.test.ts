@@ -13,25 +13,27 @@ test("RunPod URL info includes endpoint id and operation", () => {
 });
 
 test("sanitized request body redacts secrets and omits inline media", () => {
-  const sanitized = logger.sanitizeRunpodRequestBody(JSON.stringify({
-    input: {
-      workflow: {
-        "3": {
-          class_type: "OpenAIChatNode",
-          _meta: { title: "OpenAI ChatGPT" },
-          inputs: { prompt: "hello" },
+  const sanitized = logger.sanitizeRunpodRequestBody(
+    JSON.stringify({
+      input: {
+        workflow: {
+          "3": {
+            class_type: "OpenAIChatNode",
+            _meta: { title: "OpenAI ChatGPT" },
+            inputs: { prompt: "hello" },
+          },
         },
+        images: [
+          {
+            name: "reference.png",
+            image: `data:image/png;base64,${"A".repeat(1200)}`,
+            url: "https://backend.example/api/runpod-input?token=secret-token",
+          },
+        ],
+        comfy_org_api_key: "secret-key",
       },
-      images: [
-        {
-          name: "reference.png",
-          image: `data:image/png;base64,${"A".repeat(1200)}`,
-          url: "https://backend.example/api/runpod-input?token=secret-token",
-        },
-      ],
-      comfy_org_api_key: "secret-key",
-    },
-  })) as Record<string, any>;
+    }),
+  ) as Record<string, any>;
 
   const serialized = JSON.stringify(sanitized);
   assert.equal(serialized.includes("secret-key"), false);
@@ -58,14 +60,20 @@ test("debug logging prints sanitized body only when RUNPOD_DEBUG is true", () =>
       method: "POST",
       body: JSON.stringify({ input: { image_base64: "AAA=", api_key: "secret" } }),
     });
-    assert.equal(logs.some((line) => line.includes("sanitized request body")), false);
+    assert.equal(
+      logs.some((line) => line.includes("sanitized request body")),
+      false,
+    );
 
     process.env.RUNPOD_DEBUG = "true";
     logger.logRunpodRequest("https://api.runpod.ai/v2/endpoint-test/runsync", {
       method: "POST",
       body: JSON.stringify({ input: { image_base64: "AAA=", api_key: "secret" } }),
     });
-    assert.equal(logs.some((line) => line.includes("sanitized request body")), true);
+    assert.equal(
+      logs.some((line) => line.includes("sanitized request body")),
+      true,
+    );
     assert.equal(logs.join("\n").includes("secret"), false);
   } finally {
     console.info = originalInfo;

@@ -53,8 +53,16 @@ export function renderPrometheusMetrics(snapshot: ObservabilitySnapshot): string
   gauge("momi_queue_runpod_active", "In-flight RunPod jobs.", snapshot.queue.runpodActive);
   gauge("momi_queue_capacity", "Global RunPod concurrency cap.", snapshot.queue.capacity);
 
-  gauge("momi_dispatcher_lease_active", "1 if a dispatcher lease is currently held by any process.", snapshot.queue.dispatcher.active ? 1 : 0);
-  gauge("momi_dispatcher_lease_held", "1 if this process holds the dispatcher lease.", snapshot.queue.dispatcher.heldByThisProcess ? 1 : 0);
+  gauge(
+    "momi_dispatcher_lease_active",
+    "1 if a dispatcher lease is currently held by any process.",
+    snapshot.queue.dispatcher.active ? 1 : 0,
+  );
+  gauge(
+    "momi_dispatcher_lease_held",
+    "1 if this process holds the dispatcher lease.",
+    snapshot.queue.dispatcher.heldByThisProcess ? 1 : 0,
+  );
   if (snapshot.queue.dispatcher.expiresAt != null) {
     gauge(
       "momi_dispatcher_lease_expires_in_seconds",
@@ -66,8 +74,16 @@ export function renderPrometheusMetrics(snapshot: ObservabilitySnapshot): string
   if (snapshot.mediaIndex) {
     gauge("momi_media_index_dirty_revision", "Latest media-index dirty revision.", snapshot.mediaIndex.dirtyRevision);
     gauge("momi_media_index_built_revision", "Latest built/published media-index revision.", snapshot.mediaIndex.builtRevision);
-    gauge("momi_media_index_cached_revision", "Media-index revision this process has cached.", snapshot.mediaIndex.cachedRevision);
-    gauge("momi_media_index_lag", "Dirty minus cached revision (read staleness).", snapshot.mediaIndex.dirtyRevision - snapshot.mediaIndex.cachedRevision);
+    gauge(
+      "momi_media_index_cached_revision",
+      "Media-index revision this process has cached.",
+      snapshot.mediaIndex.cachedRevision,
+    );
+    gauge(
+      "momi_media_index_lag",
+      "Dirty minus cached revision (read staleness).",
+      snapshot.mediaIndex.dirtyRevision - snapshot.mediaIndex.cachedRevision,
+    );
     gauge("momi_media_index_items", "Number of items in the media index.", snapshot.mediaIndex.cachedItems);
   }
 

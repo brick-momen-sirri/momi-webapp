@@ -46,9 +46,7 @@ export function VideoUploader({ video, onChange }: VideoUploaderProps) {
           <UploadCloud className="h-4 w-4 text-stone-500" />
           <h2 className="text-sm font-semibold">Input Video</h2>
         </div>
-        <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">
-          required
-        </span>
+        <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">required</span>
       </div>
 
       {video ? (
@@ -81,7 +79,13 @@ export function VideoUploader({ video, onChange }: VideoUploaderProps) {
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
-          <input ref={inputRef} type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v" className="hidden" onChange={handleFileInput} />
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v"
+            className="hidden"
+            onChange={handleFileInput}
+          />
         </div>
       ) : (
         <>
@@ -102,7 +106,13 @@ export function VideoUploader({ video, onChange }: VideoUploaderProps) {
             <span className="mt-2 text-xs font-semibold">Input video</span>
             <span className="mt-1 text-[11px] leading-4 text-stone-500">Drop video or browse</span>
           </button>
-          <input ref={inputRef} type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v" className="hidden" onChange={handleFileInput} />
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v"
+            className="hidden"
+            onChange={handleFileInput}
+          />
         </>
       )}
     </section>

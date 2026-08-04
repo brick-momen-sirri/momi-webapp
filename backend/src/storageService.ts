@@ -42,8 +42,8 @@ export async function readJsonFileWithBackup<T>(filePath: string, fallback: T): 
       return parsed;
     } catch (error) {
       console.error(
-        `Could not parse ${path.basename(candidate)}: ${error instanceof Error ? error.message : String(error)}.`
-        + " Trying the next backup...",
+        `Could not parse ${path.basename(candidate)}: ${error instanceof Error ? error.message : String(error)}.` +
+          " Trying the next backup...",
       );
     }
   }
@@ -141,10 +141,12 @@ function assertNoEmbeddedMediaInner(value: unknown, location: string, seen: Weak
 }
 
 function isEmbeddedMediaString(value: string) {
-  return value.startsWith("data:image/")
-    || value.startsWith("data:video/")
-    || value.startsWith("data:audio/")
-    || value.startsWith("data:application/octet-stream");
+  return (
+    value.startsWith("data:image/") ||
+    value.startsWith("data:video/") ||
+    value.startsWith("data:audio/") ||
+    value.startsWith("data:application/octet-stream")
+  );
 }
 
 function assertMetadataTextSize(text: string, filePath: string, maxBytes: number) {
@@ -169,7 +171,11 @@ async function replaceFile(tempPath: string, filePath: string) {
 }
 
 export function safeSegment(value: string) {
-  return value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/\s+/g, "_").slice(0, 140);
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 140);
 }
 
 export function fallbackProjectFolder(project: Project) {

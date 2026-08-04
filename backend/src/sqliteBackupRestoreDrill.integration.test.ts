@@ -36,7 +36,12 @@ test("restore drill: a database that never existed cannot be restored (documents
   try {
     const liveDbPath = path.join(dir, "jobs.sqlite");
     const stagingDir = path.join(dir, "staging");
-    const cycle = await runBackupCycle({ targets: [{ name: "jobs", sourcePath: liveDbPath }], stagingDir, retention: 5, label: "t0" });
+    const cycle = await runBackupCycle({
+      targets: [{ name: "jobs", sourcePath: liveDbPath }],
+      stagingDir,
+      retention: 5,
+      label: "t0",
+    });
     assert.equal(cycle.ok, false, "there is nothing to back up yet, and that must be a visible failure, not silent success");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -67,7 +72,12 @@ test("restore drill: live jobs.sqlite is fully recoverable after simulated total
     });
 
     // 2. A real backup cycle, taken while the store above is still open.
-    const cycle = await runBackupCycle({ targets: [{ name: "jobs", sourcePath: liveDbPath }], stagingDir, retention: 5, label: "t0" });
+    const cycle = await runBackupCycle({
+      targets: [{ name: "jobs", sourcePath: liveDbPath }],
+      stagingDir,
+      retention: 5,
+      label: "t0",
+    });
     assert.equal(cycle.ok, true);
     const snapshotPath = cycle.results[0].snapshotPath!;
     assert.ok(snapshotPath);
@@ -79,7 +89,10 @@ test("restore drill: live jobs.sqlite is fully recoverable after simulated total
     await fs.rm(liveDbPath, { force: true });
     await fs.rm(`${liveDbPath}-wal`, { force: true });
     await fs.rm(`${liveDbPath}-shm`, { force: true });
-    const survivedLoss = await fs.access(liveDbPath).then(() => true, () => false);
+    const survivedLoss = await fs.access(liveDbPath).then(
+      () => true,
+      () => false,
+    );
     assert.equal(survivedLoss, false, "sanity check: the live db must actually be gone before restoring");
 
     // 4. The documented restore procedure: verify the snapshot, then copy it
@@ -98,7 +111,11 @@ test("restore drill: live jobs.sqlite is fully recoverable after simulated total
       assert.equal(restored.length, 3);
       assert.deepEqual(restored.map((j) => j.id).sort(), ["job_1", "job_2", "job_3"]);
       assert.equal(restored.find((j) => j.id === "job_1")?.prompt, "a red car at sunset");
-      assert.equal(restored.find((j) => j.id === "job_2")?.status, "running", "the post-snapshot applyToJob mutation must have been captured by the backup");
+      assert.equal(
+        restored.find((j) => j.id === "job_2")?.status,
+        "running",
+        "the post-snapshot applyToJob mutation must have been captured by the backup",
+      );
       assert.equal(restored.find((j) => j.id === "job_3")?.errorMessage, "RunPod timeout");
     } finally {
       restoredStore.close();

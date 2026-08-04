@@ -17,7 +17,11 @@ const omittedStringMaxLength = 300;
 const maxArrayPreviewItems = 4;
 
 export function runpodDebugEnabled() {
-  return ["1", "true", "yes", "on"].includes(String(process.env.RUNPOD_DEBUG ?? "").trim().toLowerCase());
+  return ["1", "true", "yes", "on"].includes(
+    String(process.env.RUNPOD_DEBUG ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 export function logRunpodRequest(url: string, init: RequestInit = {}) {
@@ -49,7 +53,9 @@ export function logRunpodResponse(url: string, responseStatus: number, data: Run
       `operation=${info.operation}`,
       jobId ? `job_id=${jobId}` : "",
       runpodStatus ? `runpod_status=${runpodStatus}` : "",
-    ].filter(Boolean).join(" "),
+    ]
+      .filter(Boolean)
+      .join(" "),
   );
 
   if (info.operation === "/run") {
@@ -112,7 +118,10 @@ export function sanitizeRunpodRequestBody(body: unknown): unknown {
 export function runpodUrlInfo(url: string): RunpodUrlInfo {
   try {
     const parsed = new URL(url);
-    const segments = parsed.pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
+    const segments = parsed.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((part) => decodeURIComponent(part));
     const v2Index = segments.indexOf("v2");
     const endpointId = v2Index >= 0 ? segments[v2Index + 1] : undefined;
     const operationSegments = v2Index >= 0 ? segments.slice(v2Index + 2) : segments;
@@ -221,9 +230,19 @@ function sanitizeUrl(value: string) {
 
 function summarizeWorkflow(workflow: Record<string, unknown>) {
   const nodeEntries = Object.entries(workflow).filter(([, node]) => isRecord(node) && stringFrom(node.class_type));
-  const classTypes = Array.from(new Set(nodeEntries.map(([, node]) => stringFrom((node as Record<string, unknown>).class_type)).filter((item): item is string => Boolean(item))));
+  const classTypes = Array.from(
+    new Set(
+      nodeEntries
+        .map(([, node]) => stringFrom((node as Record<string, unknown>).class_type))
+        .filter((item): item is string => Boolean(item)),
+    ),
+  );
   const titles = nodeEntries
-    .map(([, node]) => isRecord((node as Record<string, unknown>)._meta) ? stringFrom(((node as Record<string, unknown>)._meta as Record<string, unknown>).title) : undefined)
+    .map(([, node]) =>
+      isRecord((node as Record<string, unknown>)._meta)
+        ? stringFrom(((node as Record<string, unknown>)._meta as Record<string, unknown>).title)
+        : undefined,
+    )
     .filter((item): item is string => Boolean(item));
 
   return {
@@ -277,7 +296,15 @@ function looksLikeLargeBase64(value: string) {
 
 function isSensitiveKey(key: string) {
   const clean = key.toLowerCase();
-  return clean.includes("api_key") || clean.includes("apikey") || clean.includes("authorization") || clean.includes("secret") || clean.includes("token") || clean === "key" || clean.endsWith("_key");
+  return (
+    clean.includes("api_key") ||
+    clean.includes("apikey") ||
+    clean.includes("authorization") ||
+    clean.includes("secret") ||
+    clean.includes("token") ||
+    clean === "key" ||
+    clean.endsWith("_key")
+  );
 }
 
 function isMediaInputKey(key: string) {

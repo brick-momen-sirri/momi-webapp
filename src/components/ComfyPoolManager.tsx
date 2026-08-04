@@ -179,7 +179,9 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
                         >
                           <td className="px-3 py-2 font-bold text-ink">{port}</td>
                           <td className="px-3 py-2">
-                            <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-bold ${statusClass(server.status)}`}>
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-bold ${statusClass(server.status)}`}
+                            >
                               <span className="h-1.5 w-1.5 rounded-full bg-current" />
                               {server.status}
                             </span>
@@ -250,13 +252,18 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
                     <ActionButton disabled={!canManage || Boolean(busyAction)} onClick={() => run("stop-all", "stop-all")}>
                       Stop all
                     </ActionButton>
-                    <ActionButton disabled={!canManage || Boolean(busyAction)} onClick={() => run("open-manager", "open-manager")}>
+                    <ActionButton
+                      disabled={!canManage || Boolean(busyAction)}
+                      onClick={() => run("open-manager", "open-manager")}
+                    >
                       Open desktop manager
                     </ActionButton>
                   </section>
 
                   {!canManage ? <p className="text-xs font-semibold text-stone-500">Admin access is required.</p> : null}
-                  {busyAction && busyAction !== "refresh" ? <p className="text-xs font-semibold text-accent">Running {busyAction}...</p> : null}
+                  {busyAction && busyAction !== "refresh" ? (
+                    <p className="text-xs font-semibold text-accent">Running {busyAction}...</p>
+                  ) : null}
                   {actionMessage ? <p className="text-xs font-semibold text-stone-600">{actionMessage}</p> : null}
                   {actionDetail ? (
                     <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-mist/80 p-2 text-[11px] font-semibold leading-5 text-stone-600">

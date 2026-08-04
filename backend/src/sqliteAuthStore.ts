@@ -141,11 +141,7 @@ export function openSqliteAuthStore(dbPath: string): SqliteAuthStore {
     return true;
   });
 
-  const applyToUserTx = db.transaction((
-    id: string,
-    mutate: (user: StoredUser) => StoredUser | void,
-    revokeSessions: boolean,
-  ) => {
+  const applyToUserTx = db.transaction((id: string, mutate: (user: StoredUser) => StoredUser | void, revokeSessions: boolean) => {
     const row = selectUserById.get(id);
     if (!row) return undefined;
     const current = JSON.parse(row.data) as StoredUser;
@@ -195,11 +191,11 @@ export function openSqliteAuthStore(dbPath: string): SqliteAuthStore {
     },
     loadUserById(id: string) {
       const row = selectUserById.get(id);
-      return row ? JSON.parse(row.data) as StoredUser : undefined;
+      return row ? (JSON.parse(row.data) as StoredUser) : undefined;
     },
     loadUserByIdentifier(identifier: string) {
       const row = selectUserByIdentifier.get(identifier, identifier);
-      return row ? JSON.parse(row.data) as StoredUser : undefined;
+      return row ? (JSON.parse(row.data) as StoredUser) : undefined;
     },
     insertUser(user: StoredUser) {
       assertNoEmbeddedMedia(user, `user ${user.id}`);
@@ -226,11 +222,13 @@ export function openSqliteAuthStore(dbPath: string): SqliteAuthStore {
       insertSession.run(sessionParams(session));
     },
     touchSession(tokenHash: string, lastUsedAt: string, updateBefore: string) {
-      return touchSession.run({
-        token_hash: tokenHash,
-        last_used_at: lastUsedAt,
-        update_before: updateBefore,
-      }).changes === 1;
+      return (
+        touchSession.run({
+          token_hash: tokenHash,
+          last_used_at: lastUsedAt,
+          update_before: updateBefore,
+        }).changes === 1
+      );
     },
     deleteSessionByTokenHash(tokenHash: string) {
       return deleteSessionByToken.run(tokenHash).changes === 1;

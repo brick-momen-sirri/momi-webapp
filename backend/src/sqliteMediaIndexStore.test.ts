@@ -14,13 +14,19 @@ test("media dirty and published revisions are shared across connections", async 
   try {
     assert.deepEqual(a.loadState(), { dirtyRevision: 1, builtRevision: 0, publishedAt: undefined });
     assert.equal(a.publish(1, [job("existing_1")]), true);
-    assert.deepEqual(b.loadPublishedIfNewer(-1)?.jobs.map((item) => item.id), ["existing_1"]);
+    assert.deepEqual(
+      b.loadPublishedIfNewer(-1)?.jobs.map((item) => item.id),
+      ["existing_1"],
+    );
 
     assert.equal(b.invalidate(), 2);
     assert.deepEqual(a.loadState().dirtyRevision, 2);
     assert.equal(a.publish(1, [job("stale")]), false);
     assert.equal(b.publish(2, [job("existing_2")]), true);
-    assert.deepEqual(a.loadPublishedIfNewer(1)?.jobs.map((item) => item.id), ["existing_2"]);
+    assert.deepEqual(
+      a.loadPublishedIfNewer(1)?.jobs.map((item) => item.id),
+      ["existing_2"],
+    );
   } finally {
     a.close();
     b.close();

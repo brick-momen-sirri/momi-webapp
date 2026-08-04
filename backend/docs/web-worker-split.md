@@ -17,15 +17,15 @@ existing SQLite file. No Redis / external queue.**
 
 Chosen from a design + red-team of three approaches:
 
-| Approach | Approach-breaking findings | Verdict |
-|---|---|---|
-| **Single dispatcher + cluster API** | **0** | **Chosen.** |
-| Leader-election (identical processes) | 2 | Rejected — stale whole-blob write can resurrect a claimed job → double-spend; more failure surface. |
-| External queue (Redis/BullMQ) | 1 | Rejected — unjustified at 100 users; its own author argued against it; collapses into the single-dispatcher design. |
+| Approach                              | Approach-breaking findings | Verdict                                                                                                             |
+| ------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Single dispatcher + cluster API**   | **0**                      | **Chosen.**                                                                                                         |
+| Leader-election (identical processes) | 2                          | Rejected — stale whole-blob write can resurrect a claimed job → double-spend; more failure surface.                 |
+| External queue (Redis/BullMQ)         | 1                          | Rejected — unjustified at 100 users; its own author argued against it; collapses into the single-dispatcher design. |
 
 Rationale: RunPod is the real compute (capped at `RUNPOD_MAX_CONCURRENT_JOBS`,
 default 10); the Node process only orchestrates HTTP holds. We don't need to
-fan work across worker machines — we need to scale *polling/reads*. SQLite+WAL
+fan work across worker machines — we need to scale _polling/reads_. SQLite+WAL
 already gives durable persistence and transactional atomic claims, so a second
 stateful service would add failure surface for no benefit.
 
@@ -33,7 +33,7 @@ stateful service would add failure surface for no benefit.
 
 - `momi-dispatcher` — `exec_mode: fork`, `instances: 1`. Owns the dispatch loop,
   RunPod calls, the concurrency cap, background reconcilers, and all job
-  *lifecycle* writes.
+  _lifecycle_ writes.
 - `momi-api` — `exec_mode: cluster`, `instances: N`. Serves HTTP: reads, enqueue,
   narrow metadata edits, cancel requests. Never dispatches.
 - Both run the same `dist/index.js`, branching on `ROLE` (`dispatcher` | `api` |
@@ -44,6 +44,7 @@ stateful service would add failure surface for no benefit.
 ## 2. Background: where we are
 
 Current model (`backend/src/jobQueue.ts`):
+
 - `let jobs: Job[]` is the in-memory source of truth for reads; `getJobs()`
   returns it.
 - Mutations edit the array in place (`createJob` prepends; `runRunpodJob`
@@ -56,17 +57,18 @@ Current model (`backend/src/jobQueue.ts`):
 - `runpodActivityTracker` (balance-delta exclusivity) is an in-process singleton.
 
 Landed foundations (safe, dormant):
+
 - **0a** `sqliteJobStore`: `insertJob` / `updateJob` / `applyToJob` (transactional
   read-modify-write) / `deleteJob`; `seq` assigned `MAX+1` under IMMEDIATE txn;
   `busy_timeout=5000`; per-row writes enforce the no-embedded-media contract.
 - **0b** `sqliteJobStore.dataVersion()`: cross-process change signal (bumps on
-  *other* connections' commits, not own).
+  _other_ connections' commits, not own).
 
 Why the jobQueue write rewire was deferred to here: single-process, the current
-dirty-diff `replaceAll` is *already* per-row for changed rows, so converting the
+dirty-diff `replaceAll` is _already_ per-row for changed rows, so converting the
 ~20 mutation sites buys nothing until a second writer exists — and the parts that
-*do* change are only correct relative to the ownership model below. So they must
-be built and verified *with* topology, not before it.
+_do_ change are only correct relative to the ownership model below. So they must
+be built and verified _with_ topology, not before it.
 
 ---
 
@@ -75,17 +77,17 @@ be built and verified *with* topology, not before it.
 Every field/operation has exactly one owning role. This is what makes concurrent
 writes safe without locks beyond SQLite's.
 
-| Data / operation | Owner | Mechanism |
-|---|---|---|
-| Job creation (new `queued` row) | **API** | `store.insertJob(job)` |
-| Lifecycle fields: `status`, `startedAt`, `completedAt`, `runpodJobId`, `runpodStatus`, `resultUrls`, `thumbnailUrls`, `outputResolution`, `creditUsage`/`creditsUsed`/`creditsActual`, `generatedPrompt`, `textArtifacts`, `errorMessage`, `creditBalance*` | **Dispatcher** | per-row `updateJob`/`applyToJob`; guarded by `WHERE status=@expected` for transitions |
-| User metadata edits: `title` (rename), `folderId`/`folderName` (move), save number | **API** | `store.applyToJob(id, j => { …only these fields… })` — never touches `status` |
-| **Cancellation** | **API requests, dispatcher acts** | API sets `cancelRequested=true` via `applyToJob`; the dispatcher's run loop re-reads the row each tick and aborts + sets `status='canceled'`. API never writes `status`. |
-| Archive/restore of a **terminal** job | **API** | move between jobs/archived stores via per-row ops |
-| Archive of a **live** (queued/running) job | **Dispatcher** (or disallow) | route through a request flag; do not let API flip a running job |
-| Permanent delete (archived) | **API** | `archivedStore.deleteJob(id)` |
-| Boot `sending/running → failed` normalization | **Dispatcher only** | else an API worker restart fails the dispatcher's in-flight jobs |
-| Credit reconcile, remote-media recovery, media scan, memory logger | **Dispatcher only** | else N× external load + stale-cache writes |
+| Data / operation                                                                                                                                                                                                                                            | Owner                             | Mechanism                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Job creation (new `queued` row)                                                                                                                                                                                                                             | **API**                           | `store.insertJob(job)`                                                                                                                                                   |
+| Lifecycle fields: `status`, `startedAt`, `completedAt`, `runpodJobId`, `runpodStatus`, `resultUrls`, `thumbnailUrls`, `outputResolution`, `creditUsage`/`creditsUsed`/`creditsActual`, `generatedPrompt`, `textArtifacts`, `errorMessage`, `creditBalance*` | **Dispatcher**                    | per-row `updateJob`/`applyToJob`; guarded by `WHERE status=@expected` for transitions                                                                                    |
+| User metadata edits: `title` (rename), `folderId`/`folderName` (move), save number                                                                                                                                                                          | **API**                           | `store.applyToJob(id, j => { …only these fields… })` — never touches `status`                                                                                            |
+| **Cancellation**                                                                                                                                                                                                                                            | **API requests, dispatcher acts** | API sets `cancelRequested=true` via `applyToJob`; the dispatcher's run loop re-reads the row each tick and aborts + sets `status='canceled'`. API never writes `status`. |
+| Archive/restore of a **terminal** job                                                                                                                                                                                                                       | **API**                           | move between jobs/archived stores via per-row ops                                                                                                                        |
+| Archive of a **live** (queued/running) job                                                                                                                                                                                                                  | **Dispatcher** (or disallow)      | route through a request flag; do not let API flip a running job                                                                                                          |
+| Permanent delete (archived)                                                                                                                                                                                                                                 | **API**                           | `archivedStore.deleteJob(id)`                                                                                                                                            |
+| Boot `sending/running → failed` normalization                                                                                                                                                                                                               | **Dispatcher only**               | else an API worker restart fails the dispatcher's in-flight jobs                                                                                                         |
+| Credit reconcile, remote-media recovery, media scan, memory logger                                                                                                                                                                                          | **Dispatcher only**               | else N× external load + stale-cache writes                                                                                                                               |
 
 New job field: `cancelRequested?: boolean`. New SQLite objects: a `meta` table
 (dispatcher lease) and optionally `runpod_activity` (see §6).
@@ -129,7 +131,7 @@ Two independent guarantees:
    Never write a cache-built blob for the claim (would clobber a concurrent API
    metadata edit).
 
-**Crash-safe single dispatcher:** a bare lock file / lock row is *not* released on
+**Crash-safe single dispatcher:** a bare lock file / lock row is _not_ released on
 SIGKILL → permanent dispatch outage. Use a **lease**: `meta` row with owner PID +
 heartbeat/`expires`; a booting dispatcher steals the lease if the prior owner's
 PID is dead or the heartbeat is stale. Add a health alert on "queued depth not
@@ -157,6 +159,7 @@ spend and would misattribute a balance delta to a queue job.
 `CREDIT_BALANCE_DELTA_ACCOUNTING` is **off by default**, so the simplest 0c ships
 the split with it staying off (rely on `creditUsage`/reconcile). If it is ever
 enabled under the split, either:
+
 - (a) route all billable RunPod endpoints through the dispatcher, or
 - (b) move the tracker to a shared `runpod_activity` SQLite table — **with a
   per-op owner PID + lease/TTL and stale-row reconcile**, because a crashed API
@@ -169,7 +172,7 @@ enabled under the split, either:
 
 - WAL (already on) + `busy_timeout` (added in 0a). **Lower `busy_timeout` to
   ~250–500ms** for 0c: better-sqlite3 is synchronous, so a long wait blocks the
-  *entire* worker event loop (freezing every poller pinned to it). Pair with an
+  _entire_ worker event loop (freezing every poller pinned to it). Pair with an
   app-level bounded retry that yields to the loop.
 - Every multi-statement write uses an **IMMEDIATE** transaction (acquire the write
   lock up front; no deferred→write upgrade deadlocks).
@@ -211,20 +214,20 @@ enabled under the split, either:
 All stages default to `ROLE=monolith` (today's behavior) until explicitly flipped.
 
 - **A.** jobQueue per-row write conversion behind a flag; single process; load-test
-  equivalence. *(the ~20-site rewire, done with §3 ownership in mind)*
+  equivalence. _(the ~20-site rewire, done with §3 ownership in mind)_
 - **B.** Dispatcher-only guards (boot-normalization, reconcile, recovery, media
-  timers) + `cancelRequested` flow; still one process. *(implemented; default
-  remains `ROLE=monolith`)*
+  timers) + `cancelRequested` flow; still one process. _(implemented; default
+  remains `ROLE=monolith`)_
 - **C.** Incremental `data_version` read cache wired into `getJobs` /
-  `getJobsWithExistingMedia`; merge-by-id; still one process. *(implemented
-  with per-store revisions + tombstones; default remains `ROLE=monolith`)*
+  `getJobsWithExistingMedia`; merge-by-id; still one process. _(implemented
+  with per-store revisions + tombstones; default remains `ROLE=monolith`)_
 - **D.** Dispatcher lease + atomic claim + SQL concurrency cap + dispatch poll;
-  still one process (lone process always wins the lease). *(implemented; claims
+  still one process (lone process always wins the lease). _(implemented; claims
   verify the current lease owner inside the same `IMMEDIATE` transaction as the
-  SQL capacity check and queued-to-sending transition)*
+  SQL capacity check and queued-to-sending transition)_
 - **E.** (Only if enabling balance-delta) shared `runpod_activity` table; else skip.
 - **F.** Topology flip behind `MOMI_TOPOLOGY_SPLIT`: `dispatcher:1` + `api:2`.
-  *(implemented; production default remains the monolith)*
+  _(implemented; production default remains the monolith)_
 - **G.** Scale `api` instances; dispatcher stays at 1.
 
 **Companion prerequisite before instances>1:** the
@@ -242,6 +245,7 @@ dispatcher-published revisions and project-locked atomic reservations. The
 
 Simulate 100 clients polling `/api/jobs` + `/api/snapshot` every 12s, plus bursty
 job creation, plus a full queue draining through the 10-cap. Assert:
+
 - exactly-once: no RunPod `jobId` dispatched twice (incl. a SIGSTOP-leader
   split-brain scenario);
 - zero `SQLITE_BUSY`; read staleness < ~1s; enqueue p99 bounded with the

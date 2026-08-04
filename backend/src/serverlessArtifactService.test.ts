@@ -22,9 +22,10 @@ test("serverless video output under images is mirrored into Brick video folders 
       isVideo: true,
     },
   ];
-  const fetchImpl = async () => new Response(Buffer.from("video-bytes"), {
-    headers: { "content-type": "video/mp4" },
-  });
+  const fetchImpl = async () =>
+    new Response(Buffer.from("video-bytes"), {
+      headers: { "content-type": "video/mp4" },
+    });
 
   const result = await persistServerlessArtifacts({
     project,
@@ -45,7 +46,10 @@ test("serverless video output under images is mirrored into Brick video folders 
   assert.equal(await fs.readFile(jobCopy, "utf8"), "video-bytes");
 
   const manifestPath = path.join(projectFolder, "metadata", "manifest.jsonl");
-  const records = (await fs.readFile(manifestPath, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  const records = (await fs.readFile(manifestPath, "utf8"))
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line));
   assert.equal(records.length, 1);
   assert.equal(records[0].asset_type, "video");
   assert.equal(records[0].source, "runpod_serverless");
@@ -115,7 +119,10 @@ test("dispatcher failover reserves unique versions while an older write is pause
 
   const versions = JSON.parse(await fs.readFile(path.join(projectFolder, "metadata", "latest_versions.json"), "utf8"));
   assert.equal(versions["video|1234_TestOffice_TestProject|kling-v3-video|SHOT_0007"], 2);
-  assert.equal((await recursiveFiles(projectFolder)).some((filePath) => filePath.endsWith(".momi-reservation")), false);
+  assert.equal(
+    (await recursiveFiles(projectFolder)).some((filePath) => filePath.endsWith(".momi-reservation")),
+    false,
+  );
 });
 
 function videoMedia(url: string): RunpodMediaResult {
@@ -138,10 +145,14 @@ async function waitForReservation(root: string) {
 
 async function recursiveFiles(root: string): Promise<string[]> {
   const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
-  return (await Promise.all(entries.map(async (entry) => {
-    const fullPath = path.join(root, entry.name);
-    return entry.isDirectory() ? recursiveFiles(fullPath) : [fullPath];
-  }))).flat();
+  return (
+    await Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = path.join(root, entry.name);
+        return entry.isDirectory() ? recursiveFiles(fullPath) : [fullPath];
+      }),
+    )
+  ).flat();
 }
 
 function mediaPathFromUrl(value: string) {

@@ -75,4 +75,3 @@ test("snapshotJsonStore copies an existing store and is a no-op when absent", as
   assert.equal(snapshots.length, 1);
   await fs.rm(dir, { recursive: true, force: true });
 });
-

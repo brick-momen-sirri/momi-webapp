@@ -51,4 +51,3 @@ async function checkJsonlMetadata(filePath: string) {
 function containsEmbeddedMedia(value: string) {
   return embeddedMediaMarkers.some((marker) => value.includes(marker));
 }
-

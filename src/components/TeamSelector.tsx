@@ -8,12 +8,7 @@ type TeamSelectorProps = {
   onMembersChange: (members: ProjectMember[]) => void;
 };
 
-export function TeamSelector({
-  users,
-  ownerId,
-  members,
-  onMembersChange,
-}: TeamSelectorProps) {
+export function TeamSelector({ users, ownerId, members, onMembersChange }: TeamSelectorProps) {
   function toggleUser(userId: string) {
     if (userId === ownerId) {
       return;
@@ -76,7 +71,6 @@ export function TeamSelector({
           })}
         </div>
       </div>
-
     </div>
   );
 }

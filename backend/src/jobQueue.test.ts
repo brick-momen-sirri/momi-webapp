@@ -3,33 +3,24 @@ import { randomBytes } from "node:crypto";
 import test from "node:test";
 import sharp from "sharp";
 import { chooseRunpodImageInputNames, isRemoteResultMediaUrl, jobRemoteMediaEntries } from "./jobQueue.js";
-import {
-  prepareRunpodInlineImageInput,
-  runpodInlineImageByteBudget,
-} from "./runpodImageInlineService.js";
+import { prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "./runpodImageInlineService.js";
 
 test("RunPod image input names stay unique when workflow placeholders repeat", () => {
-  const names = chooseRunpodImageInputNames(
-    [
-      "data:image/png;base64,AA==",
-      "data:image/jpeg;base64,AA==",
-    ],
-    "job_test",
-    ["0001.png", "0001.png", "0001.png", "0001.png"],
-  );
+  const names = chooseRunpodImageInputNames(["data:image/png;base64,AA==", "data:image/jpeg;base64,AA=="], "job_test", [
+    "0001.png",
+    "0001.png",
+    "0001.png",
+    "0001.png",
+  ]);
 
   assert.deepEqual(names, ["0001.png", "job_test_2.jpg"]);
 });
 
 test("RunPod image input names keep distinct workflow placeholders", () => {
-  const names = chooseRunpodImageInputNames(
-    [
-      "data:image/png;base64,AA==",
-      "data:image/jpeg;base64,AA==",
-    ],
-    "job_test",
-    ["image_a.png", "image_b.jpg"],
-  );
+  const names = chooseRunpodImageInputNames(["data:image/png;base64,AA==", "data:image/jpeg;base64,AA=="], "job_test", [
+    "image_a.png",
+    "image_b.jpg",
+  ]);
 
   assert.deepEqual(names, ["image_a.png", "image_b.jpg"]);
 });
@@ -89,7 +80,9 @@ test("oversized RunPod inline images are compressed below their JSON budget", as
   const height = 512;
   const noisyPng = await sharp(randomBytes(width * height * 3), {
     raw: { width, height, channels: 3 },
-  }).png().toBuffer();
+  })
+    .png()
+    .toBuffer();
 
   const prepared = await prepareRunpodInlineImageInput({
     buffer: noisyPng,

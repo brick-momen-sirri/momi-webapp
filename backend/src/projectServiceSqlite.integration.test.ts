@@ -40,12 +40,14 @@ test("projectService observes cross-connection ACL, folder, and rename changes",
     shortName: "1234",
     client: "Client",
     ownerId: "usr_owner",
-    members: [{
-      userId: "usr_owner",
-      role: "owner",
-      addedAt: "2026-07-21T00:00:00.000Z",
-      addedBy: "usr_owner",
-    }],
+    members: [
+      {
+        userId: "usr_owner",
+        role: "owner",
+        addedAt: "2026-07-21T00:00:00.000Z",
+        addedBy: "usr_owner",
+      },
+    ],
   });
   assert.equal(externalStore.loadProjectById(created.id)?.folderPath, created.folderPath);
 
@@ -58,17 +60,26 @@ test("projectService observes cross-connection ACL, folder, and rename changes",
     });
     project.updatedAt = "2026-07-21T01:00:00.000Z";
   });
-  assert.equal(projectService.getProject(created.id)?.members.some((item) => item.userId === "usr_viewer"), true);
+  assert.equal(
+    projectService.getProject(created.id)?.members.some((item) => item.userId === "usr_viewer"),
+    true,
+  );
 
   const folder = await projectService.createProjectFolder(created.id, { name: "Concepts" }, "usr_owner");
   assert.ok(folder);
-  assert.equal(externalStore.loadProjectById(created.id)?.folders?.some((item) => item.folderId === folder?.folderId), true);
+  assert.equal(
+    externalStore.loadProjectById(created.id)?.folders?.some((item) => item.folderId === folder?.folderId),
+    true,
+  );
 
   const renamed = await projectService.renameProject(created.id, { name: "Renamed" }, "usr_owner");
   assert.ok(renamed);
   const externallyRenamed = externalStore.loadProjectById(created.id);
   assert.equal(externallyRenamed?.folderName, "1234_Client_Renamed");
-  assert.equal(externallyRenamed?.members.some((item) => item.userId === "usr_viewer"), true);
+  assert.equal(
+    externallyRenamed?.members.some((item) => item.userId === "usr_viewer"),
+    true,
+  );
 
   externalStore.applyToProject(created.id, (project) => {
     project.members = project.members.filter((item) => item.userId !== "usr_viewer");
@@ -80,7 +91,10 @@ test("projectService observes cross-connection ACL, folder, and rename changes",
     });
     project.updatedAt = "2026-07-21T02:00:00.000Z";
   });
-  assert.equal(projectService.getProject(created.id)?.members.some((item) => item.userId === "usr_viewer"), false);
+  assert.equal(
+    projectService.getProject(created.id)?.members.some((item) => item.userId === "usr_viewer"),
+    false,
+  );
 
   // Simulate a crash after the directory rename but before the path row commit.
   externalStore.applyToProject(created.id, (project) => {
@@ -94,7 +108,10 @@ test("projectService observes cross-connection ACL, folder, and rename changes",
   await projectService.loadProjects();
   const recovered = projectService.getProject(created.id);
   assert.equal(recovered?.folderName, "1234_Client_Renamed");
-  assert.equal(recovered?.members.some((item) => item.userId === "usr_recovery"), true);
+  assert.equal(
+    recovered?.members.some((item) => item.userId === "usr_recovery"),
+    true,
+  );
 
   assert.equal(readFileSync(projectsJsonPath, "utf8"), "[]");
 });

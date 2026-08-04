@@ -27,7 +27,10 @@ test("project folder metadata keeps folder IDs stable across rename", async () =
   assert.equal(renamed.name, "Approved Shots");
   assert.match(renamed.diskName, new RegExp(`^${folder.folderId}_approved-shots$`));
   await assert.rejects(fs.stat(path.join(projectRoot, "folders", folder.diskName)));
-  assert.equal(await fs.readFile(path.join(projectRoot, "folders", renamed.diskName, "images", "result.png"), "utf8"), "image-bytes");
+  assert.equal(
+    await fs.readFile(path.join(projectRoot, "folders", renamed.diskName, "images", "result.png"), "utf8"),
+    "image-bytes",
+  );
 
   const foldersFile = JSON.parse(await fs.readFile(path.join(projectRoot, "metadata", "folders.json"), "utf8"));
   assert.equal(foldersFile.folders[0].folderId, folder.folderId);

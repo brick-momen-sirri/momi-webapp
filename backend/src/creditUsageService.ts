@@ -135,10 +135,7 @@ async function fetchProjectSummaryRows(serverUrl: string, extraParams: Record<st
   return Array.isArray(rows) ? rows : [];
 }
 
-function mergeProjectSummaryRows(
-  allTimeRows: CreditTrackerProjectRow[],
-  currentMonthRows: CreditTrackerProjectRow[],
-) {
+function mergeProjectSummaryRows(allTimeRows: CreditTrackerProjectRow[], currentMonthRows: CreditTrackerProjectRow[]) {
   const statsByProjectName = new Map<string, CreditTrackerProjectStats>();
 
   for (const row of allTimeRows) {

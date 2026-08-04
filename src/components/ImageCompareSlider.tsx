@@ -1,12 +1,5 @@
 import { ChevronsLeftRight } from "lucide-react";
-import {
-  type DragEvent,
-  type KeyboardEvent,
-  type PointerEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type DragEvent, type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 
 type ImageCompareSliderProps = {
   beforeImage?: string;
@@ -72,8 +65,8 @@ export function ImageCompareSlider({
       const container = containerRef.current;
       return Boolean(
         container &&
-          (isViewerHoveredRef.current ||
-            (document.activeElement instanceof HTMLElement && container.contains(document.activeElement))),
+        (isViewerHoveredRef.current ||
+          (document.activeElement instanceof HTMLElement && container.contains(document.activeElement))),
       );
     };
 
@@ -125,7 +118,6 @@ export function ImageCompareSlider({
         setZoom(1);
         return;
       }
-
     };
 
     const handleKeyUp = (event: globalThis.KeyboardEvent) => {

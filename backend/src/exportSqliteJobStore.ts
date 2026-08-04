@@ -1,11 +1,6 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import {
-  archivedItemsSqlitePath,
-  archivedItemsStorePath,
-  jobsSqlitePath,
-  jobsStorePath,
-} from "./config.js";
+import { archivedItemsSqlitePath, archivedItemsStorePath, jobsSqlitePath, jobsStorePath } from "./config.js";
 import { openSqliteJobStore } from "./sqliteJobStore.js";
 import { readJsonFileWithBackup, writeJsonFile } from "./storageService.js";
 import type { Job } from "./types.js";
@@ -50,9 +45,8 @@ export async function exportSqliteJobStoreToJson(paths: ExportPaths, options: Ex
   await writeJsonFile(paths.jobsJsonPath, jobs, { maxBytes: EXPORT_MAX_BYTES });
   await writeJsonFile(paths.archivedJsonPath, archived, { maxBytes: EXPORT_MAX_BYTES });
 
-  const retired = options.retireSqlite === false
-    ? []
-    : [...retireStore(paths.jobsSqlitePath), ...retireStore(paths.archivedSqlitePath)];
+  const retired =
+    options.retireSqlite === false ? [] : [...retireStore(paths.jobsSqlitePath), ...retireStore(paths.archivedSqlitePath)];
 
   return { jobs: jobs.length, archived: archived.length, retired };
 }
@@ -60,8 +54,8 @@ export async function exportSqliteJobStoreToJson(paths: ExportPaths, options: Ex
 function readSqlite(dbPath: string, table: string): Job[] {
   if (!fs.existsSync(dbPath)) {
     throw new Error(
-      `SQLite store not found at ${dbPath}. Refusing to export (this would otherwise overwrite the JSON fallback with an empty list). `
-      + "Point JOBS_SQLITE_PATH/JOBS_ARCHIVED_SQLITE_PATH at the real store, or run this only after the backend has booted on SQLite.",
+      `SQLite store not found at ${dbPath}. Refusing to export (this would otherwise overwrite the JSON fallback with an empty list). ` +
+        "Point JOBS_SQLITE_PATH/JOBS_ARCHIVED_SQLITE_PATH at the real store, or run this only after the backend has booted on SQLite.",
     );
   }
   const store = openSqliteJobStore(dbPath, table, { readonly: true });
@@ -80,8 +74,8 @@ async function assertNotEmptyClobber(jsonPath: string, data: Job[], label: strin
   const existing = await readJsonFileWithBackup<Job[]>(jsonPath, []);
   if (existing.length > 0) {
     throw new Error(
-      `Refusing to overwrite ${jsonPath} (${existing.length} ${label}) with an empty export. `
-      + "If the store really is empty, pass { allowEmpty: true } / --allow-empty.",
+      `Refusing to overwrite ${jsonPath} (${existing.length} ${label}) with an empty export. ` +
+        "If the store really is empty, pass { allowEmpty: true } / --allow-empty.",
     );
   }
 }
@@ -116,8 +110,8 @@ async function main() {
     { allowEmpty, retireSqlite },
   );
   console.log(
-    `Exported SQLite job store to JSON: ${result.jobs} jobs -> ${jobsStorePath}, `
-    + `${result.archived} archived -> ${archivedItemsStorePath}.`,
+    `Exported SQLite job store to JSON: ${result.jobs} jobs -> ${jobsStorePath}, ` +
+      `${result.archived} archived -> ${archivedItemsStorePath}.`,
   );
   if (result.retired.length) {
     console.log(`Retired SQLite files (renamed aside): ${result.retired.join(", ")}`);

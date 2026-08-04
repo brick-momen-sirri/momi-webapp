@@ -26,8 +26,24 @@ process.env.JOBS_ARCHIVED_SQLITE_PATH = archivedSqlitePath;
 writeFileSync(
   jobsJsonPath,
   JSON.stringify([
-    { id: "job_done", projectId: "prj_1", userId: "usr_1", status: "completed", createdAt: "2026-07-20T00:00:00.000Z", resultUrls: [], thumbnailUrls: [] },
-    { id: "job_running", projectId: "prj_1", userId: "usr_1", status: "running", createdAt: "2026-07-20T00:01:00.000Z", resultUrls: [], thumbnailUrls: [] },
+    {
+      id: "job_done",
+      projectId: "prj_1",
+      userId: "usr_1",
+      status: "completed",
+      createdAt: "2026-07-20T00:00:00.000Z",
+      resultUrls: [],
+      thumbnailUrls: [],
+    },
+    {
+      id: "job_running",
+      projectId: "prj_1",
+      userId: "usr_1",
+      status: "running",
+      createdAt: "2026-07-20T00:01:00.000Z",
+      resultUrls: [],
+      thumbnailUrls: [],
+    },
   ]),
   "utf8",
 );
@@ -35,7 +51,16 @@ writeFileSync(
 writeFileSync(
   archivedJsonPath,
   JSON.stringify([
-    { id: "job_archived", projectId: "prj_1", userId: "usr_1", status: "completed", source: "existing_project_media", createdAt: "2026-07-19T00:00:00.000Z", resultUrls: [], thumbnailUrls: [] },
+    {
+      id: "job_archived",
+      projectId: "prj_1",
+      userId: "usr_1",
+      status: "completed",
+      source: "existing_project_media",
+      createdAt: "2026-07-19T00:00:00.000Z",
+      resultUrls: [],
+      thumbnailUrls: [],
+    },
   ]),
   "utf8",
 );

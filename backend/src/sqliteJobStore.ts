@@ -72,12 +72,7 @@ export type SqliteJobStore = {
   deleteJob(id: string): boolean;
   count(): number;
   countActiveJobs(): number;
-  claimNextQueuedJob(
-    startedAt: string,
-    concurrencyLimit: number,
-    dispatcherOwnerId?: string,
-    now?: number,
-  ): Job | undefined;
+  claimNextQueuedJob(startedAt: string, concurrencyLimit: number, dispatcherOwnerId?: string, now?: number): Job | undefined;
   readDispatcherLease(): DispatcherLease | undefined;
   tryAcquireDispatcherLease(attempt: DispatcherLeaseAttempt): boolean;
   renewDispatcherLease(lease: DispatcherLease): boolean;
@@ -182,9 +177,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   const selectAll = db.prepare<[], JobRow>(`SELECT data FROM ${table} ORDER BY seq DESC`);
   const selectOne = db.prepare<[string], JobRow>(`SELECT data FROM ${table} WHERE id = ?`);
   const countStmt = db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
-  const countActiveStmt = db.prepare<[], CountRow>(
-    `SELECT COUNT(*) AS n FROM ${table} WHERE status IN ('sending', 'running')`,
-  );
+  const countActiveStmt = db.prepare<[], CountRow>(`SELECT COUNT(*) AS n FROM ${table} WHERE status IN ('sending', 'running')`);
   const metaSchemaAvailable = hasTable(db, metaTable);
   const readDispatcherLeaseStmt = metaSchemaAvailable
     ? db.prepare<[], DispatcherLeaseRow>(`
@@ -193,9 +186,10 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
         WHERE key = 'dispatcher_lease'
       `)
     : undefined;
-  const revisionSchemaAvailable = hasTable(db, revisionTable)
-    && hasTable(db, tombstoneTable)
-    && (db.pragma(`table_info(${table})`) as Array<{ name: string }>).some((column) => column.name === "revision");
+  const revisionSchemaAvailable =
+    hasTable(db, revisionTable) &&
+    hasTable(db, tombstoneTable) &&
+    (db.pragma(`table_info(${table})`) as Array<{ name: string }>).some((column) => column.name === "revision");
   const currentRevisionStmt = revisionSchemaAvailable
     ? db.prepare<[], RevisionRow>(`SELECT revision FROM ${revisionTable} WHERE singleton = 1`)
     : undefined;
@@ -238,7 +232,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       },
       loadById(id: string) {
         const row = selectOne.get(id);
-        return row ? JSON.parse(row.data) as Job : undefined;
+        return row ? (JSON.parse(row.data) as Job) : undefined;
       },
       loadSnapshot() {
         return loadSnapshotTx();
@@ -344,9 +338,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
         expires_at = @expires_at
     WHERE key = 'dispatcher_lease' AND owner_id = @owner_id
   `);
-  const releaseDispatcherLease = db.prepare<[string]>(
-    `DELETE FROM ${metaTable} WHERE key = 'dispatcher_lease' AND owner_id = ?`,
-  );
+  const releaseDispatcherLease = db.prepare<[string]>(`DELETE FROM ${metaTable} WHERE key = 'dispatcher_lease' AND owner_id = ?`);
 
   const nextRevision = () => bumpRevisionStmt.get()!.revision;
 
@@ -463,32 +455,29 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   // The capacity check and queued -> sending transition share one IMMEDIATE
   // transaction. Even if a misconfigured second dispatcher is alive, only one
   // claimant can observe and consume a free global slot.
-  const claimNextQueuedJobTx = db.transaction((
-    startedAt: string,
-    concurrencyLimit: number,
-    dispatcherOwnerId?: string,
-    now = Date.now(),
-  ) => {
-    if (dispatcherOwnerId) {
-      const lease = readDispatcherLeaseStmt?.get();
-      if (lease?.owner_id !== dispatcherOwnerId || lease.expires_at <= now) return undefined;
-    }
-    const limit = Math.max(1, Math.floor(concurrencyLimit));
-    if ((countActiveStmt.get()?.n ?? 0) >= limit) return undefined;
+  const claimNextQueuedJobTx = db.transaction(
+    (startedAt: string, concurrencyLimit: number, dispatcherOwnerId?: string, now = Date.now()) => {
+      if (dispatcherOwnerId) {
+        const lease = readDispatcherLeaseStmt?.get();
+        if (lease?.owner_id !== dispatcherOwnerId || lease.expires_at <= now) return undefined;
+      }
+      const limit = Math.max(1, Math.floor(concurrencyLimit));
+      if ((countActiveStmt.get()?.n ?? 0) >= limit) return undefined;
 
-    const row = selectNextQueued.get();
-    if (!row) return undefined;
-    const claimed = JSON.parse(row.data) as Job;
-    claimed.status = "sending";
-    claimed.startedAt = claimed.startedAt ?? startedAt;
-    const data = JSON.stringify(claimed);
-    assertNoEmbeddedMedia(claimed, `job ${claimed.id}`);
-    const info = claimQueued.run(updateParams(claimed, nextRevision(), data));
-    if (info.changes !== 1) return undefined;
-    clearTombstone.run(claimed.id);
-    knownHash.set(claimed.id, hashString(data));
-    return claimed;
-  });
+      const row = selectNextQueued.get();
+      if (!row) return undefined;
+      const claimed = JSON.parse(row.data) as Job;
+      claimed.status = "sending";
+      claimed.startedAt = claimed.startedAt ?? startedAt;
+      const data = JSON.stringify(claimed);
+      assertNoEmbeddedMedia(claimed, `job ${claimed.id}`);
+      const info = claimQueued.run(updateParams(claimed, nextRevision(), data));
+      if (info.changes !== 1) return undefined;
+      clearTombstone.run(claimed.id);
+      knownHash.set(claimed.id, hashString(data));
+      return claimed;
+    },
+  );
 
   return {
     loadAll() {
@@ -496,7 +485,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     },
     loadById(id: string) {
       const row = selectOne.get(id);
-      return row ? JSON.parse(row.data) as Job : undefined;
+      return row ? (JSON.parse(row.data) as Job) : undefined;
     },
     loadSnapshot() {
       return loadSnapshotTx();
@@ -544,13 +533,15 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       return info.changes === 1;
     },
     renewDispatcherLease(lease: DispatcherLease) {
-      return renewDispatcherLease.run({
-        owner_id: lease.ownerId,
-        owner_pid: lease.ownerPid,
-        owner_host: lease.ownerHost,
-        heartbeat_at: lease.heartbeatAt,
-        expires_at: lease.expiresAt,
-      }).changes === 1;
+      return (
+        renewDispatcherLease.run({
+          owner_id: lease.ownerId,
+          owner_pid: lease.ownerPid,
+          owner_host: lease.ownerHost,
+          heartbeat_at: lease.heartbeatAt,
+          expires_at: lease.expiresAt,
+        }).changes === 1
+      );
     },
     releaseDispatcherLease(ownerId: string) {
       return releaseDispatcherLease.run(ownerId).changes === 1;
@@ -595,9 +586,9 @@ function toRow(job: Job, seq: number, revision: number, data: string) {
 }
 
 function hasTable(db: Database.Database, table: string) {
-  const row = db.prepare<[string], { name: string }>(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-  ).get(table);
+  const row = db
+    .prepare<[string], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table);
   return Boolean(row);
 }
 

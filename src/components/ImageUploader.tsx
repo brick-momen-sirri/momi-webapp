@@ -145,7 +145,10 @@ export function ImageUploader({
     }
 
     const backendResult = await backendClipboardImageFiles();
-    await applyPastedFiles(dedupeFiles(backendResult.files), noImageMessage([...browserResult.details, ...backendResult.details]));
+    await applyPastedFiles(
+      dedupeFiles(backendResult.files),
+      noImageMessage([...browserResult.details, ...backendResult.details]),
+    );
   }
 
   async function applyPastedFiles(files: File[], emptyMessage: string) {
@@ -247,13 +250,9 @@ export function ImageUploader({
             </button>
           ) : null}
           {use16By9Cropping ? (
-            <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">
-              crop on import
-            </span>
+            <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">crop on import</span>
           ) : show16By9CropToggle ? (
-            <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
-              original ratio
-            </span>
+            <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">original ratio</span>
           ) : null}
         </div>
       </div>
@@ -375,7 +374,9 @@ async function browserClipboardImageFiles(): Promise<ClipboardFileResult> {
       if (!imageType) continue;
 
       const blob = await item.getType(imageType);
-      files.push(new File([blob], `clipboard-image.${extensionForImageType(blob.type || imageType)}`, { type: blob.type || imageType }));
+      files.push(
+        new File([blob], `clipboard-image.${extensionForImageType(blob.type || imageType)}`, { type: blob.type || imageType }),
+      );
     }
 
     return {
@@ -522,7 +523,10 @@ async function resultImageDragDataToFile(dragData: ResultImageDragData) {
     throw new Error("The dragged result is not an image.");
   }
 
-  const fileName = ensureImageExtension(sanitizeFileName(dragData.name || fileNameFromUrl(dragData.url) || "result-image"), blob.type);
+  const fileName = ensureImageExtension(
+    sanitizeFileName(dragData.name || fileNameFromUrl(dragData.url) || "result-image"),
+    blob.type,
+  );
   return new File([blob], fileName, { type: blob.type });
 }
 
@@ -556,7 +560,12 @@ function fileNameFromUrl(url: string) {
 }
 
 function sanitizeFileName(name: string) {
-  return name.replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_").replace(/\s+/g, " ").trim() || "result-image";
+  return (
+    name
+      .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim() || "result-image"
+  );
 }
 
 function ensureImageExtension(name: string, type: string) {
@@ -613,29 +622,40 @@ type UploadSlotProps = {
   onCrop: () => void;
 };
 
-function UploadSlot({ slot, image, requiresLandscape, useCroppedImage, cropOutputSize, onFile, onResultImage, onRemove, onCrop }: UploadSlotProps) {
+function UploadSlot({
+  slot,
+  image,
+  requiresLandscape,
+  useCroppedImage,
+  cropOutputSize,
+  onFile,
+  onResultImage,
+  onRemove,
+  onCrop,
+}: UploadSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const source = useCroppedImage ? image?.croppedUrl ?? image?.url : image?.url;
+  const source = useCroppedImage ? (image?.croppedUrl ?? image?.url) : image?.url;
   const tooSmall = Boolean(
     requiresLandscape &&
-      image?.width &&
-      image?.height &&
-      (image.width < cropOutputSize.width || image.height < cropOutputSize.height),
+    image?.width &&
+    image?.height &&
+    (image.width < cropOutputSize.width || image.height < cropOutputSize.height),
   );
   const status = !useCroppedImage ? "original" : image?.cropRequired ? "crop required" : image?.croppedUrl ? "cropped" : "ready";
   const statusClass = !useCroppedImage
     ? "bg-stone-100 text-stone-700"
     : image?.cropRequired
-    ? "bg-amber-100 text-amber-800"
-    : image?.croppedUrl
-      ? "bg-cyan-100 text-cyan-800"
-      : "bg-teal-100 text-teal-800";
-  const sizeLabel = image?.width && image?.height
-    ? useCroppedImage && image.cropWidth && image.cropHeight
-      ? `${image.width}x${image.height} -> ${image.cropWidth}x${image.cropHeight}`
-      : `${image.width}x${image.height}`
-    : "";
+      ? "bg-amber-100 text-amber-800"
+      : image?.croppedUrl
+        ? "bg-cyan-100 text-cyan-800"
+        : "bg-teal-100 text-teal-800";
+  const sizeLabel =
+    image?.width && image?.height
+      ? useCroppedImage && image.cropWidth && image.cropHeight
+        ? `${image.width}x${image.height} -> ${image.cropWidth}x${image.cropHeight}`
+        : `${image.width}x${image.height}`
+      : "";
 
   function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -693,9 +713,7 @@ function UploadSlot({ slot, image, requiresLandscape, useCroppedImage, cropOutpu
           {sizeLabel ? <p className="truncate text-[11px] text-stone-500">{sizeLabel}</p> : null}
         </div>
         {tooSmall ? (
-          <p className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-            Small input. Crop may reduce detail.
-          </p>
+          <p className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">Small input. Crop may reduce detail.</p>
         ) : null}
         <div className="mt-2 grid grid-cols-3 gap-1">
           <button

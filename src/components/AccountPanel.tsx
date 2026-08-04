@@ -26,14 +26,8 @@ type AccountPanelProps = {
   creditsRemaining: number;
   monthlyCreditsSpent: number;
   monthlyJobsCompleted: number;
-  onUpdateProfile: (
-    updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string },
-  ) => Promise<AuthResult>;
-  onChangePassword: (
-    currentPassword: string,
-    newPassword: string,
-    confirmPassword: string,
-  ) => Promise<AuthResult>;
+  onUpdateProfile: (updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string }) => Promise<AuthResult>;
+  onChangePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<AuthResult>;
   onCreateUser: (payload: {
     name: string;
     email: string;
@@ -448,7 +442,9 @@ function AdminUsersPanel({
   onToggleUserActive: AccountPanelProps["onToggleUserActive"];
 }) {
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "user" as "admin" | "user" });
-  const [drafts, setDrafts] = useState<Record<string, { name: string; email: string; role: "admin" | "user"; active: boolean }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { name: string; email: string; role: "admin" | "user"; active: boolean }>>(
+    {},
+  );
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
   const [userSearch, setUserSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "user">("all");
@@ -461,14 +457,7 @@ function AdminUsersPanel({
     const query = userSearch.trim().toLowerCase();
     return users.filter((user) => {
       const draft = drafts[user.id];
-      const searchTarget = [
-        user.name,
-        user.displayName,
-        user.email,
-        user.username,
-        draft?.name,
-        draft?.email,
-      ]
+      const searchTarget = [user.name, user.displayName, user.email, user.username, draft?.name, draft?.email]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -547,7 +536,10 @@ function AdminUsersPanel({
     }
   }
 
-  function updateDraft(userId: string, updates: Partial<{ name: string; email: string; role: "admin" | "user"; active: boolean }>) {
+  function updateDraft(
+    userId: string,
+    updates: Partial<{ name: string; email: string; role: "admin" | "user"; active: boolean }>,
+  ) {
     setDrafts((current) => ({
       ...current,
       [userId]: {
@@ -728,23 +720,20 @@ function Avatar({
   account: Pick<AuthUser, "name" | "avatar" | "avatarColor" | "profileImageUrl">;
   size?: "small" | "large";
 }) {
-  const initials = account.name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || account.avatar;
+  const initials =
+    account.name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || account.avatar;
 
   return (
     <span
       className={`${size === "large" ? "h-14 w-14 text-base" : "h-8 w-8 text-xs"} flex shrink-0 items-center justify-center overflow-hidden rounded-full font-bold text-white`}
       style={{ backgroundColor: account.avatarColor }}
     >
-      {account.profileImageUrl ? (
-        <img src={account.profileImageUrl} alt="" className="h-full w-full object-cover" />
-      ) : (
-        initials
-      )}
+      {account.profileImageUrl ? <img src={account.profileImageUrl} alt="" className="h-full w-full object-cover" /> : initials}
     </span>
   );
 }

@@ -62,11 +62,13 @@ async function readWholeFileIfSmall(filePath: string, maxBytes: number) {
 }
 
 function parseImageResolution(buffer: Buffer): Resolution | undefined {
-  return parsePngResolution(buffer)
-    ?? parseJpegResolution(buffer)
-    ?? parseWebpResolution(buffer)
-    ?? parseGifResolution(buffer)
-    ?? parseBmpResolution(buffer);
+  return (
+    parsePngResolution(buffer) ??
+    parseJpegResolution(buffer) ??
+    parseWebpResolution(buffer) ??
+    parseGifResolution(buffer) ??
+    parseBmpResolution(buffer)
+  );
 }
 
 function parsePngResolution(buffer: Buffer): Resolution | undefined {
@@ -138,11 +140,7 @@ function parseWebpResolution(buffer: Buffer): Resolution | undefined {
 
     if (chunkType === "VP8 " && chunkSize >= 10) {
       const startCodeOffset = dataOffset + 3;
-      if (
-        buffer[startCodeOffset] === 0x9d &&
-        buffer[startCodeOffset + 1] === 0x01 &&
-        buffer[startCodeOffset + 2] === 0x2a
-      ) {
+      if (buffer[startCodeOffset] === 0x9d && buffer[startCodeOffset + 1] === 0x01 && buffer[startCodeOffset + 2] === 0x2a) {
         const width = buffer.readUInt16LE(startCodeOffset + 3) & 0x3fff;
         const height = buffer.readUInt16LE(startCodeOffset + 5) & 0x3fff;
         return toResolution(width, height);

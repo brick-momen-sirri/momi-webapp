@@ -1,13 +1,4 @@
-import {
-  Archive,
-  CheckCircle2,
-  ChevronDown,
-  Hash,
-  Loader2,
-  Search,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Hash, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Job, JobStatus, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
@@ -128,17 +119,11 @@ export function JobFeed({
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const selectedFolder = selectedProject?.folders?.find((folder) => folder.folderId === selectedFolderId);
   const models = Array.from(new Set(jobs.map((job) => job.modelType))).sort((a, b) => a.localeCompare(b));
-  const jobsForSelectedProject =
-    selectedProjectId === "all"
-      ? jobs
-      : jobs.filter((job) => job.projectId === selectedProjectId);
+  const jobsForSelectedProject = selectedProjectId === "all" ? jobs : jobs.filter((job) => job.projectId === selectedProjectId);
   const jobsForSelectedFolder = jobsForSelectedProject.filter((job) => matchesSelectedFolder(job, selectedFolderId));
 
   const visibleJobs = useMemo(() => {
-    const projectJobs =
-      selectedProjectId === "all"
-        ? jobs
-        : jobs.filter((job) => job.projectId === selectedProjectId);
+    const projectJobs = selectedProjectId === "all" ? jobs : jobs.filter((job) => job.projectId === selectedProjectId);
     const filteredJobs = projectJobs.filter((job) => {
       if (!matchesSelectedFolder(job, selectedFolderId)) return false;
       const project = projects.find((item) => item.id === job.projectId);
@@ -146,7 +131,8 @@ export function JobFeed({
       const hasSaveNumber = hasJobSaveNumber(job);
       const saveNumber = job.source === "existing_project_media" && !hasSaveNumber ? "" : getJobSaveNumber(job);
       const saveLabel = job.source === "existing_project_media" && !hasSaveNumber ? "" : getJobSaveNumberLabel(job);
-      const searchable = `${job.title ?? ""} ${job.prompt} ${job.modelType} ${job.folderName ?? ""} ${job.id} ${project?.name ?? ""} ${user?.name ?? ""} ${saveLabel} ${saveNumber}`.toLowerCase();
+      const searchable =
+        `${job.title ?? ""} ${job.prompt} ${job.modelType} ${job.folderName ?? ""} ${job.id} ${project?.name ?? ""} ${user?.name ?? ""} ${saveLabel} ${saveNumber}`.toLowerCase();
       const normalizedQuery = query.trim().toLowerCase();
       const matchesQuery = !normalizedQuery || searchable.includes(normalizedQuery);
       const matchesStatus = statusFilter === "all" || job.status === statusFilter;
@@ -163,7 +149,16 @@ export function JobFeed({
         (outputFilter === "video" && (job.outputType === "video" || job.outputType === "sequence" || Boolean(job.videoLength))) ||
         (outputFilter === "image" && (job.outputType === "image" || (!job.outputType && !job.videoLength)));
 
-      return matchesQuery && matchesStatus && matchesModel && matchesScope && matchesUser && matchesDate && matchesSaveNumber && matchesOutput;
+      return (
+        matchesQuery &&
+        matchesStatus &&
+        matchesModel &&
+        matchesScope &&
+        matchesUser &&
+        matchesDate &&
+        matchesSaveNumber &&
+        matchesOutput
+      );
     });
     const sortedJobs = [...filteredJobs].sort((a, b) => compareJobs(a, b, sortMode));
 
@@ -352,13 +347,11 @@ export function JobFeed({
                   {selectedProject.name}
                 </span>
               ) : (
-                <span className="rounded-full bg-stone-100 px-2 py-1 text-xs font-semibold text-stone-600">
-                  All projects
-                </span>
+                <span className="rounded-full bg-stone-100 px-2 py-1 text-xs font-semibold text-stone-600">All projects</span>
               )}
               {selectedProject && selectedFolderId !== "all" ? (
                 <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
-                  {selectedFolderId === "root" ? "Root" : selectedFolder?.name ?? "Folder"}
+                  {selectedFolderId === "root" ? "Root" : (selectedFolder?.name ?? "Folder")}
                 </span>
               ) : null}
               <span className="text-sm font-semibold text-stone-500">{resultCountLabel}</span>
@@ -412,7 +405,10 @@ export function JobFeed({
           </div>
 
           <div className="grid gap-2 xl:grid-cols-[minmax(18rem,1fr)_10rem_minmax(12rem,15rem)_auto]">
-            <label className="relative min-w-0" title="Search prompts, IDs, users, shots, cameras, projects, and models. Press / to focus.">
+            <label
+              className="relative min-w-0"
+              title="Search prompts, IDs, users, shots, cameras, projects, and models. Press / to focus."
+            >
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
               <input
                 ref={searchInputRef}
@@ -660,7 +656,9 @@ export function JobFeed({
         </div>
       ) : (
         <div className="rounded-lg border border-line bg-white p-12 text-center shadow-card">
-          <p className="text-sm font-semibold">{archiveView ? "No archived results match this view." : "No jobs match this view."}</p>
+          <p className="text-sm font-semibold">
+            {archiveView ? "No archived results match this view." : "No jobs match this view."}
+          </p>
           <p className="mt-1 text-xs text-stone-500">Adjust filters or select a different project.</p>
           {hasMoreJobs && onLoadMoreJobs ? (
             <button

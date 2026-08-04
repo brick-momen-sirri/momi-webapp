@@ -54,14 +54,8 @@ const gptImage = {
 };
 
 test("Seedance 2.0 first-last estimate uses Comfy price badge token formula", () => {
-  assert.equal(
-    estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1280, height: 720, label: "720p" }),
-    228,
-  );
-  assert.equal(
-    estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1920, height: 1080, label: "1080p" }),
-    567,
-  );
+  assert.equal(estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1280, height: 720, label: "720p" }), 228);
+  assert.equal(estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1920, height: 1080, label: "1080p" }), 567);
 });
 
 test("Seedance 2.0 image-to-video does not use the input-video range", () => {
@@ -80,10 +74,7 @@ test("Seedance 2.0 reference-video edit exposes the conservative input-video ran
 });
 
 test("ExteriorGrid Generator estimate matches observed low-cost grid usage", () => {
-  assert.equal(
-    estimateWorkflowCredits(exteriorGridGenerator, 5, { width: 1920, height: 1080, label: "1080p" }),
-    6,
-  );
+  assert.equal(estimateWorkflowCredits(exteriorGridGenerator, 5, { width: 1920, height: 1080, label: "1080p" }), 6);
 });
 
 test("Nano Banana estimate doubles when two output images are requested", () => {

@@ -22,9 +22,7 @@ type RunpodHealthStats = {
   };
 };
 
-type RunpodHealthResult =
-  | { available: true; stats: RunpodHealthStats }
-  | { available: false; error: string };
+type RunpodHealthResult = { available: true; stats: RunpodHealthStats } | { available: false; error: string };
 
 export async function getPodStatus(fetchImpl: typeof fetch = fetch) {
   const queue = getQueueSnapshot();
@@ -77,7 +75,7 @@ export async function getPodStatus(fetchImpl: typeof fetch = fetch) {
       ? overallStatus({ queued, running, idle, stopped, unavailable })
       : queue.active || queued
         ? overallStatus({ queued, running: queue.active, idle: 0, stopped: 0, unavailable: 0 })
-        : "error" as PodDisplayStatus,
+        : ("error" as PodDisplayStatus),
     available: running + idle,
     running,
     idle,
@@ -222,7 +220,9 @@ function countStateList(value: unknown, aliases: Record<string, string[]>) {
   }
 
   for (const item of value) {
-    const state = String(getField(item, "status") ?? getField(item, "state") ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const state = String(getField(item, "status") ?? getField(item, "state") ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
     for (const [key, values] of Object.entries(aliases)) {
       if (values.map(normalizeKey).includes(state)) {
         counts[key] += 1;

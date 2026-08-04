@@ -11,8 +11,5 @@ process.env.RUNPOD_SUBMISSION_MODE = "sync";
 const { validateRuntimeConfigForStartup } = await import("./config.js");
 
 test("split roles require durable asynchronous RunPod submissions", () => {
-  assert.throws(
-    () => validateRuntimeConfigForStartup(),
-    /RUNPOD_SUBMISSION_MODE=async/,
-  );
+  assert.throws(() => validateRuntimeConfigForStartup(), /RUNPOD_SUBMISSION_MODE=async/);
 });

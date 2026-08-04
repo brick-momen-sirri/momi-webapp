@@ -12,8 +12,5 @@ process.env.OPS_ALLOW_LOOPBACK = "false";
 const { validateRuntimeConfigForStartup } = await import("./config.js");
 
 test("closing loopback with no token configured is refused at startup", () => {
-  assert.throws(
-    () => validateRuntimeConfigForStartup(),
-    /would make \/metrics and \/ops-dashboard unreachable/,
-  );
+  assert.throws(() => validateRuntimeConfigForStartup(), /would make \/metrics and \/ops-dashboard unreachable/);
 });

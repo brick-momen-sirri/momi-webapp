@@ -80,8 +80,8 @@ export async function moveResultFiles({
       await rollbackFileMoves(completedOperations);
     } catch (rollbackError) {
       throw new Error(
-        `Could not move result files: ${error instanceof Error ? error.message : "filesystem operation failed"}. `
-        + `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : "filesystem operation failed"}`,
+        `Could not move result files: ${error instanceof Error ? error.message : "filesystem operation failed"}. ` +
+          `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : "filesystem operation failed"}`,
       );
     }
     throw new Error(`Could not move result files: ${error instanceof Error ? error.message : "filesystem operation failed"}`);
@@ -104,9 +104,7 @@ export async function moveResultFiles({
 }
 
 function uniqueLocalMediaPaths(urls: string[]) {
-  const paths = urls
-    .map(localMediaPathFromUrl)
-    .filter((filePath): filePath is string => Boolean(filePath));
+  const paths = urls.map(localMediaPathFromUrl).filter((filePath): filePath is string => Boolean(filePath));
   return Array.from(new Set(paths.map((filePath) => path.resolve(filePath))));
 }
 
@@ -137,9 +135,10 @@ function buildMoveOperations(
     const segments = relative.split(path.sep).filter(Boolean);
     if (!MOVABLE_OUTPUT_FOLDERS.has(segments[0]?.toLowerCase())) continue;
 
-    const movableRelative = outputType === "sequence" && segments[0].toLowerCase() === "sequences" && segments.length > 2
-      ? path.join(segments[0], segments[1])
-      : relative;
+    const movableRelative =
+      outputType === "sequence" && segments[0].toLowerCase() === "sequences" && segments.length > 2
+        ? path.join(segments[0], segments[1])
+        : relative;
     const from = path.resolve(sourceOutputRoot, movableRelative);
     const to = path.resolve(destinationOutputRoot, movableRelative);
     assertPathInside(sourceOutputRoot, from);
@@ -175,7 +174,10 @@ async function validateReferencedFiles(referencedPaths: string[]) {
 async function rollbackFileMoves(operations: ResultFileMove[]) {
   const failures: string[] = [];
   for (const operation of [...operations].reverse()) {
-    const destinationExists = await fs.stat(operation.to).then(() => true).catch(() => false);
+    const destinationExists = await fs
+      .stat(operation.to)
+      .then(() => true)
+      .catch(() => false);
     if (!destinationExists) continue;
     await fs.mkdir(path.dirname(operation.from), { recursive: true });
     await fs.rename(operation.to, operation.from).catch((error) => {

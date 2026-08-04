@@ -14,20 +14,20 @@ unguarded for the RunPod topology; production remains on the monolith until
 
 ## Findings
 
-| State | Current behavior | Classification | Required before flip |
-|---|---|---|---|
-| Jobs and archived jobs | SQLite row writes, incremental revision/tombstone caches, dispatcher lease, lease-bound atomic claim, SQL active count | Ready | Keep Stage A-D integration tests in the gate. |
-| Users and sessions | `APP_STATE_DRIVER=sqlite` uses indexed rows, direct token lookups, row-level mutations, transactional revocation, and one-time JSON migration | Ready behind flag | Keep the cross-connection auth and rollback-export tests in the topology gate; split-role startup requires SQLite. |
-| Projects and ACLs | `APP_STATE_DRIVER=sqlite` uses direct indexed reads and transactional per-project writes; filesystem discovery is insert-only and ACL-preserving | Ready behind flag | Keep the cross-connection ACL/rename/recovery tests in the topology gate; derive `jobCount` from jobs. |
-| Project folder metadata | Per-project `.lock` uses exclusive file creation and stale-lock recovery | Ready with caveat | Retain the filesystem lock; make the SQLite project row the current path/ACL authority after rename. |
-| Existing-media cache | Dispatcher publishes dirty/published revisions and serialized metadata in `media_index_state`; API roles consume revisions without filesystem scans | Ready behind flag | Keep automatic sub-second publication and API-consumer tests in the topology gate. |
-| Output version reservation | `latest_versions.json` updates run under the cross-process project lock and each target gets an exclusive reservation marker | Ready | Keep the paused-old-dispatcher failover test in the topology gate. |
-| Workflow model and mapping cache | Read-only files loaded at boot | Conditionally ready | Treat model files as immutable deployment artifacts and restart all roles together. Add a catalog fingerprint to health before rolling deployments. |
-| Comfy pool `busy` set/status cache | Process-local | Ready only for RunPod topology | Refuse split roles with `GENERATION_BACKEND=local_comfy` until Comfy ownership/status is shared or routed through the dispatcher. |
-| Balance-delta activity tracker | Process-local active-operation counter | Optional blocker | Keep `CREDIT_BALANCE_DELTA_ACCOUNTING` off. Refuse split boot if it is enabled until Stage E provides shared activity rows. |
-| Credit Tracker caches | Ten-second read-only caches of an external source | Safe, performance-only | Measure duplicate external traffic during the load test; no shared correctness state. |
-| Recovery/reconcile/memory timers | Dispatcher-only guards | Ready | Verify one execution stream during the topology load test. |
-| Kling skill cache | Read-only skill text | Ready | Restart to pick up skill-file changes. |
+| State                              | Current behavior                                                                                                                                    | Classification                 | Required before flip                                                                                                                                |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Jobs and archived jobs             | SQLite row writes, incremental revision/tombstone caches, dispatcher lease, lease-bound atomic claim, SQL active count                              | Ready                          | Keep Stage A-D integration tests in the gate.                                                                                                       |
+| Users and sessions                 | `APP_STATE_DRIVER=sqlite` uses indexed rows, direct token lookups, row-level mutations, transactional revocation, and one-time JSON migration       | Ready behind flag              | Keep the cross-connection auth and rollback-export tests in the topology gate; split-role startup requires SQLite.                                  |
+| Projects and ACLs                  | `APP_STATE_DRIVER=sqlite` uses direct indexed reads and transactional per-project writes; filesystem discovery is insert-only and ACL-preserving    | Ready behind flag              | Keep the cross-connection ACL/rename/recovery tests in the topology gate; derive `jobCount` from jobs.                                              |
+| Project folder metadata            | Per-project `.lock` uses exclusive file creation and stale-lock recovery                                                                            | Ready with caveat              | Retain the filesystem lock; make the SQLite project row the current path/ACL authority after rename.                                                |
+| Existing-media cache               | Dispatcher publishes dirty/published revisions and serialized metadata in `media_index_state`; API roles consume revisions without filesystem scans | Ready behind flag              | Keep automatic sub-second publication and API-consumer tests in the topology gate.                                                                  |
+| Output version reservation         | `latest_versions.json` updates run under the cross-process project lock and each target gets an exclusive reservation marker                        | Ready                          | Keep the paused-old-dispatcher failover test in the topology gate.                                                                                  |
+| Workflow model and mapping cache   | Read-only files loaded at boot                                                                                                                      | Conditionally ready            | Treat model files as immutable deployment artifacts and restart all roles together. Add a catalog fingerprint to health before rolling deployments. |
+| Comfy pool `busy` set/status cache | Process-local                                                                                                                                       | Ready only for RunPod topology | Refuse split roles with `GENERATION_BACKEND=local_comfy` until Comfy ownership/status is shared or routed through the dispatcher.                   |
+| Balance-delta activity tracker     | Process-local active-operation counter                                                                                                              | Optional blocker               | Keep `CREDIT_BALANCE_DELTA_ACCOUNTING` off. Refuse split boot if it is enabled until Stage E provides shared activity rows.                         |
+| Credit Tracker caches              | Ten-second read-only caches of an external source                                                                                                   | Safe, performance-only         | Measure duplicate external traffic during the load test; no shared correctness state.                                                               |
+| Recovery/reconcile/memory timers   | Dispatcher-only guards                                                                                                                              | Ready                          | Verify one execution stream during the topology load test.                                                                                          |
+| Kling skill cache                  | Read-only skill text                                                                                                                                | Ready                          | Restart to pick up skill-file changes.                                                                                                              |
 
 ## Auth blocker closed
 
@@ -89,28 +89,28 @@ orphaned markers are skipped rather than overwritten.
 
 ## Required multi-process tests
 
-1. Login on API A; authenticate the token on API B immediately. *(covered by
-   cross-connection integration test)*
+1. Login on API A; authenticate the token on API B immediately. _(covered by
+   cross-connection integration test)_
 2. Concurrent logins on A/B; both sessions survive. Logout, password reset, and
-   user disable on A are enforced by B on its next request. *(covered at the
-   store/service boundary; repeat through HTTP in the topology load harness)*
+   user disable on A are enforced by B on its next request. _(covered at the
+   store/service boundary; repeat through HTTP in the topology load harness)_
 3. Add/remove project membership on A; B's project and job authorization changes
    on its next request. Concurrent edits to different projects do not clobber.
-   *(covered at the store/service boundary; repeat through HTTP in the topology
-   load harness)*
+   _(covered at the store/service boundary; repeat through HTTP in the topology
+   load harness)_
 4. Rename a project on A; B creates a job using the new path and never recreates
-   or writes to the old path. *(cross-connection path visibility, ACL-preserving
+   or writes to the old path. _(cross-connection path visibility, ACL-preserving
    rename, and interrupted-rename recovery are covered; repeat job creation in
-   the topology load harness)*
+   the topology load harness)_
 5. Move/rename media on A; B's list reflects it within one second without a full
-   independent filesystem scan. *(covered by automatic dispatcher publication
-   and API-role revision-consumer integration tests; repeat through HTTP)*
+   independent filesystem scan. _(covered by automatic dispatcher publication
+   and API-role revision-consumer integration tests; repeat through HTTP)_
 6. Pause the dispatcher during artifact persistence, take over the lease, then
    resume it; output versions and files remain unique and neither file is
-   overwritten. *(covered with a paused `v001` writer and replacement `v002`
-   writer)*
+   overwritten. _(covered with a paused `v001` writer and replacement `v002`
+   writer)_
 7. Split startup refuses `local_comfy` and balance-delta accounting until their
-   shared-state implementations exist. *(covered by fail-closed startup tests)*
+   shared-state implementations exist. _(covered by fail-closed startup tests)_
 
 ## Gate result
 

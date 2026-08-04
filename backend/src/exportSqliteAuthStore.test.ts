@@ -46,12 +46,14 @@ test("missing app-state DB fails without replacing JSON rollback files", async (
     await fs.writeFile(sessionsPath, "sessions-sentinel", "utf8");
     await fs.writeFile(projectsPath, "projects-sentinel", "utf8");
 
-    await assert.rejects(exportSqliteAuthStoreToJson({
-      dbPath: path.join(dir, "missing.sqlite"),
-      usersPath,
-      sessionsPath,
-      projectsPath,
-    }));
+    await assert.rejects(
+      exportSqliteAuthStoreToJson({
+        dbPath: path.join(dir, "missing.sqlite"),
+        usersPath,
+        sessionsPath,
+        projectsPath,
+      }),
+    );
     assert.equal(await fs.readFile(usersPath, "utf8"), "users-sentinel");
     assert.equal(await fs.readFile(sessionsPath, "utf8"), "sessions-sentinel");
     assert.equal(await fs.readFile(projectsPath, "utf8"), "projects-sentinel");
@@ -99,12 +101,14 @@ function project(): Project {
     folderName: "1234_Client_Project",
     folderPath: "C:\\projects\\1234_Client_Project",
     ownerId: "usr_1",
-    members: [{
-      userId: "usr_1",
-      role: "owner",
-      addedAt: "2026-07-20T00:00:00.000Z",
-      addedBy: "usr_1",
-    }],
+    members: [
+      {
+        userId: "usr_1",
+        role: "owner",
+        addedAt: "2026-07-20T00:00:00.000Z",
+        addedBy: "usr_1",
+      },
+    ],
     groupMembers: [],
     jobCount: 0,
     createdAt: "2026-07-20T00:00:00.000Z",

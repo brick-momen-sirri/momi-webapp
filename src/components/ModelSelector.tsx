@@ -104,9 +104,7 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
           <h2 className="text-sm font-semibold">Generation Settings</h2>
         </div>
         {selectedModel.requiresLandscape ? (
-          <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
-            16:9 required
-          </span>
+          <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">16:9 required</span>
         ) : null}
       </div>
 
@@ -178,7 +176,11 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
                 onDragOver={(event) => activateFromResultDrag(event, option.model)}
                 aria-pressed={selected}
                 aria-label={option.label}
-                title={option.model?.workflowPath ? `${option.label} - ${workflowFileName(option.model.workflowPath)}` : `${option.label} unavailable`}
+                title={
+                  option.model?.workflowPath
+                    ? `${option.label} - ${workflowFileName(option.model.workflowPath)}`
+                    : `${option.label} unavailable`
+                }
                 className={cn(
                   "relative flex h-8 w-8 items-center justify-center rounded-md border transition",
                   selected ? "border-accent bg-accent text-white shadow-card" : "border-line bg-white text-stone-600",
@@ -189,12 +191,17 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
                   <img
                     src={iconSrc}
                     alt=""
-                    className={cn("workflow-icon-img h-4 w-4 object-contain", selected ? "workflow-icon-selected brightness-0 invert" : "")}
+                    className={cn(
+                      "workflow-icon-img h-4 w-4 object-contain",
+                      selected ? "workflow-icon-selected brightness-0 invert" : "",
+                    )}
                   />
                 ) : (
                   <Icon className="h-3.5 w-3.5" />
                 )}
-                {selected ? <CheckCircle2 className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-white text-accent" /> : null}
+                {selected ? (
+                  <CheckCircle2 className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-white text-accent" />
+                ) : null}
                 <span className="sr-only">{option.label}</span>
               </button>
             );
@@ -231,8 +238,8 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
           selectedModel.requiresVideo
             ? "bg-cyan-50 text-cyan-800"
             : selectedModel.requiresTwoImages
-            ? "bg-cyan-50 text-cyan-800"
-            : "bg-stone-50 text-stone-600",
+              ? "bg-cyan-50 text-cyan-800"
+              : "bg-stone-50 text-stone-600",
         )}
       >
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -242,8 +249,8 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
             : selectedModel.requiresVideo
               ? "This model needs an input video before generation."
               : selectedModel.requiresTwoImages
-            ? "This model needs both a start frame and an end frame before generation."
-            : "Most jobs use a single reference image or text-only prompt, depending on the model."}
+                ? "This model needs both a start frame and an end frame before generation."
+                : "Most jobs use a single reference image or text-only prompt, depending on the model."}
         </span>
       </div>
     </section>
@@ -251,8 +258,9 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
 }
 
 function categoryForModel(model: ModelType) {
-  return taskCategories.find((category) => category.id === model.backendCategory) ?? (
-    model.category === "image" ? taskCategories.find((category) => category.id === "image_editing") : undefined
+  return (
+    taskCategories.find((category) => category.id === model.backendCategory) ??
+    (model.category === "image" ? taskCategories.find((category) => category.id === "image_editing") : undefined)
   );
 }
 
@@ -344,5 +352,8 @@ function iconSrcForModel(model: ModelType) {
 }
 
 function cleanModelLabel(label: string) {
-  return label.replace(/^Api\s+/i, "").replace(/\s+/g, " ").trim();
+  return label
+    .replace(/^Api\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

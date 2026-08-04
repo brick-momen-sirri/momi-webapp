@@ -40,12 +40,7 @@ export async function writeStreamAtomically(
   const temporaryPath = `${finalPath}.${randomUUID()}.part`;
 
   try {
-    await pipeline(
-      source,
-      limiter,
-      createWriteStream(temporaryPath, { flags: "wx" }),
-      { signal },
-    );
+    await pipeline(source, limiter, createWriteStream(temporaryPath, { flags: "wx" }), { signal });
     await fs.rename(temporaryPath, finalPath);
     return { bytesWritten: limiter.bytes };
   } catch (error) {

@@ -72,7 +72,11 @@ async function compressImageForInlineJson(buffer: Buffer, maxBytes: number, sour
   const format = metadata.hasAlpha ? "webp" : "jpeg";
   const mimeType = format === "webp" ? "image/webp" : "image/jpeg";
   const extension = format === "webp" ? ".webp" : ".jpg";
-  const originalLongestSide = Math.max(metadata.width ?? runpodInlineImageMaxDimension, metadata.height ?? runpodInlineImageMaxDimension, 1);
+  const originalLongestSide = Math.max(
+    metadata.width ?? runpodInlineImageMaxDimension,
+    metadata.height ?? runpodInlineImageMaxDimension,
+    1,
+  );
   let longestSide = Math.min(originalLongestSide, runpodInlineImageMaxDimension);
   let best: Buffer | undefined;
 
@@ -94,23 +98,18 @@ async function compressImageForInlineJson(buffer: Buffer, maxBytes: number, sour
 }
 
 async function encodeImage(buffer: Buffer, format: "jpeg" | "webp", longestSide: number, quality: number) {
-  const pipeline = sharp(buffer, { limitInputPixels: false })
-    .rotate()
-    .resize({
-      width: longestSide,
-      height: longestSide,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
+  const pipeline = sharp(buffer, { limitInputPixels: false }).rotate().resize({
+    width: longestSide,
+    height: longestSide,
+    fit: "inside",
+    withoutEnlargement: true,
+  });
 
   if (format === "webp") {
     return pipeline.webp({ quality, effort: 4 }).toBuffer();
   }
 
-  return pipeline
-    .flatten({ background: "#ffffff" })
-    .jpeg({ quality, mozjpeg: true })
-    .toBuffer();
+  return pipeline.flatten({ background: "#ffffff" }).jpeg({ quality, mozjpeg: true }).toBuffer();
 }
 
 function qualitySteps() {
@@ -135,11 +134,14 @@ function dataUrl(mimeType: string, buffer: Buffer) {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
 
-function throwRunpodInlineImageTooLarge(originalBytes: number, maxBytes: number, source: string, compressedBytes?: number): never {
+function throwRunpodInlineImageTooLarge(
+  originalBytes: number,
+  maxBytes: number,
+  source: string,
+  compressedBytes?: number,
+): never {
   const sourceName = path.basename(source) || "image input";
-  const compressedHint = compressedBytes
-    ? ` The smallest compressed fallback was ${formatBytes(compressedBytes)}.`
-    : "";
+  const compressedHint = compressedBytes ? ` The smallest compressed fallback was ${formatBytes(compressedBytes)}.` : "";
   const baseUrlHint = runpodInputBaseUrl
     ? "The input could not be sent as a signed file URL, and image compression was not enough."
     : "Set RUNPOD_INPUT_BASE_URL to a public URL for this backend so RunPod can download the original file bytes without inline JSON.";

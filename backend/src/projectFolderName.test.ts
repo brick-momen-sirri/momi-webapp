@@ -3,10 +3,7 @@ import test from "node:test";
 import { projectFolderName } from "./projectFolderName.js";
 
 test("projectFolderName handles Windows project paths on every OS", () => {
-  assert.equal(
-    projectFolderName("C:\\ComfyUI\\output\\projects\\1234_TestOffice_TestProject"),
-    "1234_TestOffice_TestProject",
-  );
+  assert.equal(projectFolderName("C:\\ComfyUI\\output\\projects\\1234_TestOffice_TestProject"), "1234_TestOffice_TestProject");
 });
 
 test("projectFolderName handles POSIX and mixed-separator project paths", () => {
@@ -15,10 +12,7 @@ test("projectFolderName handles POSIX and mixed-separator project paths", () => 
 });
 
 test("projectFolderName ignores trailing separators", () => {
-  assert.equal(
-    projectFolderName("C:\\ComfyUI\\output\\projects\\1234_TestOffice_TestProject\\"),
-    "1234_TestOffice_TestProject",
-  );
+  assert.equal(projectFolderName("C:\\ComfyUI\\output\\projects\\1234_TestOffice_TestProject\\"), "1234_TestOffice_TestProject");
   assert.equal(projectFolderName("/srv/output/projects/1234_TestOffice_TestProject/"), "1234_TestOffice_TestProject");
 });
 

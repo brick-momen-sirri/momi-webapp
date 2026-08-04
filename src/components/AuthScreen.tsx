@@ -42,7 +42,8 @@ export function AuthScreen({ onSignIn, theme, onThemeToggle }: AuthScreenProps) 
           </div>
           <h1 className="login-stagger login-delay-2 mt-8 text-3xl font-bold">Momi-AI</h1>
           <p className="login-stagger login-delay-3 mt-4 max-w-sm text-sm leading-6 text-white/70">
-            Production workspace for RunPod serverless ComfyUI generations, project media, credit tracking, and team-safe image and video workflows.
+            Production workspace for RunPod serverless ComfyUI generations, project media, credit tracking, and team-safe image
+            and video workflows.
           </p>
 
           <div className="mt-10 grid gap-3 text-sm">
@@ -96,9 +97,7 @@ export function AuthScreen({ onSignIn, theme, onThemeToggle }: AuthScreenProps) 
             </label>
 
             {error ? (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                {error}
-              </p>
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>
             ) : null}
 
             <div className="login-form-item login-delay-6">

@@ -29,11 +29,17 @@ after(() => {
 
 test("API role consumes dispatcher media revisions without a filesystem scan", async () => {
   await mediaService.initializeMediaIndex();
-  assert.deepEqual((await mediaService.scanExistingMediaJobs()).map((job) => job.id), ["existing_from_dispatcher"]);
+  assert.deepEqual(
+    (await mediaService.scanExistingMediaJobs()).map((job) => job.id),
+    ["existing_from_dispatcher"],
+  );
 
   const revision = externalStore.invalidate();
   externalStore.publish(revision, [mediaJob("existing_after_refresh")]);
-  assert.deepEqual((await mediaService.scanExistingMediaJobs()).map((job) => job.id), ["existing_after_refresh"]);
+  assert.deepEqual(
+    (await mediaService.scanExistingMediaJobs()).map((job) => job.id),
+    ["existing_after_refresh"],
+  );
 });
 
 function mediaJob(id: string): Job {

@@ -1,15 +1,15 @@
 import type { Job } from "../types";
 
 export function normalizeSaveNumber(value?: number | string | null) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return (digits || "0000").padStart(4, "0");
 }
 
 export function getJobSaveNumber(job: Job) {
   const save = job.workflowOptions?.save;
-  const value = isVideoLikeJob(job)
-    ? save?.shotNumber ?? save?.cameraNumber
-    : save?.cameraNumber ?? save?.shotNumber;
+  const value = isVideoLikeJob(job) ? (save?.shotNumber ?? save?.cameraNumber) : (save?.cameraNumber ?? save?.shotNumber);
 
   return normalizeSaveNumber(value);
 }

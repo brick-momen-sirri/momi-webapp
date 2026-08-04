@@ -82,9 +82,7 @@ export function JobCard({
               </span>
             ) : null}
             {job.missingMetadata?.length ? (
-              <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
-                Missing metadata
-              </span>
+              <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">Missing metadata</span>
             ) : null}
             {job.hasUnsavedRemoteMedia ? (
               <span
@@ -95,22 +93,16 @@ export function JobCard({
               </span>
             ) : null}
             {job.source === "existing_project_media" ? (
-              <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
-                Existing media
-              </span>
+              <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">Existing media</span>
             ) : null}
             {archiveView ? (
-              <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-700">
-                Archived
-              </span>
+              <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-700">Archived</span>
             ) : null}
             <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
               {project?.name ?? "Unknown project"}
             </span>
             {job.folderName ? (
-              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">
-                {job.folderName}
-              </span>
+              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">{job.folderName}</span>
             ) : null}
             {showSaveNumber && editingSaveNumber ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">
@@ -243,7 +235,11 @@ export function JobCard({
                     />
                     {job.inputImages.length > 1 ? (
                       <span className="absolute left-1.5 top-1.5 rounded-full bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold">
-                        {job.inputType === "start_end_frames" ? (index === 0 ? "Start frame" : "End frame") : `Input ${index + 1}`}
+                        {job.inputType === "start_end_frames"
+                          ? index === 0
+                            ? "Start frame"
+                            : "End frame"
+                          : `Input ${index + 1}`}
                       </span>
                     ) : null}
                   </div>
@@ -277,9 +273,7 @@ export function JobCard({
               {job.fileName ? <p className="mb-1 truncate font-mono text-xs text-stone-500">{job.fileName}</p> : null}
               <p
                 className={`text-sm leading-6 text-stone-800 ${
-                  expanded
-                    ? ""
-                    : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+                  expanded ? "" : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
                 }`}
               >
                 {job.prompt}
@@ -302,8 +296,8 @@ export function JobCard({
 
         <section className="result-section mt-4 flex justify-center">
           <div className="w-full max-w-5xl">
-          <JobPreview job={job} />
-        </div>
+            <JobPreview job={job} />
+          </div>
         </section>
       </div>
 

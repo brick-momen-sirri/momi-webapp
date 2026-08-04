@@ -43,9 +43,7 @@ export function openSqliteProjectStore(dbPath: string): SqliteProjectStore {
   `);
 
   const countProjects = db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM app_projects");
-  const selectProjects = db.prepare<[], ProjectRow>(
-    "SELECT data FROM app_projects ORDER BY created_at DESC, id ASC",
-  );
+  const selectProjects = db.prepare<[], ProjectRow>("SELECT data FROM app_projects ORDER BY created_at DESC, id ASC");
   const selectProjectById = db.prepare<[string], ProjectRow>("SELECT data FROM app_projects WHERE id = ?");
   const selectProjectByIdentity = db.prepare<ProjectParams, ProjectRow>(`
     SELECT data FROM app_projects
@@ -117,7 +115,7 @@ export function openSqliteProjectStore(dbPath: string): SqliteProjectStore {
     },
     loadProjectById(id: string) {
       const row = selectProjectById.get(id);
-      return row ? JSON.parse(row.data) as Project : undefined;
+      return row ? (JSON.parse(row.data) as Project) : undefined;
     },
     insertProject(project: Project) {
       const normalized = projectForPersistence(project);
@@ -156,7 +154,9 @@ function projectParams(project: Project): ProjectParams {
   return {
     id: project.id,
     folder_path_norm: normalizeProjectPath(project.folderPath),
-    folder_name_norm: projectFolderName(project.folderName || project.folderPath).trim().toLowerCase(),
+    folder_name_norm: projectFolderName(project.folderName || project.folderPath)
+      .trim()
+      .toLowerCase(),
     created_at: project.createdAt,
     updated_at: project.updatedAt,
     data: JSON.stringify(project),
@@ -165,9 +165,8 @@ function projectParams(project: Project): ProjectParams {
 
 function normalizeProjectPath(folderPath: string) {
   const normalized = folderPath.trim().replaceAll("\\", "/").replace(/\/+$/g, "");
-  const absolute = path.isAbsolute(normalized) || /^[a-z]:\//i.test(normalized)
-    ? normalized
-    : path.resolve(normalized).replaceAll("\\", "/");
+  const absolute =
+    path.isAbsolute(normalized) || /^[a-z]:\//i.test(normalized) ? normalized : path.resolve(normalized).replaceAll("\\", "/");
   return absolute.toLowerCase();
 }
 

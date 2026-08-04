@@ -122,10 +122,7 @@ function makeProject(folderPath: string): Project {
 }
 
 function makeFolders(): ProjectFolder[] {
-  return [
-    makeFolder("fld_source", "Source"),
-    makeFolder("fld_destination", "Destination"),
-  ];
+  return [makeFolder("fld_source", "Source"), makeFolder("fld_destination", "Destination")];
 }
 
 function makeFolder(folderId: string, name: string): ProjectFolder {

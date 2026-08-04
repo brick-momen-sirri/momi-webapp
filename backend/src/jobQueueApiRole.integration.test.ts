@@ -23,8 +23,24 @@ process.env.JOBS_ARCHIVED_SQLITE_PATH = path.join(tempDir, "archived-items.sqlit
 writeFileSync(
   jobsJsonPath,
   JSON.stringify([
-    { id: "job_running", projectId: "prj_1", userId: "usr_1", status: "running", createdAt: "2026-07-20T00:02:00.000Z", resultUrls: [], thumbnailUrls: [] },
-    { id: "job_queued", projectId: "prj_1", userId: "usr_1", status: "queued", createdAt: "2026-07-20T00:01:00.000Z", resultUrls: [], thumbnailUrls: [] },
+    {
+      id: "job_running",
+      projectId: "prj_1",
+      userId: "usr_1",
+      status: "running",
+      createdAt: "2026-07-20T00:02:00.000Z",
+      resultUrls: [],
+      thumbnailUrls: [],
+    },
+    {
+      id: "job_queued",
+      projectId: "prj_1",
+      userId: "usr_1",
+      status: "queued",
+      createdAt: "2026-07-20T00:01:00.000Z",
+      resultUrls: [],
+      thumbnailUrls: [],
+    },
   ]),
   "utf8",
 );
@@ -71,11 +87,7 @@ test("API-role cancellation writes only cancelRequested", async () => {
 test("live jobs cannot be archived by an API worker", async () => {
   await assert.rejects(
     jobQueue.archiveJob("job_running", "usr_1"),
-    (error: unknown) => (
-      error instanceof Error
-      && "statusCode" in error
-      && error.statusCode === 409
-    ),
+    (error: unknown) => error instanceof Error && "statusCode" in error && error.statusCode === 409,
   );
 
   assert.equal(sqliteJob("job_running")?.archivedAt, undefined);

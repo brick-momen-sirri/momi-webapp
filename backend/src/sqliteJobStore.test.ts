@@ -33,15 +33,15 @@ async function withStore(run: (dbPath: string) => void) {
 test("replaceAll then loadAll round-trips jobs in order with full data", async () => {
   await withStore((dbPath) => {
     const store = openSqliteJobStore(dbPath);
-    const input = [
-      job("job_1", { prompt: "first", creditsUsed: 4 } as Partial<Job>),
-      job("job_2", { status: "queued" }),
-    ];
+    const input = [job("job_1", { prompt: "first", creditsUsed: 4 } as Partial<Job>), job("job_2", { status: "queued" })];
     store.replaceAll(input);
 
     const loaded = store.loadAll();
     assert.equal(loaded.length, 2);
-    assert.deepEqual(loaded.map((j) => j.id), ["job_1", "job_2"]);
+    assert.deepEqual(
+      loaded.map((j) => j.id),
+      ["job_1", "job_2"],
+    );
     assert.equal((loaded[0] as { prompt?: string }).prompt, "first");
     assert.equal(loaded[1].status, "queued");
     store.close();
@@ -72,7 +72,10 @@ test("data persists across store reopen (on-disk durability)", async () => {
 
     const second = openSqliteJobStore(dbPath);
     assert.equal(second.count(), 2);
-    assert.deepEqual(second.loadAll().map((j) => j.id), ["job_1", "job_2"]);
+    assert.deepEqual(
+      second.loadAll().map((j) => j.id),
+      ["job_1", "job_2"],
+    );
     second.close();
   });
 });
@@ -124,7 +127,10 @@ test("prepended jobs keep newest-first order across syncs", async () => {
     store.replaceAll([job("job_1")]);
     store.replaceAll([job("job_2"), job("job_1")]); // job_2 prepended (newer)
     store.replaceAll([job("job_3"), job("job_2"), job("job_1")]); // job_3 prepended
-    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_3", "job_2", "job_1"]);
+    assert.deepEqual(
+      store.loadAll().map((j) => j.id),
+      ["job_3", "job_2", "job_1"],
+    );
     store.close();
   });
 });
@@ -164,7 +170,10 @@ test("a readonly store cannot be written", async () => {
     writable.replaceAll([job("job_1")]);
     writable.close();
     const ro = openSqliteJobStore(dbPath, "jobs", { readonly: true });
-    assert.deepEqual(ro.loadAll().map((j) => j.id), ["job_1"]);
+    assert.deepEqual(
+      ro.loadAll().map((j) => j.id),
+      ["job_1"],
+    );
     assert.throws(() => ro.replaceAll([job("job_2")]), /read-only/i);
     ro.close();
   });
@@ -178,7 +187,10 @@ test("seq is stable across reopen so order survives later updates", async () => 
 
     const second = openSqliteJobStore(dbPath);
     second.replaceAll([job("job_2"), job("job_1", { status: "failed" })]);
-    assert.deepEqual(second.loadAll().map((j) => j.id), ["job_2", "job_1"]);
+    assert.deepEqual(
+      second.loadAll().map((j) => j.id),
+      ["job_2", "job_1"],
+    );
     assert.equal(second.loadAll().find((j) => j.id === "job_1")?.status, "failed");
     second.close();
   });
@@ -192,7 +204,10 @@ test("insertJob assigns increasing seq and loadAll returns newest-first", async 
     store.insertJob(job("job_1"));
     store.insertJob(job("job_2"));
     store.insertJob(job("job_3"));
-    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_3", "job_2", "job_1"]);
+    assert.deepEqual(
+      store.loadAll().map((j) => j.id),
+      ["job_3", "job_2", "job_1"],
+    );
     assert.equal(store.count(), 3);
     store.close();
   });
@@ -220,7 +235,10 @@ test("incremental reads return inserts, updates, and tombstones after a revision
     store.insertJob(job("job_1", { status: "queued" }));
     const inserted = store.loadChanges(initial.revision);
     assert.ok(inserted.revision > initial.revision);
-    assert.deepEqual(inserted.upserts.map((item) => item.id), ["job_1"]);
+    assert.deepEqual(
+      inserted.upserts.map((item) => item.id),
+      ["job_1"],
+    );
     assert.deepEqual(inserted.deletedIds, []);
 
     store.applyToJob("job_1", (current) => {
@@ -263,7 +281,10 @@ test("updateJob rewrites content, preserves order, and reports missing ids", asy
     store.insertJob(job("job_2"));
     assert.equal(store.updateJob(job("job_1", { status: "completed" })), true);
     assert.equal(store.updateJob(job("ghost")), false);
-    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_2", "job_1"]);
+    assert.deepEqual(
+      store.loadAll().map((j) => j.id),
+      ["job_2", "job_1"],
+    );
     assert.equal(store.loadAll().find((j) => j.id === "job_1")?.status, "completed");
     store.close();
   });
@@ -273,10 +294,15 @@ test("applyToJob does an atomic read-modify-write and no-ops on missing ids", as
   await withStore((dbPath) => {
     const store = openSqliteJobStore(dbPath);
     store.insertJob(job("job_1", { status: "queued" }));
-    const updated = store.applyToJob("job_1", (j) => { j.status = "canceled"; });
+    const updated = store.applyToJob("job_1", (j) => {
+      j.status = "canceled";
+    });
     assert.equal(updated?.status, "canceled");
     assert.equal(store.loadAll()[0].status, "canceled");
-    assert.equal(store.applyToJob("ghost", (j) => j), undefined);
+    assert.equal(
+      store.applyToJob("ghost", (j) => j),
+      undefined,
+    );
     store.close();
   });
 });
@@ -288,7 +314,10 @@ test("deleteJob removes a row and reports whether it existed", async () => {
     store.insertJob(job("job_2"));
     assert.equal(store.deleteJob("job_1"), true);
     assert.equal(store.deleteJob("job_1"), false);
-    assert.deepEqual(store.loadAll().map((j) => j.id), ["job_2"]);
+    assert.deepEqual(
+      store.loadAll().map((j) => j.id),
+      ["job_2"],
+    );
     store.close();
   });
 });
@@ -298,7 +327,10 @@ test("per-row writes enforce the no-embedded-media contract", async () => {
     const store = openSqliteJobStore(dbPath);
     assert.throws(() => store.insertJob(job("bad", { prompt: "data:image/png;base64,AAAA" } as Partial<Job>)), /embedded media/i);
     store.insertJob(job("job_1"));
-    assert.throws(() => store.updateJob(job("job_1", { prompt: "data:video/mp4;base64,AAAA" } as Partial<Job>)), /embedded media/i);
+    assert.throws(
+      () => store.updateJob(job("job_1", { prompt: "data:video/mp4;base64,AAAA" } as Partial<Job>)),
+      /embedded media/i,
+    );
     assert.equal(store.count(), 1);
     store.close();
   });
@@ -311,7 +343,10 @@ test("a reader observes another connection's writes via data_version", async () 
     const reader = openSqliteJobStore(dbPath, "jobs", { readonly: true });
 
     const v0 = reader.dataVersion();
-    assert.deepEqual(reader.loadAll().map((j) => j.id), ["job_seed"]);
+    assert.deepEqual(
+      reader.loadAll().map((j) => j.id),
+      ["job_seed"],
+    );
     // The reader's own repeated reads never move its data_version.
     assert.equal(reader.dataVersion(), v0);
 
@@ -320,7 +355,13 @@ test("a reader observes another connection's writes via data_version", async () 
     writer.insertJob(job("job_new"));
     const v1 = reader.dataVersion();
     assert.notEqual(v1, v0, "data_version must change after another connection commits");
-    assert.deepEqual(reader.loadAll().map((j) => j.id).sort(), ["job_new", "job_seed"]);
+    assert.deepEqual(
+      reader
+        .loadAll()
+        .map((j) => j.id)
+        .sort(),
+      ["job_new", "job_seed"],
+    );
 
     writer.close();
     reader.close();
@@ -410,11 +451,14 @@ test("an explicitly dead same-host lease can be replaced before its TTL", async 
 
     assert.equal(a.tryAcquireDispatcherLease({ ...deadOwner, now: 1_000 }), true);
     assert.equal(b.tryAcquireDispatcherLease({ ...replacement, now: 1_100 }), false);
-    assert.equal(b.tryAcquireDispatcherLease({
-      ...replacement,
-      now: 1_100,
-      replaceOwnerId: deadOwner.ownerId,
-    }), true);
+    assert.equal(
+      b.tryAcquireDispatcherLease({
+        ...replacement,
+        now: 1_100,
+        replaceOwnerId: deadOwner.ownerId,
+      }),
+      true,
+    );
     assert.deepEqual(a.readDispatcherLease(), replacement);
 
     a.close();
@@ -472,14 +516,8 @@ test("atomic claim rejects a stale dispatcher after lease takeover", async () =>
     assert.equal(a.tryAcquireDispatcherLease({ ...ownerA, now: 1_000 }), true);
     assert.equal(b.tryAcquireDispatcherLease({ ...ownerB, now: 2_000 }), true);
 
-    assert.equal(
-      a.claimNextQueuedJob("2026-07-21T01:00:00.000Z", 1, ownerA.ownerId, 2_001),
-      undefined,
-    );
-    assert.equal(
-      b.claimNextQueuedJob("2026-07-21T01:00:01.000Z", 1, ownerB.ownerId, 2_001)?.id,
-      "job_queued",
-    );
+    assert.equal(a.claimNextQueuedJob("2026-07-21T01:00:00.000Z", 1, ownerA.ownerId, 2_001), undefined);
+    assert.equal(b.claimNextQueuedJob("2026-07-21T01:00:01.000Z", 1, ownerB.ownerId, 2_001)?.id, "job_queued");
 
     a.close();
     b.close();

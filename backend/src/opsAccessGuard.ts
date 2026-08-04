@@ -31,7 +31,13 @@ export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
   // Node reports IPv4 peers on a dual-stack socket as ::ffff:127.0.0.1, and
   // remoteAddress can carry a zone id (fe80::1%eth0).
-  const host = address.trim().toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/%.*$/, "").replace(/^::ffff:/, "");
+  const host = address
+    .trim()
+    .toLowerCase()
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .replace(/%.*$/, "")
+    .replace(/^::ffff:/, "");
   if (host === "::1") return true;
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!ipv4) return false;

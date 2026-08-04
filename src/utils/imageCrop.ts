@@ -31,15 +31,17 @@ export function outputSizeForResolution(resolution: string, aspectRatio = 16 / 9
   return { width, height: Math.round(width / aspectRatio) };
 }
 
-export function isNearAspectRatio(width: number | undefined, height: number | undefined, aspectRatio = 16 / 9, tolerance = 0.015) {
+export function isNearAspectRatio(
+  width: number | undefined,
+  height: number | undefined,
+  aspectRatio = 16 / 9,
+  tolerance = 0.015,
+) {
   if (!width || !height) return false;
   return Math.abs(width / height - aspectRatio) <= aspectRatio * tolerance;
 }
 
-export async function cropImageToDataUrl(
-  url: string,
-  settings: CropSettings,
-): Promise<string> {
+export async function cropImageToDataUrl(url: string, settings: CropSettings): Promise<string> {
   const image = await loadImage(url);
   const width = settings.outputWidth ?? 1920;
   const height = settings.outputHeight ?? Math.round(width / settings.aspectRatio);
@@ -57,9 +59,7 @@ export async function cropImageToDataUrl(
   context.fillRect(0, 0, width, height);
 
   const imageAspect = image.naturalWidth / image.naturalHeight;
-  const coverScale = imageAspect > settings.aspectRatio
-    ? height / image.naturalHeight
-    : width / image.naturalWidth;
+  const coverScale = imageAspect > settings.aspectRatio ? height / image.naturalHeight : width / image.naturalWidth;
   const finalScale = coverScale * clamp(settings.scale, 1, 4);
   const drawWidth = image.naturalWidth * finalScale;
   const drawHeight = image.naturalHeight * finalScale;

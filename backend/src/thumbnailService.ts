@@ -23,17 +23,7 @@ const execFileAsync = promisify(execFile);
 // existing renditions regenerate instead of being served with stale settings.
 const CACHE_VERSION = "v1";
 
-const THUMBNAILABLE_EXTENSIONS = new Set([
-  ".avif",
-  ".bmp",
-  ".gif",
-  ".jpeg",
-  ".jpg",
-  ".png",
-  ".tif",
-  ".tiff",
-  ".webp",
-]);
+const THUMBNAILABLE_EXTENSIONS = new Set([".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"]);
 
 export type ThumbnailRendition =
   // The rendition on disk; safe to stream with a long-lived cache header
@@ -247,8 +237,8 @@ async function extractVideoFrame(sourcePath: string, framePath: string) {
   }
 
   throw new Error(
-    `Could not extract a poster frame from ${path.basename(sourcePath)}`
-    + (lastError instanceof Error ? `: ${lastError.message}` : ""),
+    `Could not extract a poster frame from ${path.basename(sourcePath)}` +
+      (lastError instanceof Error ? `: ${lastError.message}` : ""),
   );
 }
 
@@ -302,7 +292,12 @@ export async function pruneThumbnailCache(maxBytes = thumbnailCacheMaxBytes) {
   let deletedBytes = 0;
   for (const entry of entries) {
     if (remaining <= target) break;
-    if (await fs.rm(entry.filePath, { force: true }).then(() => true).catch(() => false)) {
+    if (
+      await fs
+        .rm(entry.filePath, { force: true })
+        .then(() => true)
+        .catch(() => false)
+    ) {
       remaining -= entry.size;
       deletedFiles += 1;
       deletedBytes += entry.size;

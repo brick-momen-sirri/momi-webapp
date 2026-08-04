@@ -1,15 +1,4 @@
-import {
-  AlertTriangle,
-  ArrowUpDown,
-  BarChart3,
-  Coins,
-  Download,
-  Loader2,
-  RefreshCw,
-  Search,
-  WalletCards,
-  X,
-} from "lucide-react";
+import { AlertTriangle, ArrowUpDown, BarChart3, Coins, Download, Loader2, RefreshCw, Search, WalletCards, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -115,7 +104,9 @@ export function CreditUsageDashboard({
             <div className="min-w-0">
               <h2 className="truncate text-base font-bold text-ink">Credit Usage Analytics</h2>
               <p className="truncate text-xs font-semibold text-stone-500">
-                {dashboard ? `${dashboard.range.label} - updated ${formatDateTime(dashboard.generatedAt)}` : "Job-history dashboard"}
+                {dashboard
+                  ? `${dashboard.range.label} - updated ${formatDateTime(dashboard.generatedAt)}`
+                  : "Job-history dashboard"}
               </p>
             </div>
           </div>
@@ -242,13 +233,19 @@ function DashboardContent({ dashboard, creditsRemaining }: { dashboard: BackendC
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
-  const chart = useMemo(() => buildChartRows(dashboard.byDay, dashboard.recent, chartGroup), [dashboard.byDay, dashboard.recent, chartGroup]);
+  const chart = useMemo(
+    () => buildChartRows(dashboard.byDay, dashboard.recent, chartGroup),
+    [dashboard.byDay, dashboard.recent, chartGroup],
+  );
   const maxDailyCredits = useMemo(() => Math.max(1, ...chart.rows.map((day) => day.total)), [chart.rows]);
   const visibleAnomalies = useMemo(
     () => buildDisplayAnomalies(dashboard.anomalies, creditsRemaining, dashboard.summary.burnRateCreditsPerDay),
     [creditsRemaining, dashboard.anomalies, dashboard.summary.burnRateCreditsPerDay],
   );
-  const statuses = useMemo(() => ["all", ...Array.from(new Set(dashboard.recent.map((job) => job.status))).sort()], [dashboard.recent]);
+  const statuses = useMemo(
+    () => ["all", ...Array.from(new Set(dashboard.recent.map((job) => job.status))).sort()],
+    [dashboard.recent],
+  );
   const filteredRecent = useMemo(
     () => sortRecentJobs(filterRecentJobs(dashboard.recent, search, statusFilter), sortKey, sortDirection),
     [dashboard.recent, search, sortDirection, sortKey, statusFilter],
@@ -277,13 +274,33 @@ function DashboardContent({ dashboard, creditsRemaining }: { dashboard: BackendC
     <div className="space-y-4">
       <div className="sticky top-0 z-20 -mx-4 border-b border-line bg-white/95 px-4 pb-3 pt-1 backdrop-blur">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-          <KpiCard label="Today" value={`${formatCredits(dashboard.summary.todayCredits)} cr`} sub={`${formatUsd(dashboard.summary.todayUsd)} cost`} />
-          <KpiCard label="This month" value={`${formatCredits(dashboard.summary.monthCredits)} cr`} sub={`${formatUsd(dashboard.summary.monthUsd)} cost`} />
-          <KpiCard label="All time" value={`${formatCredits(dashboard.summary.totalCredits)} cr`} sub={`${formatUsd(dashboard.summary.totalUsd)} cost`} />
+          <KpiCard
+            label="Today"
+            value={`${formatCredits(dashboard.summary.todayCredits)} cr`}
+            sub={`${formatUsd(dashboard.summary.todayUsd)} cost`}
+          />
+          <KpiCard
+            label="This month"
+            value={`${formatCredits(dashboard.summary.monthCredits)} cr`}
+            sub={`${formatUsd(dashboard.summary.monthUsd)} cost`}
+          />
+          <KpiCard
+            label="All time"
+            value={`${formatCredits(dashboard.summary.totalCredits)} cr`}
+            sub={`${formatUsd(dashboard.summary.totalUsd)} cost`}
+          />
           <KpiCard label="Remaining" value={`${formatCredits(creditsRemaining)} cr`} sub="available balance" />
-          <KpiCard label="Runs today" value={String(dashboard.summary.todayRuns)} sub={`${dashboard.summary.periodRuns} in range`} />
+          <KpiCard
+            label="Runs today"
+            value={String(dashboard.summary.todayRuns)}
+            sub={`${dashboard.summary.periodRuns} in range`}
+          />
           <KpiCard label="Avg/run" value={`${formatCredits(dashboard.summary.averageCreditsPerRun)} cr`} sub="selected range" />
-          <KpiCard label="Runway" value={formatDays(daysUntilEmpty)} sub={`${formatCredits(dashboard.summary.burnRateCreditsPerDay)} cr/day`} />
+          <KpiCard
+            label="Runway"
+            value={formatDays(daysUntilEmpty)}
+            sub={`${formatCredits(dashboard.summary.burnRateCreditsPerDay)} cr/day`}
+          />
           <KpiCard
             label="Projected EOM"
             value={`${formatCredits(dashboard.summary.projectedMonthCredits)} cr`}
@@ -320,7 +337,11 @@ function DashboardContent({ dashboard, creditsRemaining }: { dashboard: BackendC
         <div className="flex h-44 items-end gap-1 overflow-hidden rounded-md bg-stone-50 px-2 pb-2 pt-4">
           {chart.rows.length ? (
             chart.rows.map((day) => (
-              <div key={day.date} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={`${day.date}: ${formatCredits(day.total)} credits`}>
+              <div
+                key={day.date}
+                className="flex min-w-0 flex-1 flex-col items-center gap-1"
+                title={`${day.date}: ${formatCredits(day.total)} credits`}
+              >
                 <div className="flex h-36 w-full items-end">
                   <div
                     className="flex w-full flex-col justify-end overflow-hidden rounded-t"
@@ -408,7 +429,9 @@ function AnomalyPanel({ anomalies }: { anomalies: DisplayAnomaly[] }) {
         {anomalies.slice(0, 6).map((anomaly) => (
           <div key={anomaly.id} className="rounded-md border border-amber-200 bg-white px-3 py-2">
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-xs font-bold uppercase ${anomaly.severity === "critical" ? "text-red-700" : "text-amber-700"}`}>
+              <span
+                className={`text-xs font-bold uppercase ${anomaly.severity === "critical" ? "text-red-700" : "text-amber-700"}`}
+              >
                 {anomaly.type.replace(/_/g, " ")}
               </span>
               <span className="text-xs font-semibold text-stone-500">{formatCredits(anomaly.credits)} cr</span>
@@ -450,7 +473,9 @@ function ProjectStatsTable({ rows }: { rows: BackendCreditDashboardGroup[] }) {
                   <td className="px-2 py-2 text-stone-600">{formatPercent(row.percentage)}</td>
                   <td className="px-2 py-2 text-stone-600">{formatDateTime(row.lastActivityAt)}</td>
                   <td className="px-2 py-2 text-stone-600">
-                    {row.mostExpensiveWorkflow ? `${row.mostExpensiveWorkflow} (${formatCredits(row.mostExpensiveWorkflowCredits ?? 0)} cr)` : "-"}
+                    {row.mostExpensiveWorkflow
+                      ? `${row.mostExpensiveWorkflow} (${formatCredits(row.mostExpensiveWorkflowCredits ?? 0)} cr)`
+                      : "-"}
                   </td>
                 </tr>
               ))
@@ -491,7 +516,9 @@ function WorkflowStatsTable({ rows }: { rows: BackendCreditDashboardGroup[] }) {
                   <td className="px-2 py-2 text-stone-600">{formatUsd(row.usd)}</td>
                   <td className="px-2 py-2 text-stone-600">{row.jobs}</td>
                   <td className="px-2 py-2 text-stone-600">{formatCredits(row.averageCreditsPerRun)}</td>
-                  <td className="px-2 py-2 text-stone-600">{formatCredits(row.minCredits)} / {formatCredits(row.maxCredits)}</td>
+                  <td className="px-2 py-2 text-stone-600">
+                    {formatCredits(row.minCredits)} / {formatCredits(row.maxCredits)}
+                  </td>
                   <td className="px-2 py-2 text-stone-600">{formatDateTime(row.lastActivityAt)}</td>
                   <td className="px-2 py-2 text-stone-600">{formatExpectedDelta(row)}</td>
                 </tr>
@@ -581,7 +608,9 @@ function RecentJobsTable({
             className="h-9 rounded-md border border-line bg-white px-2 text-xs font-bold text-stone-600"
           >
             {statuses.map((status) => (
-              <option key={status} value={status}>{status === "all" ? "All statuses" : status}</option>
+              <option key={status} value={status}>
+                {status === "all" ? "All statuses" : status}
+              </option>
             ))}
           </select>
           <button
@@ -601,15 +630,50 @@ function RecentJobsTable({
         <table className="w-full min-w-[1120px] text-left text-xs">
           <thead className="sticky top-0 bg-mist text-stone-600">
             <tr>
-              <SortableHeader label="Timestamp" active={sortKey === "timestamp"} direction={sortDirection} onClick={() => onSort("timestamp")} />
-              <SortableHeader label="Project" active={sortKey === "project"} direction={sortDirection} onClick={() => onSort("project")} />
+              <SortableHeader
+                label="Timestamp"
+                active={sortKey === "timestamp"}
+                direction={sortDirection}
+                onClick={() => onSort("timestamp")}
+              />
+              <SortableHeader
+                label="Project"
+                active={sortKey === "project"}
+                direction={sortDirection}
+                onClick={() => onSort("project")}
+              />
               <SortableHeader label="User" active={sortKey === "user"} direction={sortDirection} onClick={() => onSort("user")} />
-              <SortableHeader label="Workflow" active={sortKey === "workflow"} direction={sortDirection} onClick={() => onSort("workflow")} />
-              <SortableHeader label="Credits" active={sortKey === "credits"} direction={sortDirection} onClick={() => onSort("credits")} />
+              <SortableHeader
+                label="Workflow"
+                active={sortKey === "workflow"}
+                direction={sortDirection}
+                onClick={() => onSort("workflow")}
+              />
+              <SortableHeader
+                label="Credits"
+                active={sortKey === "credits"}
+                direction={sortDirection}
+                onClick={() => onSort("credits")}
+              />
               <SortableHeader label="Cost" active={sortKey === "usd"} direction={sortDirection} onClick={() => onSort("usd")} />
-              <SortableHeader label="Status" active={sortKey === "status"} direction={sortDirection} onClick={() => onSort("status")} />
-              <SortableHeader label="Resolution" active={sortKey === "resolution"} direction={sortDirection} onClick={() => onSort("resolution")} />
-              <SortableHeader label="Duration" active={sortKey === "duration"} direction={sortDirection} onClick={() => onSort("duration")} />
+              <SortableHeader
+                label="Status"
+                active={sortKey === "status"}
+                direction={sortDirection}
+                onClick={() => onSort("status")}
+              />
+              <SortableHeader
+                label="Resolution"
+                active={sortKey === "resolution"}
+                direction={sortDirection}
+                onClick={() => onSort("resolution")}
+              />
+              <SortableHeader
+                label="Duration"
+                active={sortKey === "duration"}
+                direction={sortDirection}
+                onClick={() => onSort("duration")}
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -626,7 +690,9 @@ function RecentJobsTable({
                   <td className="px-2 py-2 text-stone-600">{job.modelName}</td>
                   <td className="px-2 py-2 font-bold text-ink">{formatCredits(job.credits)}</td>
                   <td className="px-2 py-2 text-stone-600">{formatUsd(job.usd)}</td>
-                  <td className="px-2 py-2"><StatusPill status={job.status} /></td>
+                  <td className="px-2 py-2">
+                    <StatusPill status={job.status} />
+                  </td>
                   <td className="px-2 py-2 text-stone-600">{job.resolution || "-"}</td>
                   <td className="px-2 py-2 text-stone-600">{formatDuration(job.runDurationSeconds)}</td>
                 </tr>
@@ -675,10 +741,18 @@ function SelectedRunBreakdown({ job, rows }: { job: BackendCreditDashboardRecent
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 text-right text-xs font-semibold text-stone-600 sm:grid-cols-4">
-          <span><b className="block text-ink">{formatCredits(job.credits)}</b>credits</span>
-          <span><b className="block text-ink">{formatUsd(job.usd)}</b>cost</span>
-          <span><b className="block text-ink">{job.resolution || "-"}</b>resolution</span>
-          <span><b className="block text-ink">{formatDuration(job.runDurationSeconds)}</b>duration</span>
+          <span>
+            <b className="block text-ink">{formatCredits(job.credits)}</b>credits
+          </span>
+          <span>
+            <b className="block text-ink">{formatUsd(job.usd)}</b>cost
+          </span>
+          <span>
+            <b className="block text-ink">{job.resolution || "-"}</b>resolution
+          </span>
+          <span>
+            <b className="block text-ink">{formatDuration(job.runDurationSeconds)}</b>duration
+          </span>
         </div>
       </div>
       <div className="overflow-auto rounded-md border border-line">
@@ -770,21 +844,29 @@ function StatusPill({ status }: { status: string }) {
 function EmptyRow({ colSpan, label }: { colSpan: number; label: string }) {
   return (
     <tr>
-      <td className="px-2 py-3 text-sm font-semibold text-stone-500" colSpan={colSpan}>{label}</td>
+      <td className="px-2 py-3 text-sm font-semibold text-stone-500" colSpan={colSpan}>
+        {label}
+      </td>
     </tr>
   );
 }
 
-type DisplayAnomaly = BackendCreditDashboardAnomaly | {
-  id: string;
-  type: "low_remaining";
-  severity: "warning" | "critical";
-  message: string;
-  credits: number;
-  threshold: number;
-};
+type DisplayAnomaly =
+  | BackendCreditDashboardAnomaly
+  | {
+      id: string;
+      type: "low_remaining";
+      severity: "warning" | "critical";
+      message: string;
+      credits: number;
+      threshold: number;
+    };
 
-function buildDisplayAnomalies(anomalies: BackendCreditDashboardAnomaly[], creditsRemaining: number, burnRateCreditsPerDay: number): DisplayAnomaly[] {
+function buildDisplayAnomalies(
+  anomalies: BackendCreditDashboardAnomaly[],
+  creditsRemaining: number,
+  burnRateCreditsPerDay: number,
+): DisplayAnomaly[] {
   const output: DisplayAnomaly[] = [...anomalies];
   const threshold = burnRateCreditsPerDay > 0 ? Math.max(100, burnRateCreditsPerDay * 3) : 100;
   if (creditsRemaining <= threshold) {
@@ -832,7 +914,10 @@ function buildChartRows(days: BackendCreditDashboardDay[], events: BackendCredit
     .slice(0, 5)
     .map(([label]) => label);
   const hasOther = Array.from(totals.keys()).some((label) => !topLabels.includes(label));
-  const legend = [...topLabels, ...(hasOther ? ["Other"] : [])].map((label, index) => ({ label, color: chartColors[index % chartColors.length] }));
+  const legend = [...topLabels, ...(hasOther ? ["Other"] : [])].map((label, index) => ({
+    label,
+    color: chartColors[index % chartColors.length],
+  }));
 
   return {
     legend,
@@ -870,14 +955,11 @@ function filterRecentJobs(rows: BackendCreditDashboardRecentJob[], search: strin
   return rows.filter((job) => {
     if (statusFilter !== "all" && job.status !== statusFilter) return false;
     if (!query) return true;
-    return [
-      job.jobId,
-      job.projectName,
-      job.userName,
-      job.modelName,
-      job.status,
-      job.resolution,
-    ].some((value) => String(value ?? "").toLowerCase().includes(query));
+    return [job.jobId, job.projectName, job.userName, job.modelName, job.status, job.resolution].some((value) =>
+      String(value ?? "")
+        .toLowerCase()
+        .includes(query),
+    );
   });
 }
 
@@ -904,7 +986,18 @@ function recentSortValue(job: BackendCreditDashboardRecentJob, sortKey: SortKey)
 }
 
 function exportRecentCsv(rows: BackendCreditDashboardRecentJob[]) {
-  const headers = ["timestamp", "project", "user", "workflow", "credits", "cost", "status", "resolution", "duration_seconds", "job_id"];
+  const headers = [
+    "timestamp",
+    "project",
+    "user",
+    "workflow",
+    "credits",
+    "cost",
+    "status",
+    "resolution",
+    "duration_seconds",
+    "job_id",
+  ];
   const body = rows.map((job) => [
     job.timestamp,
     job.projectName,
@@ -998,9 +1091,5 @@ function addDays(date: Date, days: number) {
 }
 
 function toDateInput(date: Date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }

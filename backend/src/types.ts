@@ -13,14 +13,7 @@ export type ModelCategory =
   | "utility";
 
 export type WorkflowRequiredInput =
-  | "prompt"
-  | "single_image"
-  | "start_frame"
-  | "end_frame"
-  | "video"
-  | "mask"
-  | "resolution"
-  | "seed";
+  "prompt" | "single_image" | "start_frame" | "end_frame" | "video" | "mask" | "resolution" | "seed";
 
 export type WorkflowModel = {
   id: string;

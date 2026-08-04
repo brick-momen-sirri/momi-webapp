@@ -15,11 +15,7 @@ import {
   isRunpodTextOutputItem,
   type RunpodTextArtifact,
 } from "./runpodTextArtifactService.js";
-import {
-  logRunpodFetchError,
-  logRunpodRequest,
-  logRunpodResponse,
-} from "./runpodDebugLogger.js";
+import { logRunpodFetchError, logRunpodRequest, logRunpodResponse } from "./runpodDebugLogger.js";
 import type { CreditUsageRow, CreditUsageSummary } from "./types.js";
 
 export type RunpodComfyImageInput = {
@@ -80,7 +76,10 @@ export class RunpodComfyError extends Error {
   jobId?: string;
   creditUsage?: CreditUsageSummary;
 
-  constructor(message: string, options: { response?: unknown; status?: string; jobId?: string; creditUsage?: CreditUsageSummary } = {}) {
+  constructor(
+    message: string,
+    options: { response?: unknown; status?: string; jobId?: string; creditUsage?: CreditUsageSummary } = {},
+  ) {
     super(message);
     this.name = "RunpodComfyError";
     this.response = options.response;
@@ -119,11 +118,17 @@ export async function runComfyWorkflowOnRunpod({
 
   assertRunpodRequestBodySize(body);
 
-  const firstResponse = await runpodFetch(fetchImpl, runpodEndpointUrl, {
-    method: "POST",
-    headers: runpodHeaders(),
-    body,
-  }, startedAt, shouldCancel);
+  const firstResponse = await runpodFetch(
+    fetchImpl,
+    runpodEndpointUrl,
+    {
+      method: "POST",
+      headers: runpodHeaders(),
+      body,
+    },
+    startedAt,
+    shouldCancel,
+  );
 
   const submittedJobId = runpodJobId(firstResponse);
   if (submittedJobId && onSubmitted) {
@@ -148,10 +153,15 @@ export async function resumeComfyWorkflowOnRunpod({
 
 export async function cancelComfyWorkflowOnRunpod(jobId: string, fetchImpl: typeof fetch = fetch) {
   assertRunpodConfig();
-  const response = await runpodFetch(fetchImpl, runpodCancelUrl(jobId), {
-    method: "POST",
-    headers: runpodHeaders(),
-  }, Date.now());
+  const response = await runpodFetch(
+    fetchImpl,
+    runpodCancelUrl(jobId),
+    {
+      method: "POST",
+      headers: runpodHeaders(),
+    },
+    Date.now(),
+  );
   return {
     jobId: runpodJobId(response) ?? jobId,
     status: normalizeStatus(response.status ?? "CANCELLED"),
@@ -241,7 +251,9 @@ async function resolveRunpodResponse(
   let current = response;
   while (true) {
     throwIfCancellationRequested(shouldCancel);
-    const status = normalizeStatus(current.status ?? (current.output as Record<string, unknown> | undefined)?.status ?? "COMPLETED");
+    const status = normalizeStatus(
+      current.status ?? (current.output as Record<string, unknown> | undefined)?.status ?? "COMPLETED",
+    );
     if (pendingStatuses.has(status)) {
       const jobId = runpodJobId(current);
       if (!jobId) {
@@ -249,10 +261,16 @@ async function resolveRunpodResponse(
       }
 
       await waitBeforePoll(startedAt, shouldCancel);
-      current = await runpodFetch(fetchImpl, runpodStatusUrl(jobId), {
-        method: "GET",
-        headers: runpodHeaders(),
-      }, startedAt, shouldCancel);
+      current = await runpodFetch(
+        fetchImpl,
+        runpodStatusUrl(jobId),
+        {
+          method: "GET",
+          headers: runpodHeaders(),
+        },
+        startedAt,
+        shouldCancel,
+      );
       continue;
     }
 
@@ -311,16 +329,19 @@ async function runpodFetch(
   let canceled = false;
   let cancellationError: unknown;
   const cancellationTimer = shouldCancel
-    ? setInterval(() => {
-        try {
-          if (!shouldCancel()) return;
-          canceled = true;
-          controller.abort();
-        } catch (error) {
-          cancellationError = error;
-          controller.abort();
-        }
-      }, Math.min(1000, Math.max(50, runpodPollIntervalMs)))
+    ? setInterval(
+        () => {
+          try {
+            if (!shouldCancel()) return;
+            canceled = true;
+            controller.abort();
+          } catch (error) {
+            cancellationError = error;
+            controller.abort();
+          }
+        },
+        Math.min(1000, Math.max(50, runpodPollIntervalMs)),
+      )
     : undefined;
   cancellationTimer?.unref?.();
   logRunpodRequest(url, init);
@@ -358,7 +379,7 @@ async function runpodFetch(
 async function parseRunpodResponse(response: Response): Promise<RunpodResponse> {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
-    return await response.json() as RunpodResponse;
+    return (await response.json()) as RunpodResponse;
   }
 
   const text = await response.text().catch(() => "");
@@ -408,7 +429,9 @@ function throwIfCancellationRequested(shouldCancel?: () => boolean) {
 }
 
 function normalizeStatus(status: unknown) {
-  return String(status ?? "").trim().toUpperCase();
+  return String(status ?? "")
+    .trim()
+    .toUpperCase();
 }
 
 function runpodJobId(response: RunpodResponse) {
@@ -416,7 +439,10 @@ function runpodJobId(response: RunpodResponse) {
 }
 
 function runpodFailureMessage(response: RunpodResponse, status: string) {
-  const detail = stringFrom(response.error) ?? stringFrom(response.message) ?? stringFrom((response.output as Record<string, unknown> | undefined)?.message);
+  const detail =
+    stringFrom(response.error) ??
+    stringFrom(response.message) ??
+    stringFrom((response.output as Record<string, unknown> | undefined)?.message);
   const serialized = safeJson(response);
   const prefix = isUnauthorizedComfyError(response)
     ? "Comfy API authorization failed. COMFY_ORG_API_KEY is missing, invalid, or was not accepted by the worker."
@@ -459,10 +485,7 @@ function mediaFromOutputItem(item: unknown, source: string): RunpodMediaResult |
   if (!url) return undefined;
 
   const filename =
-    stringFrom(record.filename) ??
-    stringFrom(record.file_name) ??
-    stringFrom(record.name) ??
-    filenameFromValue(url);
+    stringFrom(record.filename) ?? stringFrom(record.file_name) ?? stringFrom(record.name) ?? filenameFromValue(url);
   const type = stringFrom(record.type);
 
   return {
@@ -529,13 +552,7 @@ function extensionFromMime(mime: string) {
 }
 
 function creditUsageRows(record: Record<string, unknown>) {
-  const candidate =
-    record.per_node_rows ??
-    record.per_node ??
-    record.perNode ??
-    record.node_usage ??
-    record.nodes ??
-    record.rows;
+  const candidate = record.per_node_rows ?? record.per_node ?? record.perNode ?? record.node_usage ?? record.nodes ?? record.rows;
   return arrayFromUnknown(candidate)
     .map(normalizeCreditUsageRow)
     .filter((row): row is CreditUsageRow => Boolean(row));
@@ -547,16 +564,12 @@ function normalizeCreditUsageRow(row: unknown): CreditUsageRow | undefined {
   return {
     ...record,
     node_id: stringFrom(record.node_id) ?? stringFrom(record.nodeId) ?? stringFrom(record.node) ?? stringFrom(record.id),
-    node_title: stringFrom(record.node_title) ?? stringFrom(record.nodeTitle) ?? stringFrom(record.title) ?? stringFrom(record.name),
+    node_title:
+      stringFrom(record.node_title) ?? stringFrom(record.nodeTitle) ?? stringFrom(record.title) ?? stringFrom(record.name),
     class_type: stringFrom(record.class_type) ?? stringFrom(record.classType),
     total_estimated_credits:
-      numberFrom(record.total_estimated_credits) ??
-      numberFrom(record.credits) ??
-      numberFrom(record.estimated_credits),
-    total_estimated_usd:
-      numberFrom(record.total_estimated_usd) ??
-      numberFrom(record.usd) ??
-      numberFrom(record.estimated_usd),
+      numberFrom(record.total_estimated_credits) ?? numberFrom(record.credits) ?? numberFrom(record.estimated_credits),
+    total_estimated_usd: numberFrom(record.total_estimated_usd) ?? numberFrom(record.usd) ?? numberFrom(record.estimated_usd),
     source: stringFrom(record.source),
     status: stringFrom(record.status),
   };

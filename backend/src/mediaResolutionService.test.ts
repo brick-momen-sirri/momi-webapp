@@ -25,10 +25,7 @@ test("detectMediaResolution reads PNG dimensions", async () => {
 test("detectMediaResolution reads MP4 track dimensions", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-resolution-"));
   const filePath = path.join(tempDir, "video.mp4");
-  const mp4 = Buffer.concat([
-    mp4Box("ftyp", Buffer.alloc(8)),
-    mp4Box("moov", mp4Box("trak", mp4TrackHeaderBox(2048, 1152))),
-  ]);
+  const mp4 = Buffer.concat([mp4Box("ftyp", Buffer.alloc(8)), mp4Box("moov", mp4Box("trak", mp4TrackHeaderBox(2048, 1152)))]);
 
   await fs.writeFile(filePath, mp4);
   try {

@@ -40,15 +40,11 @@ export function GenerateButton({
 
       <div className="mb-2 flex items-center justify-between text-xs">
         <span className="text-stone-500">Available credits</span>
-        <span className={`font-semibold ${insufficient ? "text-red-600" : "text-accent"}`}>
-          {creditsRemaining}
-        </span>
+        <span className={`font-semibold ${insufficient ? "text-red-600" : "text-accent"}`}>{creditsRemaining}</span>
       </div>
 
       {disabledReason ? (
-        <p className="mb-2 min-h-5 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-          {disabledReason}
-        </p>
+        <p className="mb-2 min-h-5 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{disabledReason}</p>
       ) : null}
 
       <button

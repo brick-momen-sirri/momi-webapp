@@ -12,8 +12,5 @@ process.env.CREDIT_BALANCE_DELTA_ACCOUNTING = "exclusive";
 const { validateRuntimeConfigForStartup } = await import("./config.js");
 
 test("split roles refuse process-local balance-delta accounting", () => {
-  assert.throws(
-    () => validateRuntimeConfigForStartup(),
-    /CREDIT_BALANCE_DELTA_ACCOUNTING to remain disabled/,
-  );
+  assert.throws(() => validateRuntimeConfigForStartup(), /CREDIT_BALANCE_DELTA_ACCOUNTING to remain disabled/);
 });

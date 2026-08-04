@@ -89,11 +89,13 @@ export function openSqliteMediaIndexStore(dbPath: string): SqliteMediaIndexStore
     },
     publish(revision: number, jobs: Job[]) {
       assertNoEmbeddedMedia(jobs, "shared media index");
-      return publish.run({
-        revision,
-        published_at: new Date().toISOString(),
-        data: JSON.stringify(jobs),
-      }).changes === 1;
+      return (
+        publish.run({
+          revision,
+          published_at: new Date().toISOString(),
+          data: JSON.stringify(jobs),
+        }).changes === 1
+      );
     },
     close() {
       db.close();

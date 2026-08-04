@@ -33,26 +33,22 @@ export function ProjectCard({
   onCreateProjectFolder,
 }: ProjectCardProps) {
   const menuItems: MenuItem[] = [
-    ...(canManageFolders ? [
-      { label: "Rename folder", icon: "rename" as const, onClick: () => onRenameProject(project) },
-      { label: "New subfolder", icon: "new" as const, onClick: () => onCreateProjectFolder(project.id) },
-    ] : []),
+    ...(canManageFolders
+      ? [
+          { label: "Rename folder", icon: "rename" as const, onClick: () => onRenameProject(project) },
+          { label: "New subfolder", icon: "new" as const, onClick: () => onCreateProjectFolder(project.id) },
+        ]
+      : []),
     { label: "Manage members", icon: "settings" as const, onClick: () => onOpenSettings(project.id) },
   ];
 
   return (
     <div
       className={`relative flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition ${
-        selected
-          ? "border-accent bg-accent/10"
-          : "border-transparent bg-white hover:border-line hover:bg-stone-50"
+        selected ? "border-accent bg-accent/10" : "border-transparent bg-white hover:border-line hover:bg-stone-50"
       }`}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(project.id)}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-      >
+      <button type="button" onClick={() => onSelect(project.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-mist text-stone-600">
           <Folder className="h-4 w-4" />
         </span>

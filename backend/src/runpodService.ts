@@ -1,12 +1,5 @@
-import {
-  combinedTextArtifactContent,
-  extractRunpodTextArtifacts,
-} from "./runpodTextArtifactService.js";
-import {
-  logRunpodFetchError,
-  logRunpodRequest,
-  logRunpodResponse,
-} from "./runpodDebugLogger.js";
+import { combinedTextArtifactContent, extractRunpodTextArtifacts } from "./runpodTextArtifactService.js";
+import { logRunpodFetchError, logRunpodRequest, logRunpodResponse } from "./runpodDebugLogger.js";
 import { BackendHttpError } from "./httpError.js";
 import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 
@@ -91,7 +84,7 @@ export async function describeImageWithRunpod({
     logRunpodRequest(endpointUrl, requestInit);
     const response = await fetchImpl(endpointUrl, requestInit);
 
-    const data = await response.json().catch(() => ({})) as RunpodResponse;
+    const data = (await response.json().catch(() => ({}))) as RunpodResponse;
     logRunpodResponse(endpointUrl, response.status, data);
     if (!response.ok) {
       throw new Error(data.error || data.message || `RunPod request failed with ${response.status}`);
@@ -103,9 +96,8 @@ export async function describeImageWithRunpod({
     }
 
     const textArtifacts = await extractRunpodTextArtifacts(output, fetchImpl);
-    const text = await extractOutputText(output)
-      ?? await extractOutputText(data)
-      ?? combinedTextArtifactContent(textArtifacts);
+    const text =
+      (await extractOutputText(output)) ?? (await extractOutputText(data)) ?? combinedTextArtifactContent(textArtifacts);
     if (!text?.trim()) {
       throw new BackendHttpError("RunPod response did not include output text.", {
         statusCode: 502,
@@ -135,13 +127,26 @@ async function extractOutputText(value: unknown): Promise<string | undefined> {
   }
 
   if (Array.isArray(value)) {
-    const parts = (await Promise.all(value.map((item) => extractOutputText(item)))).filter((item): item is string => Boolean(item));
+    const parts = (await Promise.all(value.map((item) => extractOutputText(item)))).filter((item): item is string =>
+      Boolean(item),
+    );
     return parts.length ? parts.join("\n").trim() : undefined;
   }
 
   if (!isRecord(value)) return undefined;
 
-  for (const key of ["text", "response", "result", "generated_text", "generatedText", "caption", "description", "content", "message", "string"]) {
+  for (const key of [
+    "text",
+    "response",
+    "result",
+    "generated_text",
+    "generatedText",
+    "caption",
+    "description",
+    "content",
+    "message",
+    "string",
+  ]) {
     const text = await extractOutputText(value[key]);
     if (text) return text;
   }
@@ -150,9 +155,10 @@ async function extractOutputText(value: unknown): Promise<string | undefined> {
   if (Array.isArray(choices)) {
     for (const choice of choices) {
       if (isRecord(choice)) {
-        const text = await extractOutputText(choice.message)
-          ?? await extractOutputText(choice.delta)
-          ?? await extractOutputText(choice.text);
+        const text =
+          (await extractOutputText(choice.message)) ??
+          (await extractOutputText(choice.delta)) ??
+          (await extractOutputText(choice.text));
         if (text) return text;
       }
       const text = await extractOutputText(choice);

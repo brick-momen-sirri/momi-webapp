@@ -45,14 +45,11 @@ export async function runSeedancePromptWorkflow({
 
   const sourceWorkflow = JSON.parse(await fs.readFile(seedancePromptWorkflowPath, "utf8"));
   const skillInstructions = seedanceSkillInstructions(sourceWorkflow);
-  const workflow = prepareSeedancePromptWorkflow(
-    sourceWorkflow,
-    {
-      prompt: cleanPrompt,
-      imageNames: images.map((image) => image.name),
-      model: seedancePromptOpenAIModel,
-    },
-  );
+  const workflow = prepareSeedancePromptWorkflow(sourceWorkflow, {
+    prompt: cleanPrompt,
+    imageNames: images.map((image) => image.name),
+    model: seedancePromptOpenAIModel,
+  });
 
   const endBillableOperation = beginRunpodBillableOperation();
   try {
@@ -175,7 +172,12 @@ export function prepareSeedancePromptWorkflow(
 }
 
 function nextPromptNodeId(prompt: Record<string, any>) {
-  const maxId = Math.max(0, ...Object.keys(prompt).map((key) => Number(key)).filter((value) => Number.isFinite(value)));
+  const maxId = Math.max(
+    0,
+    ...Object.keys(prompt)
+      .map((key) => Number(key))
+      .filter((value) => Number.isFinite(value)),
+  );
   let next = maxId + 1;
   while (prompt[String(next)]) next += 1;
   return String(next);
@@ -202,7 +204,9 @@ function cloneJson<T>(value: T): T {
 }
 
 function nodeClassType(node: any) {
-  return String(node?.class_type ?? "").trim().toLowerCase();
+  return String(node?.class_type ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function isSeedancePromptSaveNode(node: any) {
@@ -215,11 +219,8 @@ function seedanceSkillInstructions(workflow: unknown) {
     throw new BackendHttpError("Seedance prompt workflow JSON must be a ComfyUI API prompt object.", { statusCode: 500 });
   }
 
-  const configEntry = Object.values(workflow as Record<string, any>)
-    .find((node) => nodeClassType(node) === "openaichatconfig");
-  const instructions = typeof configEntry?.inputs?.instructions === "string"
-    ? configEntry.inputs.instructions.trim()
-    : "";
+  const configEntry = Object.values(workflow as Record<string, any>).find((node) => nodeClassType(node) === "openaichatconfig");
+  const instructions = typeof configEntry?.inputs?.instructions === "string" ? configEntry.inputs.instructions.trim() : "";
   if (!instructions) {
     throw new BackendHttpError("Seedance prompt workflow is missing its prompt-writing instructions.", { statusCode: 500 });
   }

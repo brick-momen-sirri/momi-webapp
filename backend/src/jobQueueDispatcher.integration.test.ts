@@ -48,10 +48,12 @@ test("dispatcher poll discovers queued work and waits for a global SQL slot", as
   assert.equal(jobQueue.getQueueSnapshot().dispatcher.heldByThisProcess, true);
 
   writer = openSqliteJobStore(jobsSqlitePath);
-  writer.insertJob(job("job_already_active", {
-    status: "running",
-    startedAt: new Date().toISOString(),
-  }));
+  writer.insertJob(
+    job("job_already_active", {
+      status: "running",
+      startedAt: new Date().toISOString(),
+    }),
+  );
   writer.insertJob(job("job_waiting", { status: "queued", cancelRequested: true }));
 
   await delay(120);

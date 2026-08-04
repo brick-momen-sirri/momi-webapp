@@ -109,11 +109,14 @@ export async function initializeMediaIndex() {
   if (!sharedStore || !isDispatcher()) return;
 
   await refreshSharedMediaIndex({ force: true });
-  sharedMediaRefreshTimer = setInterval(() => {
-    void refreshSharedMediaIndex().catch((error) => {
-      console.error(`Could not refresh shared media index: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }, Math.max(100, mediaIndexRefreshMs));
+  sharedMediaRefreshTimer = setInterval(
+    () => {
+      void refreshSharedMediaIndex().catch((error) => {
+        console.error(`Could not refresh shared media index: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    },
+    Math.max(100, mediaIndexRefreshMs),
+  );
   sharedMediaRefreshTimer.unref?.();
 }
 
@@ -205,7 +208,9 @@ async function scanMediaTarget(project: Project, target: ScanTarget, manifest: M
   ]);
   const mediaFiles = [...imageFiles, ...videoFiles];
   const sequenceFramePaths = new Set(sequences.flatMap((sequence) => sequence.files.map(normalizePath)));
-  const images = mediaFiles.filter((filePath) => imageExtensions.has(path.extname(filePath).toLowerCase()) && !sequenceFramePaths.has(normalizePath(filePath)));
+  const images = mediaFiles.filter(
+    (filePath) => imageExtensions.has(path.extname(filePath).toLowerCase()) && !sequenceFramePaths.has(normalizePath(filePath)),
+  );
   const videos = mediaFiles.filter((filePath) => videoExtensions.has(path.extname(filePath).toLowerCase()));
 
   return (
@@ -283,19 +288,36 @@ async function scanSequences(root: string) {
   }));
 }
 
-async function mediaJob(project: Project, target: ScanTarget, filePath: string, outputType: "image" | "video", manifestIndex: ManifestIndex): Promise<Job> {
+async function mediaJob(
+  project: Project,
+  target: ScanTarget,
+  filePath: string,
+  outputType: "image" | "video",
+  manifestIndex: ManifestIndex,
+): Promise<Job> {
   const manifest = manifestIndex.records.get(normalizePath(filePath));
   const stat = await fs.stat(filePath).catch(() => undefined);
   const fileName = path.basename(filePath);
   const createdAt = manifest?.timestamp_utc || stat?.mtime?.toISOString() || new Date().toISOString();
   const modelName = modelNameFromManifest(manifest);
-  const missingMetadata = missingFields(manifest, ["prompt", "model name", "workflow path", "resolution", "user name", "user ID", "credits used", "ComfyUI prompt ID", "original input image"]);
+  const missingMetadata = missingFields(manifest, [
+    "prompt",
+    "model name",
+    "workflow path",
+    "resolution",
+    "user name",
+    "user ID",
+    "credits used",
+    "ComfyUI prompt ID",
+    "original input image",
+  ]);
   const limitedPreview = previewLimitedExtensions.has(path.extname(filePath).toLowerCase());
   const jobId = manifestJobId(manifest) ?? existingId(project.id, filePath);
   const title = manifestTitle(manifest, manifestIndex.jobTitles.get(jobId));
   const workflowOptions = manifestWorkflowOptions(manifest, manifestIndex.jobSaveNumbers.get(jobId));
-  const outputResolution = manifestOutputResolution(manifest)
-    ?? (outputType === "image" ? await detectMediaResolution(filePath, outputType).catch(() => undefined) : undefined);
+  const outputResolution =
+    manifestOutputResolution(manifest) ??
+    (outputType === "image" ? await detectMediaResolution(filePath, outputType).catch(() => undefined) : undefined);
 
   return {
     id: jobId,
@@ -329,17 +351,33 @@ async function mediaJob(project: Project, target: ScanTarget, filePath: string, 
   };
 }
 
-async function sequenceJob(project: Project, target: ScanTarget, sequence: { folderPath: string; files: string[] }, manifestIndex: ManifestIndex): Promise<Job> {
+async function sequenceJob(
+  project: Project,
+  target: ScanTarget,
+  sequence: { folderPath: string; files: string[] },
+  manifestIndex: ManifestIndex,
+): Promise<Job> {
   const manifest = manifestIndex.records.get(normalizePath(sequence.folderPath));
   const stat = await fs.stat(sequence.folderPath).catch(() => undefined);
   const firstFrame = sequence.files[0];
   const createdAt = manifest?.timestamp_utc || stat?.mtime?.toISOString() || new Date().toISOString();
-  const missingMetadata = missingFields(manifest, ["prompt", "model name", "workflow path", "resolution", "user name", "user ID", "credits used", "ComfyUI prompt ID", "original input image"]);
+  const missingMetadata = missingFields(manifest, [
+    "prompt",
+    "model name",
+    "workflow path",
+    "resolution",
+    "user name",
+    "user ID",
+    "credits used",
+    "ComfyUI prompt ID",
+    "original input image",
+  ]);
   const jobId = manifestJobId(manifest) ?? existingId(project.id, sequence.folderPath);
   const title = manifestTitle(manifest, manifestIndex.jobTitles.get(jobId));
   const workflowOptions = manifestWorkflowOptions(manifest, manifestIndex.jobSaveNumbers.get(jobId));
-  const outputResolution = manifestOutputResolution(manifest)
-    ?? (firstFrame ? await detectMediaResolution(firstFrame, "sequence").catch(() => undefined) : undefined);
+  const outputResolution =
+    manifestOutputResolution(manifest) ??
+    (firstFrame ? await detectMediaResolution(firstFrame, "sequence").catch(() => undefined) : undefined);
 
   return {
     id: jobId,
@@ -518,7 +556,8 @@ function manifestTitle(manifest: ManifestRecord | undefined, renameTitle: string
 }
 
 function manifestWorkflowOptions(manifest: ManifestRecord | undefined, updatedSaveNumber: ManifestSaveNumber | undefined) {
-  const cameraNumber = updatedSaveNumber?.cameraNumber ?? normalizeManifestSaveNumber(manifest?.cameraNumber ?? manifest?.camera_number);
+  const cameraNumber =
+    updatedSaveNumber?.cameraNumber ?? normalizeManifestSaveNumber(manifest?.cameraNumber ?? manifest?.camera_number);
   const shotNumber = updatedSaveNumber?.shotNumber ?? normalizeManifestSaveNumber(manifest?.shotNumber ?? manifest?.shot_number);
   if (!cameraNumber && !shotNumber) return undefined;
 
@@ -531,7 +570,9 @@ function manifestWorkflowOptions(manifest: ManifestRecord | undefined, updatedSa
 }
 
 function normalizeManifestSaveNumber(value: unknown) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return digits ? digits.padStart(4, "0") : undefined;
 }
 
@@ -558,7 +599,11 @@ function mediaUrl(filePath: string) {
 }
 
 function existingId(projectId: string, value: string) {
-  const hash = crypto.createHash("sha1").update(`${projectId}|${normalizePath(value)}`).digest("hex").slice(0, 20);
+  const hash = crypto
+    .createHash("sha1")
+    .update(`${projectId}|${normalizePath(value)}`)
+    .digest("hex")
+    .slice(0, 20);
   return `existing_${hash}`;
 }
 

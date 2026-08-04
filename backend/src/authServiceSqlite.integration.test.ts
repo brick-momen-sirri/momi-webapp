@@ -56,10 +56,14 @@ test("authService observes cross-connection sessions, user edits, and revocation
   });
   assert.equal(authService.getUserById("usr_momen")?.displayName, "Edited by worker B");
 
-  externalStore.applyToUser("usr_momen", (user) => {
-    user.active = false;
-    user.updatedAt = new Date().toISOString();
-  }, { revokeSessions: true });
+  externalStore.applyToUser(
+    "usr_momen",
+    (user) => {
+      user.active = false;
+      user.updatedAt = new Date().toISOString();
+    },
+    { revokeSessions: true },
+  );
   assert.equal(await authService.getAuthenticatedUser(login.token), undefined);
   assert.equal(await authService.getAuthenticatedUser(externalToken), undefined);
   await assert.rejects(authService.login("admin@example.com", "AdminPass123"), /Invalid email or password/);

@@ -47,7 +47,10 @@ test("getJobs incrementally merges commits from another SQLite connection", asyn
   const inserted = job("job_inserted", { createdAt: "2026-07-21T00:00:00.000Z" });
   writer.insertJob(inserted);
 
-  assert.deepEqual(jobQueue.getJobs().map((item) => item.id), [inserted.id, initialJob.id]);
+  assert.deepEqual(
+    jobQueue.getJobs().map((item) => item.id),
+    [inserted.id, initialJob.id],
+  );
 
   writer.applyToJob(initialJob.id, (current) => ({ ...current, title: "Edited externally" }));
   const refreshedExisting = jobQueue.getJob(initialJob.id);
@@ -55,7 +58,10 @@ test("getJobs incrementally merges commits from another SQLite connection", asyn
   assert.equal(refreshedExisting?.title, "Edited externally");
 
   writer.deleteJob(inserted.id);
-  assert.deepEqual(jobQueue.getJobs().map((item) => item.id), [initialJob.id]);
+  assert.deepEqual(
+    jobQueue.getJobs().map((item) => item.id),
+    [initialJob.id],
+  );
 });
 
 function job(id: string, overrides: Partial<Job> = {}): Job {

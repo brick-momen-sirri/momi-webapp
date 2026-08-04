@@ -58,11 +58,7 @@ import {
   type RunpodMediaResult,
 } from "./runpodComfyService.js";
 import { isDispatcher } from "./processRole.js";
-import {
-  parseImageDataUrl,
-  prepareRunpodInlineImageInput,
-  runpodInlineImageByteBudget,
-} from "./runpodImageInlineService.js";
+import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "./runpodImageInlineService.js";
 import {
   beginRunpodBillableOperation,
   hasExclusiveRunpodActivityWindow,
@@ -71,12 +67,16 @@ import {
 } from "./runpodActivityTracker.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
 import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
-import {
-  openSqliteJobStore,
-  type SqliteJobStore,
-} from "./sqliteJobStore.js";
+import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
-import { ensureJobFolders, readJsonFileWithBackup, safeSegment, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
+import {
+  ensureJobFolders,
+  readJsonFileWithBackup,
+  safeSegment,
+  saveJobMetadata,
+  snapshotJsonStore,
+  writeJsonFile,
+} from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
 import { moveResultFiles } from "./resultMoveService.js";
@@ -302,7 +302,8 @@ export async function getJobsWithExistingMedia(options: { archived?: boolean } =
   const mediaJobs = archived ? [] : await scanExistingMediaJobs();
   logMemory("after-media-scan");
   const backendResultPaths = new Set(
-    jobs.flatMap((job) => [...job.resultUrls, ...job.thumbnailUrls])
+    jobs
+      .flatMap((job) => [...job.resultUrls, ...job.thumbnailUrls])
       .map(mediaFilePathFromUrl)
       .filter((item): item is string => Boolean(item)),
   );
@@ -366,9 +367,7 @@ export function getQueueSnapshot() {
   const sendingJobs = jobs.filter((job) => job.status === "sending");
   const runningJobs = jobs.filter((job) => job.status === "running");
   const activeJobs = [...sendingJobs, ...runningJobs];
-  const sqlActiveJobs = jobRowLevelWrites && sqliteStore
-    ? sqliteStore.countActiveJobs()
-    : activeRunpodJobs;
+  const sqlActiveJobs = jobRowLevelWrites && sqliteStore ? sqliteStore.countActiveJobs() : activeRunpodJobs;
 
   return {
     queued: queuedJobs.length,
@@ -432,11 +431,7 @@ function startDispatcherCoordination() {
 function resumeAcknowledgedRunpodJobs() {
   if (generationBackend !== "runpod" || !ownsDispatcherWork()) return;
   for (const job of jobs) {
-    if (
-      !job.runpodJobId
-      || (job.status !== "sending" && job.status !== "running")
-      || inFlightJobIds.has(job.id)
-    ) continue;
+    if (!job.runpodJobId || (job.status !== "sending" && job.status !== "running") || inFlightJobIds.has(job.id)) continue;
 
     activeRunpodJobs += 1;
     inFlightJobIds.add(job.id);
@@ -509,11 +504,10 @@ function tryAcquireDispatcherLease() {
   if (!usesDispatcherCoordination() || !sqliteStore) return false;
   const now = Date.now();
   const existing = sqliteStore.readDispatcherLease();
-  const replaceOwnerId = existing
-    && existing.ownerHost.toLowerCase() === dispatcherOwnerHost.toLowerCase()
-    && !processAppearsAlive(existing.ownerPid)
-    ? existing.ownerId
-    : undefined;
+  const replaceOwnerId =
+    existing && existing.ownerHost.toLowerCase() === dispatcherOwnerHost.toLowerCase() && !processAppearsAlive(existing.ownerPid)
+      ? existing.ownerId
+      : undefined;
   const acquired = sqliteStore.tryAcquireDispatcherLease({
     ...dispatcherLease(now),
     now,
@@ -596,7 +590,8 @@ export async function createJob(request: CreateJobRequest) {
   const jobId = `job_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
   const preparedRequest = await externalizeJobInputMedia(project, jobId, request);
   const durationSeconds = normalizeDurationSeconds(request.durationSeconds, model);
-  const targetFolderId = typeof request.targetFolderId === "string" && request.targetFolderId.trim() ? request.targetFolderId.trim() : null;
+  const targetFolderId =
+    typeof request.targetFolderId === "string" && request.targetFolderId.trim() ? request.targetFolderId.trim() : null;
   const projectFolders = await loadProjectFolders(project);
   if (targetFolderId && !projectFolders.some((folder) => folder.folderId === targetFolderId && !folder.archived)) {
     throw new Error("Target folder not found.");
@@ -618,14 +613,20 @@ export async function createJob(request: CreateJobRequest) {
     durationSeconds,
     workflowOptions: preparedRequest.workflowOptions,
     status: "queued",
-    inputImages: preparedRequest.inputImages ?? [preparedRequest.startFrame, preparedRequest.endFrame].filter(Boolean) as string[],
+    inputImages:
+      preparedRequest.inputImages ?? ([preparedRequest.startFrame, preparedRequest.endFrame].filter(Boolean) as string[]),
     inputVideo: preparedRequest.inputVideo,
     resultUrls: [],
     thumbnailUrls: [],
     outputType: model.outputType,
     projectFolderPath: project.folderPath,
     workflowPath: model.workflowPath,
-    creditsEstimated: estimateWorkflowCredits(model, durationSeconds, preparedRequest.resolution, preparedRequest.workflowOptions),
+    creditsEstimated: estimateWorkflowCredits(
+      model,
+      durationSeconds,
+      preparedRequest.resolution,
+      preparedRequest.workflowOptions,
+    ),
     source: "backend_job",
     createdAt: new Date().toISOString(),
   };
@@ -642,7 +643,9 @@ async function externalizeJobInputMedia(project: Project, jobId: string, request
   if (request.inputImages) {
     prepared.inputImages = [];
     for (let index = 0; index < request.inputImages.length; index += 1) {
-      prepared.inputImages.push(await persistInputDataUrl(project, jobId, request.inputImages[index], `input_${String(index + 1).padStart(2, "0")}`));
+      prepared.inputImages.push(
+        await persistInputDataUrl(project, jobId, request.inputImages[index], `input_${String(index + 1).padStart(2, "0")}`),
+      );
     }
   }
 
@@ -686,19 +689,19 @@ function parseMediaDataUrl(value: string) {
   };
 }
 
-function normalizeDurationSeconds(value: number | undefined, model: { supportedDurations?: number[]; defaultDurationSeconds?: number }) {
+function normalizeDurationSeconds(
+  value: number | undefined,
+  model: { supportedDurations?: number[]; defaultDurationSeconds?: number },
+) {
   const options = model.supportedDurations ?? [];
   if (!options.length) return undefined;
   if (typeof value === "number" && options.includes(value)) return value;
 
-  const fallback = model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds)
-    ? model.defaultDurationSeconds
-    : options[0];
+  const fallback =
+    model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
 
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return options.reduce((closest, option) => (
-    Math.abs(option - value) < Math.abs(closest - value) ? option : closest
-  ), fallback);
+  return options.reduce((closest, option) => (Math.abs(option - value) < Math.abs(closest - value) ? option : closest), fallback);
 }
 
 export async function cancelJob(jobId: string) {
@@ -766,7 +769,9 @@ async function settleRequestedCancellation(job: Job) {
       // The remote job may still be running (and billing) on RunPod. Leave
       // the local status as-is and cancelRequested set so this is retried on
       // the next poll, instead of marking it canceled while it may not be.
-      console.warn(`Could not cancel RunPod job ${job.runpodJobId}, will retry: ${error instanceof Error ? error.message : "unknown error"}`);
+      console.warn(
+        `Could not cancel RunPod job ${job.runpodJobId}, will retry: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
       return false;
     }
   }
@@ -875,7 +880,8 @@ export async function renameJob(projectId: string, jobId: string, title: string,
     return undefined;
   }
 
-  const existingJob = backendJob ?? (await getJobsWithExistingMedia()).find((job) => job.id === jobId && job.projectId === projectId);
+  const existingJob =
+    backendJob ?? (await getJobsWithExistingMedia()).find((job) => job.id === jobId && job.projectId === projectId);
   if (!existingJob) {
     return undefined;
   }
@@ -919,7 +925,8 @@ export async function updateJobSaveNumber(projectId: string, jobId: string, valu
     return undefined;
   }
 
-  const existingJob = backendJob ?? (await getJobsWithExistingMedia()).find((job) => job.id === jobId && job.projectId === projectId);
+  const existingJob =
+    backendJob ?? (await getJobsWithExistingMedia()).find((job) => job.id === jobId && job.projectId === projectId);
   if (!existingJob) {
     return undefined;
   }
@@ -965,12 +972,7 @@ export async function updateJobSaveNumber(projectId: string, jobId: string, valu
   return { ...existingJob, workflowOptions };
 }
 
-export async function moveJobResult(
-  projectId: string,
-  jobId: string,
-  destinationFolderId: string | null,
-  userId: string,
-) {
+export async function moveJobResult(projectId: string, jobId: string, destinationFolderId: string | null, userId: string) {
   return serializeResultMove(async () => {
     const project = getProject(projectId);
     if (!project) return undefined;
@@ -1006,8 +1008,8 @@ export async function moveJobResult(
         await persistUpsert(job).catch(() => undefined);
         if (rollbackError) {
           throw new Error(
-            `Could not persist result move: ${error instanceof Error ? error.message : "metadata write failed"}. `
-            + `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : "filesystem operation failed"}`,
+            `Could not persist result move: ${error instanceof Error ? error.message : "metadata write failed"}. ` +
+              `Rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : "filesystem operation failed"}`,
           );
         }
         throw error;
@@ -1036,7 +1038,9 @@ export async function moveJobResult(
       ]);
       for (const auditWrite of auditWrites) {
         if (auditWrite.status === "rejected") {
-          console.warn(`Could not record result move audit for ${jobId}: ${auditWrite.reason instanceof Error ? auditWrite.reason.message : "unknown error"}`);
+          console.warn(
+            `Could not record result move audit for ${jobId}: ${auditWrite.reason instanceof Error ? auditWrite.reason.message : "unknown error"}`,
+          );
         }
       }
 
@@ -1047,7 +1051,10 @@ export async function moveJobResult(
 
 function serializeResultMove<T>(operation: () => Promise<T>) {
   const result = resultMoveQueue.then(operation, operation);
-  resultMoveQueue = result.then(() => undefined, () => undefined);
+  resultMoveQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
   return result;
 }
 
@@ -1066,8 +1073,9 @@ async function dispatchQueue() {
     while (true) {
       const serverUrl = await acquireIdleServer();
       if (!serverUrl) return;
-      const next = claimNextJobForDispatch(Number.MAX_SAFE_INTEGER)
-        ?? (!jobRowLevelWrites || !sqliteStore ? jobs.find((job) => job.status === "queued") : undefined);
+      const next =
+        claimNextJobForDispatch(Number.MAX_SAFE_INTEGER) ??
+        (!jobRowLevelWrites || !sqliteStore ? jobs.find((job) => job.status === "queued") : undefined);
       if (!next) {
         releaseServer(serverUrl);
         return;
@@ -1101,8 +1109,9 @@ async function failExpiredOrphanedRunpodJobs() {
   for (const job of expired) {
     job.status = "failed";
     job.completedAt = job.completedAt ?? new Date().toISOString();
-    job.errorMessage = job.errorMessage
-      ?? "The prior dispatcher stopped and the RunPod timeout elapsed before the job returned. Retry the job if needed.";
+    job.errorMessage =
+      job.errorMessage ??
+      "The prior dispatcher stopped and the RunPod timeout elapsed before the job returned. Retry the job if needed.";
     job.creditsUsed = job.creditsUsed ?? 0;
     await persistUpsert(job);
   }
@@ -1112,9 +1121,7 @@ async function dispatchRunpodJobs() {
   const usesSqlClaims = jobRowLevelWrites && Boolean(sqliteStore);
   while (acceptingNewWork && (usesSqlClaims || activeRunpodJobs < runpodJobConcurrency)) {
     if (!ensureDispatcherLease()) return;
-    const next = usesSqlClaims
-      ? claimNextJobForDispatch(runpodJobConcurrency)
-      : jobs.find((job) => job.status === "queued");
+    const next = usesSqlClaims ? claimNextJobForDispatch(runpodJobConcurrency) : jobs.find((job) => job.status === "queued");
     if (!next) return;
     if (await settleRequestedCancellation(next)) continue;
 
@@ -1171,7 +1178,7 @@ async function runRunpodJob(job: Job) {
     }
 
     if (!job.runpodJobId) job.runpodSubmissionState = "preparing";
-    job.creditBalanceBefore = job.creditBalanceBefore ?? await captureCreditBalanceSnapshot();
+    job.creditBalanceBefore = job.creditBalanceBefore ?? (await captureCreditBalanceSnapshot());
     if (job.creditBalanceBefore) {
       await persistUpsert(job);
     }
@@ -1329,9 +1336,10 @@ async function captureCreditBalanceSnapshot(): Promise<CreditBalanceSnapshot | u
     return {
       creditsLeft: credits.creditsLeft,
       source: credits.source,
-      capturedAt: credits.updatedAt && Number.isFinite(new Date(credits.updatedAt).getTime())
-        ? credits.updatedAt
-        : new Date().toISOString(),
+      capturedAt:
+        credits.updatedAt && Number.isFinite(new Date(credits.updatedAt).getTime())
+          ? credits.updatedAt
+          : new Date().toISOString(),
     };
   } catch (error) {
     console.warn(`Could not capture credit balance snapshot: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -1614,12 +1622,7 @@ export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) 
   }
 }
 
-async function downloadRemoteResultMedia(
-  entry: RemoteMediaEntry,
-  outputFolder: string,
-  jobId: string,
-  fetchImpl: typeof fetch,
-) {
+async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: string, jobId: string, fetchImpl: typeof fetch) {
   try {
     const url = new URL(entry.url);
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(120000) });
@@ -1673,7 +1676,7 @@ function getPromptHistory(history: Record<string, unknown>, promptId: string) {
 function comfyHistoryErrorMessage(promptHistory: Record<string, any>) {
   const messages = Array.isArray(promptHistory.status?.messages) ? promptHistory.status.messages : [];
   const executionError = messages
-    .map((message: unknown) => Array.isArray(message) ? message : undefined)
+    .map((message: unknown) => (Array.isArray(message) ? message : undefined))
     .find((message: unknown[] | undefined) => message?.[0] === "execution_error")?.[1] as Record<string, unknown> | undefined;
 
   const nodeType = typeof executionError?.node_type === "string" ? executionError.node_type : "ComfyUI node";
@@ -1710,9 +1713,7 @@ export function chooseRunpodImageInputNames(inputImages: string[], jobId: string
   return inputImages.map((value, index) => {
     const expectedName = expectedNames?.[index]?.trim();
     const fallbackName = fallbackRunpodImageName(value, jobId, index);
-    const preferredName = expectedName && !usedNames.has(runpodInputNameKey(expectedName))
-      ? expectedName
-      : fallbackName;
+    const preferredName = expectedName && !usedNames.has(runpodInputNameKey(expectedName)) ? expectedName : fallbackName;
 
     return uniqueRunpodInputName(preferredName, usedNames);
   });
@@ -1742,13 +1743,11 @@ async function materializeRunpodInputVideo(job: Job, model: WorkflowModel, input
   const expectedNames = await detectWorkflowLoadVideoNames(model);
   const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
   const filePath = localMediaFilePathFromUrl(job.inputVideo);
-  const preparedFilePath = filePath
-    ? await prepareRunpodVideoFile(filePath, inputFolder, model)
-    : undefined;
+  const preparedFilePath = filePath ? await prepareRunpodVideoFile(filePath, inputFolder, model) : undefined;
   return {
-    videos: [preparedFilePath
-      ? await runpodFileInput(preparedFilePath, name, "video")
-      : await runpodVideoInput(job.inputVideo, name)],
+    videos: [
+      preparedFilePath ? await runpodFileInput(preparedFilePath, name, "video") : await runpodVideoInput(job.inputVideo, name),
+    ],
     videoName: name,
   };
 }
@@ -1781,7 +1780,12 @@ async function runpodVideoInput(value: string, name: string): Promise<RunpodComf
   throw new Error("RunPod video inputs must be saved media, browser data URLs, or public http(s) URLs.");
 }
 
-async function runpodFileInput(filePath: string, name: string, kind: RunpodInputKind, inlineImageMaxBytes?: number): Promise<RunpodComfyImageInput> {
+async function runpodFileInput(
+  filePath: string,
+  name: string,
+  kind: RunpodInputKind,
+  inlineImageMaxBytes?: number,
+): Promise<RunpodComfyImageInput> {
   const signedUrl = createRunpodInputUrl(filePath, kind);
   if (signedUrl) {
     return { name, url: signedUrl };
@@ -1886,7 +1890,9 @@ function inferInputType(request: CreateJobRequest): Job["inputType"] {
 }
 
 function normalizeEditableSaveNumber(value: unknown) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   if (!digits) {
     throw new Error("Shot/camera number is required.");
   }
@@ -1915,9 +1921,8 @@ async function uploadLocalMediaToComfy(serverUrl: string, filePath: string, file
   const extension = path.extname(filePath) || (kind === "image" ? ".png" : ".mp4");
   const filename = `${safeSegment(fileBase)}${extension}`;
   const file = new Blob([await fs.readFile(filePath)], { type: mimeTypeFromMediaPath(filePath, kind) });
-  const uploaded = kind === "image"
-    ? await uploadImage(serverUrl, file, filename)
-    : await uploadInputFile(serverUrl, file, filename);
+  const uploaded =
+    kind === "image" ? await uploadImage(serverUrl, file, filename) : await uploadInputFile(serverUrl, file, filename);
   const uploadedName = uploaded.name || filename;
   return uploaded.subfolder ? `${uploaded.subfolder}/${uploadedName}` : uploadedName;
 }
@@ -2234,9 +2239,7 @@ function reconcileActualCreditsForStoredJobs() {
 }
 
 async function runCreditReconcile() {
-  const promptIds = jobs
-    .map((job) => job.comfyPromptId)
-    .filter((value): value is string => Boolean(value));
+  const promptIds = jobs.map((job) => job.comfyPromptId).filter((value): value is string => Boolean(value));
   if (!promptIds.length) return;
 
   const actualCredits = await getActualCreditsByPromptIds(promptIds);

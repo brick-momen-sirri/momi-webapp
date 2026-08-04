@@ -48,16 +48,13 @@ export async function runKlingPromptWorkflow({
   }
 
   const skillInstructions = await loadKlingSkillInstructions();
-  const workflow = prepareKlingPromptWorkflow(
-    JSON.parse(await fs.readFile(klingPromptWorkflowPath, "utf8")),
-    {
-      prompt: cleanPrompt,
-      cameraPrompt,
-      imageNames: images.map((image) => image.name),
-      model: klingPromptOpenAIModel,
-      skillInstructions,
-    },
-  );
+  const workflow = prepareKlingPromptWorkflow(JSON.parse(await fs.readFile(klingPromptWorkflowPath, "utf8")), {
+    prompt: cleanPrompt,
+    cameraPrompt,
+    imageNames: images.map((image) => image.name),
+    model: klingPromptOpenAIModel,
+    skillInstructions,
+  });
 
   const endBillableOperation = beginRunpodBillableOperation();
   try {
@@ -198,7 +195,12 @@ export function prepareKlingPromptWorkflow(
 }
 
 function nextPromptNodeId(prompt: Record<string, any>) {
-  const maxId = Math.max(0, ...Object.keys(prompt).map((key) => Number(key)).filter((value) => Number.isFinite(value)));
+  const maxId = Math.max(
+    0,
+    ...Object.keys(prompt)
+      .map((key) => Number(key))
+      .filter((value) => Number.isFinite(value)),
+  );
   let next = maxId + 1;
   while (prompt[String(next)]) next += 1;
   return String(next);
@@ -258,7 +260,9 @@ function cloneJson<T>(value: T): T {
 }
 
 function nodeClassType(node: any) {
-  return String(node?.class_type ?? "").trim().toLowerCase();
+  return String(node?.class_type ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function isKlingPromptSaveNode(node: any) {

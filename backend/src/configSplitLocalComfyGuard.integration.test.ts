@@ -10,8 +10,5 @@ process.env.GENERATION_BACKEND = "local_comfy";
 const { validateRuntimeConfigForStartup } = await import("./config.js");
 
 test("split roles refuse the process-local Comfy pool", () => {
-  assert.throws(
-    () => validateRuntimeConfigForStartup(),
-    /does not support GENERATION_BACKEND=local_comfy/,
-  );
+  assert.throws(() => validateRuntimeConfigForStartup(), /does not support GENERATION_BACKEND=local_comfy/);
 });

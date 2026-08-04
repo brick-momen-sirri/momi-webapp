@@ -13,11 +13,7 @@ const VIDEO_PREPROCESS_TIMEOUT_MS = 15 * 60_000;
 
 type VideoModel = Pick<WorkflowModel, "id" | "name" | "workflowPath">;
 
-export async function prepareRunpodVideoFile(
-  sourcePath: string,
-  outputFolder: string,
-  model: VideoModel,
-) {
+export async function prepareRunpodVideoFile(sourcePath: string, outputFolder: string, model: VideoModel) {
   const isKlingO3 = isKlingO3VideoEditModel(model);
   const isSeedance2Reference = isSeedance2ReferenceVideoModel(model);
   if (!isKlingO3 && !isSeedance2Reference) return sourcePath;
@@ -28,18 +24,12 @@ export async function prepareRunpodVideoFile(
   const targetResolution = isKlingO3
     ? normalizedKlingVideoDimensions(sourceResolution)
     : normalizedSeedance2ReferenceVideoDimensions(sourceResolution);
-  if (
-    targetResolution.width === sourceResolution.width
-    && targetResolution.height === sourceResolution.height
-  ) {
+  if (targetResolution.width === sourceResolution.width && targetResolution.height === sourceResolution.height) {
     return sourcePath;
   }
 
   await fs.mkdir(outputFolder, { recursive: true });
-  const outputPath = path.join(
-    outputFolder,
-    isKlingO3 ? "runpod_kling_o3_input.mp4" : "runpod_seedance_2_reference_input.mp4",
-  );
+  const outputPath = path.join(outputFolder, isKlingO3 ? "runpod_kling_o3_input.mp4" : "runpod_seedance_2_reference_input.mp4");
   const temporaryPath = `${outputPath}.${process.pid}.${Date.now()}.part.mp4`;
   const ffmpegPath = process.env.FFMPEG_PATH?.trim() || "ffmpeg";
 
@@ -49,18 +39,30 @@ export async function prepareRunpodVideoFile(
       [
         "-y",
         "-hide_banner",
-        "-loglevel", "error",
-        "-i", sourcePath,
-        "-map", "0:v:0",
-        "-map", "0:a?",
-        "-vf", `scale=${targetResolution.width}:${targetResolution.height}`,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "18",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-movflags", "+faststart",
+        "-loglevel",
+        "error",
+        "-i",
+        sourcePath,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-vf",
+        `scale=${targetResolution.width}:${targetResolution.height}`,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
         temporaryPath,
       ],
       {
@@ -72,9 +74,9 @@ export async function prepareRunpodVideoFile(
 
     const processedResolution = await detectMediaResolution(temporaryPath, "video");
     if (
-      !processedResolution
-      || processedResolution.width !== targetResolution.width
-      || processedResolution.height !== targetResolution.height
+      !processedResolution ||
+      processedResolution.width !== targetResolution.width ||
+      processedResolution.height !== targetResolution.height
     ) {
       throw new Error("FFmpeg produced an unexpected video resolution.");
     }
@@ -82,9 +84,9 @@ export async function prepareRunpodVideoFile(
     await fs.rm(outputPath, { force: true });
     await fs.rename(temporaryPath, outputPath);
     console.info(
-      `[runpod] Normalized ${isKlingO3 ? "Kling O3" : "Seedance 2.0 reference"} input video `
-      + `from ${sourceResolution.width}x${sourceResolution.height} `
-      + `to ${targetResolution.width}x${targetResolution.height}.`,
+      `[runpod] Normalized ${isKlingO3 ? "Kling O3" : "Seedance 2.0 reference"} input video ` +
+        `from ${sourceResolution.width}x${sourceResolution.height} ` +
+        `to ${targetResolution.width}x${targetResolution.height}.`,
     );
     return outputPath;
   } catch (error) {
@@ -99,23 +101,21 @@ export async function prepareRunpodVideoFile(
 
 export function isKlingO3VideoEditModel(model: VideoModel) {
   const key = `${model.id} ${model.name} ${model.workflowPath}`.toLowerCase();
-  return key.includes("kling")
-    && (key.includes("o3") || key.includes("omni"))
-    && (key.includes("video_edit") || key.includes("video edit"));
+  return (
+    key.includes("kling") &&
+    (key.includes("o3") || key.includes("omni")) &&
+    (key.includes("video_edit") || key.includes("video edit"))
+  );
 }
 
 export function isSeedance2ReferenceVideoModel(model: VideoModel) {
   const key = `${model.id} ${model.name} ${model.workflowPath}`.toLowerCase();
   const isSeedance2 = key.includes("seedance2") || key.includes("seedance 2");
-  const isReferenceVideo = key.includes("r2v")
-    || key.includes("reference_to_video")
-    || key.includes("reference to video");
+  const isReferenceVideo = key.includes("r2v") || key.includes("reference_to_video") || key.includes("reference to video");
   return isSeedance2 && isReferenceVideo;
 }
 
-export function normalizedSeedance2ReferenceVideoDimensions(
-  resolution: Pick<Resolution, "width" | "height">,
-) {
+export function normalizedSeedance2ReferenceVideoDimensions(resolution: Pick<Resolution, "width" | "height">) {
   const { width, height } = resolution;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error("Input video dimensions are invalid.");
@@ -152,10 +152,7 @@ export function normalizedKlingVideoDimensions(resolution: Pick<Resolution, "wid
   const scaledWidth = width * scale;
   const scaledHeight = height * scale;
   if (scaledWidth < KLING_VIDEO_MIN_DIMENSION || scaledHeight < KLING_VIDEO_MIN_DIMENSION) {
-    scale *= Math.max(
-      KLING_VIDEO_MIN_DIMENSION / scaledWidth,
-      KLING_VIDEO_MIN_DIMENSION / scaledHeight,
-    );
+    scale *= Math.max(KLING_VIDEO_MIN_DIMENSION / scaledWidth, KLING_VIDEO_MIN_DIMENSION / scaledHeight);
   }
 
   const target = {
@@ -163,14 +160,14 @@ export function normalizedKlingVideoDimensions(resolution: Pick<Resolution, "wid
     height: evenDimension(height * scale),
   };
   if (
-    target.width < KLING_VIDEO_MIN_DIMENSION
-    || target.height < KLING_VIDEO_MIN_DIMENSION
-    || target.width > KLING_VIDEO_MAX_DIMENSION
-    || target.height > KLING_VIDEO_MAX_DIMENSION
+    target.width < KLING_VIDEO_MIN_DIMENSION ||
+    target.height < KLING_VIDEO_MIN_DIMENSION ||
+    target.width > KLING_VIDEO_MAX_DIMENSION ||
+    target.height > KLING_VIDEO_MAX_DIMENSION
   ) {
     throw new Error(
-      `Video aspect ratio cannot fit within Kling O3's ${KLING_VIDEO_MIN_DIMENSION}–`
-      + `${KLING_VIDEO_MAX_DIMENSION}px dimension limits without cropping.`,
+      `Video aspect ratio cannot fit within Kling O3's ${KLING_VIDEO_MIN_DIMENSION}–` +
+        `${KLING_VIDEO_MAX_DIMENSION}px dimension limits without cropping.`,
     );
   }
   return target;

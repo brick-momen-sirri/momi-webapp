@@ -100,15 +100,15 @@ function seedanceCreditRange(key: string, durationSeconds: number, resolution: s
   const pricePer1k = seedancePricePer1k(key, normalizedResolution, hasVideoInput);
 
   if (hasVideoInput) {
-    const minVideoUnits = Math.ceil(durationSeconds * 5 / 3);
+    const minVideoUnits = Math.ceil((durationSeconds * 5) / 3);
     const maxVideoUnits = 15 + durationSeconds;
     return {
-      minCredits: roundCredits(creditsFromUsd(minVideoUnits * tokensPerSecond * pricePer1k / 1000)),
-      maxCredits: roundCredits(creditsFromUsd(maxVideoUnits * tokensPerSecond * pricePer1k / 1000)),
+      minCredits: roundCredits(creditsFromUsd((minVideoUnits * tokensPerSecond * pricePer1k) / 1000)),
+      maxCredits: roundCredits(creditsFromUsd((maxVideoUnits * tokensPerSecond * pricePer1k) / 1000)),
     };
   }
 
-  const credits = roundCredits(creditsFromUsd(durationSeconds * tokensPerSecond * pricePer1k / 1000));
+  const credits = roundCredits(creditsFromUsd((durationSeconds * tokensPerSecond * pricePer1k) / 1000));
   return {
     minCredits: credits,
     maxCredits: credits,
@@ -116,11 +116,13 @@ function seedanceCreditRange(key: string, durationSeconds: number, resolution: s
 }
 
 function seedanceHasVideoInput(key: string) {
-  return key.includes("r2v")
-    || key.includes("video_edit")
-    || key.includes("video editing")
-    || key.includes("reference_videos")
-    || key.includes("video-to-video");
+  return (
+    key.includes("r2v") ||
+    key.includes("video_edit") ||
+    key.includes("video editing") ||
+    key.includes("reference_videos") ||
+    key.includes("video-to-video")
+  );
 }
 
 function seedanceTokensPerSecond(resolution: string) {
@@ -171,7 +173,7 @@ function veo3CreditsPerSecond(key: string, resolution: string) {
   const hasAudio = false;
 
   if (key.includes("lite")) {
-    return creditsFromUsd(normalizedResolution === "1080p" ? (hasAudio ? 0.08 : 0.05) : (hasAudio ? 0.05 : 0.03));
+    return creditsFromUsd(normalizedResolution === "1080p" ? (hasAudio ? 0.08 : 0.05) : hasAudio ? 0.05 : 0.03);
   }
   if (key.includes("fast")) {
     if (normalizedResolution === "4k") return creditsFromUsd(hasAudio ? 0.3 : 0.25);

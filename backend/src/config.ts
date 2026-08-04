@@ -11,13 +11,13 @@ export const workspaceRoot = path.resolve(backendRoot, "..");
 export const PORT = Number(process.env.PORT ?? 3333);
 export const HOST = process.env.HOST ?? "127.0.0.1";
 
-export const comfyServers = (process.env.COMFY_SERVERS?.split(",").map((url) => url.trim()).filter(Boolean) ?? [
-  ...Array.from({ length: 20 }, (_, index) => `http://127.0.0.1:${8201 + index}`),
-]).map((url) => url.replace(/\/$/, ""));
+export const comfyServers = (
+  process.env.COMFY_SERVERS?.split(",")
+    .map((url) => url.trim())
+    .filter(Boolean) ?? [...Array.from({ length: 20 }, (_, index) => `http://127.0.0.1:${8201 + index}`)]
+).map((url) => url.replace(/\/$/, ""));
 
-export const comfyRoot =
-  process.env.COMFY_ROOT ??
-  "C:\\ComfyUI_windows_portable_nvidia_cu128\\ComfyUI_windows_portable\\ComfyUI";
+export const comfyRoot = process.env.COMFY_ROOT ?? "C:\\ComfyUI_windows_portable_nvidia_cu128\\ComfyUI_windows_portable\\ComfyUI";
 export const comfyPoolRoot = process.env.COMFY_POOL_ROOT ?? "C:\\Comfy_pool";
 
 export const generationBackend = process.env.GENERATION_BACKEND === "local_comfy" ? "local_comfy" : "runpod";
@@ -31,7 +31,9 @@ const legacyComfyWorkflowRoots = [
   path.join(comfyRoot, "custom_nodes", "Brick_video_editing_workflow", "example_workflows"),
 ];
 export const workflowRoots = process.env.WORKFLOW_ROOTS
-  ? process.env.WORKFLOW_ROOTS.split(";").map((item) => item.trim()).filter(Boolean)
+  ? process.env.WORKFLOW_ROOTS.split(";")
+      .map((item) => item.trim())
+      .filter(Boolean)
   : localComfyEnabled
     ? legacyComfyWorkflowRoots
     : [serverlessWorkflowRoot];
@@ -62,8 +64,9 @@ export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(
 // instead of the debounced whole-array replaceAll. Only meaningful with the
 // SQLite driver. Off by default — this is dormant prep for the topology split
 // and must be load-tested before it is relied on. See docs/web-worker-split.md.
-export const jobRowLevelWrites = jobStoreDriver === "sqlite"
-  && ["1", "true", "yes", "on"].includes((process.env.JOBS_ROW_LEVEL_WRITES ?? "").trim().toLowerCase());
+export const jobRowLevelWrites =
+  jobStoreDriver === "sqlite" &&
+  ["1", "true", "yes", "on"].includes((process.env.JOBS_ROW_LEVEL_WRITES ?? "").trim().toLowerCase());
 // Stage D dispatcher coordination. These defaults keep lease writes infrequent
 // while ensuring a standby notices new queue work within half a second.
 export const dispatcherPollIntervalMs = positiveNumber(process.env.DISPATCHER_POLL_INTERVAL_MS, 350);
@@ -72,11 +75,12 @@ export const dispatcherLeaseHeartbeatMs = Math.min(
   positiveNumber(process.env.DISPATCHER_LEASE_HEARTBEAT_MS, 5_000),
   Math.max(100, Math.floor(dispatcherLeaseTtlMs / 2)),
 );
-export const dispatcherWalCheckpointMs = process.env.DISPATCHER_WAL_CHECKPOINT_MS?.trim() === "0"
-  ? 0
-  : positiveNumber(process.env.DISPATCHER_WAL_CHECKPOINT_MS, 30_000);
-export const archivedItemsStorePath = process.env.JOBS_ARCHIVED_PATH?.trim() || path.join(backendRoot, "data", "archived-items.json");
-export const archivedItemsSqlitePath = process.env.JOBS_ARCHIVED_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "archived-items.sqlite");
+export const dispatcherWalCheckpointMs =
+  process.env.DISPATCHER_WAL_CHECKPOINT_MS?.trim() === "0" ? 0 : positiveNumber(process.env.DISPATCHER_WAL_CHECKPOINT_MS, 30_000);
+export const archivedItemsStorePath =
+  process.env.JOBS_ARCHIVED_PATH?.trim() || path.join(backendRoot, "data", "archived-items.json");
+export const archivedItemsSqlitePath =
+  process.env.JOBS_ARCHIVED_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "archived-items.sqlite");
 export const projectsStorePath = process.env.PROJECTS_STORE_PATH?.trim() || path.join(backendRoot, "data", "projects.json");
 export const usersStorePath = process.env.USERS_STORE_PATH?.trim() || path.join(backendRoot, "data", "users.json");
 export const sessionsStorePath = process.env.SESSIONS_STORE_PATH?.trim() || path.join(backendRoot, "data", "sessions.json");
@@ -84,8 +88,7 @@ export const sessionsStorePath = process.env.SESSIONS_STORE_PATH?.trim() || path
 // the default and migration source until this flag is deliberately enabled.
 export const appStateDriver: "json" | "sqlite" =
   (process.env.APP_STATE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
-export const appStateSqlitePath = process.env.APP_STATE_SQLITE_PATH?.trim()
-  || path.join(backendRoot, "data", "app-state.sqlite");
+export const appStateSqlitePath = process.env.APP_STATE_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "app-state.sqlite");
 export const initialAdminPath = process.env.INITIAL_ADMIN_PATH?.trim() || path.join(backendRoot, "data", "initial-admin.txt");
 
 export const authSessionDays = Number(process.env.AUTH_SESSION_DAYS ?? 14);
@@ -116,7 +119,9 @@ export const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
 // is opened at localhost:8190, over the LAN, and from the credit portal, and
 // enumerating those ports would break the first time one moves.
 export const corsAllowPrivateOrigins = !["0", "false", "no", "off"].includes(
-  String(process.env.CORS_ALLOW_PRIVATE_ORIGINS ?? "true").trim().toLowerCase(),
+  String(process.env.CORS_ALLOW_PRIVATE_ORIGINS ?? "true")
+    .trim()
+    .toLowerCase(),
 );
 
 export const runpodEndpointId = process.env.RUNPOD_ENDPOINT_ID?.trim() ?? "";
@@ -128,23 +133,24 @@ export const runpodEndpointBaseUrl =
 export const runpodEndpointUrl =
   process.env.RUNPOD_ENDPOINT_URL?.replace(/\/$/, "") ??
   (runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/${runpodSubmissionMode === "async" ? "run" : "runsync"}` : "");
-export const runpodStatusUrl = (jobId: string) =>
-  `${runpodEndpointBaseUrl}/status/${encodeURIComponent(jobId)}`;
-export const runpodCancelUrl = (jobId: string) =>
-  `${runpodEndpointBaseUrl}/cancel/${encodeURIComponent(jobId)}`;
+export const runpodStatusUrl = (jobId: string) => `${runpodEndpointBaseUrl}/status/${encodeURIComponent(jobId)}`;
+export const runpodCancelUrl = (jobId: string) => `${runpodEndpointBaseUrl}/cancel/${encodeURIComponent(jobId)}`;
 export const runpodHealthUrl = runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/health` : "";
 export const runpodApiKey = process.env.RUNPOD_API_KEY?.trim() ?? "";
 export const comfyOrgApiKey = process.env.COMFY_ORG_API_KEY?.trim() ?? "";
 export const runpodPollIntervalMs = positiveNumber(process.env.RUNPOD_POLL_INTERVAL_MS, 5000);
 export const runpodTimeoutMs = positiveNumber(process.env.RUNPOD_TIMEOUT_MS, 2_400_000);
-export const runpodInputBaseUrl =
-  (process.env.RUNPOD_INPUT_BASE_URL ?? process.env.PUBLIC_API_BASE_URL ?? "").trim().replace(/\/$/, "");
+export const runpodInputBaseUrl = (process.env.RUNPOD_INPUT_BASE_URL ?? process.env.PUBLIC_API_BASE_URL ?? "")
+  .trim()
+  .replace(/\/$/, "");
 export const runpodInputTokenSecret = (process.env.RUNPOD_INPUT_URL_SECRET ?? runpodApiKey).trim();
 export const runpodInputUrlTtlMs = positiveNumber(process.env.RUNPOD_INPUT_URL_TTL_MS, runpodTimeoutMs + 15 * 60_000);
 export const runpodInlineMediaMaxBytes = positiveNumber(process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES, 6 * 1024 * 1024);
 export const runpodRequestBodyMaxBytes = positiveNumber(process.env.RUNPOD_REQUEST_BODY_MAX_BYTES, 9 * 1024 * 1024);
 export const runpodInlineImageAutoCompress = !["0", "false", "no", "off"].includes(
-  String(process.env.RUNPOD_INLINE_IMAGE_AUTO_COMPRESS ?? "true").trim().toLowerCase(),
+  String(process.env.RUNPOD_INLINE_IMAGE_AUTO_COMPRESS ?? "true")
+    .trim()
+    .toLowerCase(),
 );
 export const runpodInlineImageMaxDimension = positiveNumber(process.env.RUNPOD_INLINE_IMAGE_MAX_DIMENSION, 4096);
 export const runpodInlineImageMinQuality = boundedNumber(process.env.RUNPOD_INLINE_IMAGE_MIN_QUALITY, 55, 20, 95);
@@ -152,12 +158,19 @@ export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX
 export const runpodTextOutputMaxBytes = Math.max(1024, positiveNumber(process.env.RUNPOD_TEXT_OUTPUT_MAX_BYTES, 1024 * 1024));
 // Retries downloading completed results whose media is still on a remote URL
 // (e.g. after a failed persist). "0" disables the periodic pass.
-export const resultRecoveryIntervalMs = process.env.RESULT_RECOVERY_INTERVAL_MS?.trim() === "0"
-  ? 0
-  : positiveNumber(process.env.RESULT_RECOVERY_INTERVAL_MS, 10 * 60 * 1000);
-export const runpodDebug = ["1", "true", "yes", "on"].includes(String(process.env.RUNPOD_DEBUG ?? "").trim().toLowerCase());
+export const resultRecoveryIntervalMs =
+  process.env.RESULT_RECOVERY_INTERVAL_MS?.trim() === "0"
+    ? 0
+    : positiveNumber(process.env.RESULT_RECOVERY_INTERVAL_MS, 10 * 60 * 1000);
+export const runpodDebug = ["1", "true", "yes", "on"].includes(
+  String(process.env.RUNPOD_DEBUG ?? "")
+    .trim()
+    .toLowerCase(),
+);
 export const creditBalanceDeltaAccountingEnabled = ["1", "true", "yes", "on", "exclusive"].includes(
-  String(process.env.CREDIT_BALANCE_DELTA_ACCOUNTING ?? "").trim().toLowerCase(),
+  String(process.env.CREDIT_BALANCE_DELTA_ACCOUNTING ?? "")
+    .trim()
+    .toLowerCase(),
 );
 export const mediaUploadMaxBytes = positiveNumber(process.env.MEDIA_UPLOAD_MAX_BYTES, 1024 * 1024 * 1024);
 export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
@@ -171,9 +184,12 @@ export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
 export const thumbnailCacheDir = process.env.THUMBNAIL_CACHE_DIR?.trim() || path.join(backendRoot, "data", "thumbnail-cache");
 // Whitelisted widths. Requests for anything else snap to the nearest allowed
 // width, so an arbitrary ?w= cannot fan the cache out to unbounded variants.
-export const thumbnailWidths = (process.env.THUMBNAIL_WIDTHS?.trim()
-  ? process.env.THUMBNAIL_WIDTHS.split(",").map((value) => Math.floor(Number(value.trim()))).filter((value) => Number.isFinite(value) && value >= 32 && value <= 4096)
-  : [240, 480, 960, 1440]
+export const thumbnailWidths = (
+  process.env.THUMBNAIL_WIDTHS?.trim()
+    ? process.env.THUMBNAIL_WIDTHS.split(",")
+        .map((value) => Math.floor(Number(value.trim())))
+        .filter((value) => Number.isFinite(value) && value >= 32 && value <= 4096)
+    : [240, 480, 960, 1440]
 ).sort((left, right) => left - right);
 export const thumbnailQuality = boundedNumber(process.env.THUMBNAIL_QUALITY, 72, 20, 95);
 // Sharp is multithreaded internally, so keep per-process concurrency modest;
@@ -231,7 +247,9 @@ export const alertWebhookFormat: "json" | "slack" =
 // arrive from 127.0.0.1 -- set a token AND OPS_ALLOW_LOOPBACK=false in that case.
 export const opsAccessToken = process.env.OPS_ACCESS_TOKEN?.trim() || "";
 export const opsAllowLoopback = !["0", "false", "no", "off"].includes(
-  String(process.env.OPS_ALLOW_LOOPBACK ?? "true").trim().toLowerCase(),
+  String(process.env.OPS_ALLOW_LOOPBACK ?? "true")
+    .trim()
+    .toLowerCase(),
 );
 
 // --- SQLite disaster recovery ---
@@ -239,7 +257,11 @@ export const opsAllowLoopback = !["0", "false", "no", "off"].includes(
 // against corruption/accidental deletion. Real DR requires shipping snapshots
 // offsite; set BACKUP_AZURE_SAS_URL (a container SAS URL) to enable that leg.
 // Off by default: no backups run until a driver actually needs them.
-export const backupEnabled = ["1", "true", "yes", "on"].includes(String(process.env.SQLITE_BACKUP_ENABLED ?? "").trim().toLowerCase());
+export const backupEnabled = ["1", "true", "yes", "on"].includes(
+  String(process.env.SQLITE_BACKUP_ENABLED ?? "")
+    .trim()
+    .toLowerCase(),
+);
 export const backupIntervalMs = positiveNumber(process.env.SQLITE_BACKUP_INTERVAL_MS, 60 * 60 * 1000);
 export const backupRetentionCount = Math.max(1, Math.floor(positiveNumber(process.env.SQLITE_BACKUP_RETENTION_COUNT, 48)));
 export const backupStagingDir = process.env.SQLITE_BACKUP_STAGING_DIR?.trim() || path.join(backendRoot, "data", "backups");
@@ -251,7 +273,9 @@ export const azcopyPath = process.env.AZCOPY_PATH?.trim() || "azcopy";
 
 export function validateRuntimeConfigForStartup() {
   if (corsAllowedOrigins.includes("*")) {
-    console.warn("CORS_ALLOWED_ORIGINS=* reflects any browser origin. This is an emergency rollback setting, not a configuration.");
+    console.warn(
+      "CORS_ALLOWED_ORIGINS=* reflects any browser origin. This is an emergency rollback setting, not a configuration.",
+    );
   }
   if (opsAccessToken && opsAllowLoopback) {
     console.log("Ops endpoints: loopback trusted, OPS_ACCESS_TOKEN accepted from remote callers.");
@@ -271,7 +295,9 @@ export function validateRuntimeConfigForStartup() {
     throw new Error("ROLE=dispatcher/api requires CREDIT_BALANCE_DELTA_ACCOUNTING to remain disabled.");
   }
   if (backendProcessRole !== "monolith" && generationBackend === "runpod" && runpodSubmissionMode !== "async") {
-    throw new Error("ROLE=dispatcher/api requires RUNPOD_SUBMISSION_MODE=async so acknowledged RunPod jobs can resume after dispatcher failover.");
+    throw new Error(
+      "ROLE=dispatcher/api requires RUNPOD_SUBMISSION_MODE=async so acknowledged RunPod jobs can resume after dispatcher failover.",
+    );
   }
   if (generationBackend !== "runpod") return;
   const missing = missingRunpodEnvVars();

@@ -13,9 +13,7 @@ export type AuthUser = User & {
   lastLoginAt?: string;
 };
 
-export type AuthResult =
-  | { ok: true; account: AuthUser; token?: string }
-  | { ok: false; error: string };
+export type AuthResult = { ok: true; account: AuthUser; token?: string } | { ok: false; error: string };
 
 type BackendWorkflowModel = {
   id: string;
@@ -296,14 +294,7 @@ export type ComfyServer = {
   errorMessage?: string;
 };
 
-export type ComfyPoolAction =
-  | "start"
-  | "stop"
-  | "restart"
-  | "start-safe"
-  | "start-all"
-  | "stop-all"
-  | "open-manager";
+export type ComfyPoolAction = "start" | "stop" | "restart" | "start-safe" | "start-all" | "stop-all" | "open-manager";
 
 export type ComfyPoolActionResult = {
   ok: true;
@@ -384,7 +375,9 @@ export async function logoutBackend() {
   }
 }
 
-export async function updateBackendProfile(updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string }): Promise<AuthResult> {
+export async function updateBackendProfile(
+  updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string },
+): Promise<AuthResult> {
   try {
     const data = await api<{ user: AuthUser }>("/api/auth/me", {
       method: "PATCH",
@@ -449,7 +442,10 @@ export async function createBackendUser(payload: {
   return mapUser(data.user);
 }
 
-export async function updateBackendUser(userId: string, payload: Partial<Pick<AuthUser, "name" | "email" | "role" | "active" | "avatarColor">>) {
+export async function updateBackendUser(
+  userId: string,
+  payload: Partial<Pick<AuthUser, "name" | "email" | "role" | "active" | "avatarColor">>,
+) {
   const data = await api<{ user: AuthUser }>(`/api/users/${encodeURIComponent(userId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -563,7 +559,9 @@ export async function fetchBackendJobs(params: FetchBackendJobsParams = {}): Pro
 }
 
 export async function fetchBackendCredits() {
-  return api<{ creditsLeft: number | null; creditsUsed?: number; currency?: string; updatedAt?: string; source: string }>("/api/credits");
+  return api<{ creditsLeft: number | null; creditsUsed?: number; currency?: string; updatedAt?: string; source: string }>(
+    "/api/credits",
+  );
 }
 
 export async function fetchBackendMonthlyUsage() {
@@ -655,7 +653,7 @@ export async function uploadBackendMedia(media: Blob, options: { projectId: stri
   if (!res.ok) {
     throw new Error(await errorMessageFromResponse(res));
   }
-  const data = await res.json() as { url: string };
+  const data = (await res.json()) as { url: string };
   return data.url;
 }
 
@@ -784,7 +782,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function errorMessageFromResponse(res: Response) {
   try {
-    const data = await res.json() as { error?: string };
+    const data = (await res.json()) as { error?: string };
     if (data.error) return data.error;
   } catch {
     // Fall back to the status text below.
@@ -824,17 +822,7 @@ function supportedResolutionsForModel(model: BackendWorkflowModel) {
     return ["1K", "2K", "4K"];
   }
   if ((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid")) {
-    return [
-      "auto",
-      "1024x1024",
-      "1024x1536",
-      "1536x1024",
-      "2048x2048",
-      "2048x1152",
-      "1152x2048",
-      "3840x2160",
-      "2160x3840",
-    ];
+    return ["auto", "1024x1024", "1024x1536", "1536x1024", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840"];
   }
   if (key.includes("kling") && key.includes("video_edit")) {
     return ["720p", "1080p"];
@@ -935,7 +923,13 @@ function mapJob(job: BackendJob): Job {
     hasUnsavedRemoteMedia,
     archivedAt: job.archivedAt,
     archivedBy: job.archivedBy,
-    videoLength: job.durationSeconds ? `${job.durationSeconds} seconds` : job.outputType === "video" ? "Backend video" : job.outputType === "sequence" ? "Image sequence" : undefined,
+    videoLength: job.durationSeconds
+      ? `${job.durationSeconds} seconds`
+      : job.outputType === "video"
+        ? "Backend video"
+        : job.outputType === "sequence"
+          ? "Image sequence"
+          : undefined,
     creditsUsed: mappedCreditsUsed(job),
     creditUsage: job.creditUsage,
     errorMessage: job.errorMessage,
@@ -952,8 +946,9 @@ function mapJob(job: BackendJob): Job {
 // re-downloads it (or its signed URL expires).
 function jobHasUnsavedRemoteMedia(job: BackendJob) {
   if (job.status !== "completed") return false;
-  return [...(job.resultUrls ?? []), ...(job.thumbnailUrls ?? [])]
-    .some((url) => /^https?:\/\//i.test(url ?? "") && !url.includes("/api/media"));
+  return [...(job.resultUrls ?? []), ...(job.thumbnailUrls ?? [])].some(
+    (url) => /^https?:\/\//i.test(url ?? "") && !url.includes("/api/media"),
+  );
 }
 
 function mappedCreditsUsed(job: BackendJob) {
@@ -963,14 +958,17 @@ function mappedCreditsUsed(job: BackendJob) {
   // because 0 there historically meant "unknown".
   const actualCredits = nonNegativeNumber(job.creditsActual);
   if (actualCredits != null) return actualCredits;
-  if (isCountedCreditUsage(job.creditUsage)) return nonNegativeNumber(job.creditsUsed) ?? nonNegativeNumber(job.creditUsage?.total_estimated_credits);
+  if (isCountedCreditUsage(job.creditUsage))
+    return nonNegativeNumber(job.creditsUsed) ?? nonNegativeNumber(job.creditUsage?.total_estimated_credits);
   if (!job.creditUsage) return positiveNumber(job.creditsUsed);
   return undefined;
 }
 
 function isCountedCreditUsage(creditUsage?: Job["creditUsage"]) {
   const source = (creditUsage?.source ?? "").trim().toLowerCase();
-  return Boolean(creditUsage && source !== "local_kling_estimate" && !(source.startsWith("local_") && source.includes("estimate")));
+  return Boolean(
+    creditUsage && source !== "local_kling_estimate" && !(source.startsWith("local_") && source.includes("estimate")),
+  );
 }
 
 function positiveNumber(value: unknown) {
@@ -1012,17 +1010,21 @@ function mapUser(user: AuthUser): AuthUser {
     displayName: user.displayName ?? user.name,
     avatar: user.avatar ?? initialsFor(user.displayName ?? user.name),
     avatarColor: user.avatarColor ?? "#11b8a5",
-    pinnedProjectIds: Array.isArray(user.pinnedProjectIds) ? user.pinnedProjectIds.filter((item): item is string => typeof item === "string") : [],
+    pinnedProjectIds: Array.isArray(user.pinnedProjectIds)
+      ? user.pinnedProjectIds.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }
 
 function initialsFor(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "US";
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "US"
+  );
 }
 
 function generationTimeForJob(job: BackendJob) {

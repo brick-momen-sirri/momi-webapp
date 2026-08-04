@@ -64,7 +64,11 @@ test("backupOneDatabase captures WAL-resident rows that a plain file copy would 
     const naive = new Database(naiveCopyPath, { readonly: true });
     const naiveRows = naive.prepare("SELECT id FROM items ORDER BY id").all();
     naive.close();
-    assert.deepEqual(naiveRows.map((r) => r.id), [1], "sanity check: naive file copy must miss the WAL-only row");
+    assert.deepEqual(
+      naiveRows.map((r) => r.id),
+      [1],
+      "sanity check: naive file copy must miss the WAL-only row",
+    );
 
     const result = await backupOneDatabase({ name: "jobs", sourcePath }, dir, "label1");
     assert.equal(result.ok, true);
@@ -74,10 +78,14 @@ test("backupOneDatabase captures WAL-resident rows that a plain file copy would 
     const snapshot = new Database(result.snapshotPath!, { readonly: true });
     const rows = snapshot.prepare("SELECT id, value FROM items ORDER BY id").all();
     snapshot.close();
-    assert.deepEqual(rows, [
-      { id: 1, value: "checkpointed" },
-      { id: 2, value: "wal-only" },
-    ], "the online backup must include WAL-only rows the naive copy missed");
+    assert.deepEqual(
+      rows,
+      [
+        { id: 1, value: "checkpointed" },
+        { id: 2, value: "wal-only" },
+      ],
+      "the online backup must include WAL-only rows the naive copy missed",
+    );
 
     // No leftover .tmp file.
     const files = await fs.readdir(dir);
@@ -267,10 +275,7 @@ test("runBackupCycle isolates a malformed target from the rest of the cycle and 
   }
 
   const cycle = await runBackupCycle({
-    targets: [
-      null as unknown as { name: string; sourcePath: string },
-      { name: "good", sourcePath: goodPath },
-    ],
+    targets: [null as unknown as { name: string; sourcePath: string }, { name: "good", sourcePath: goodPath }],
     stagingDir,
     retention: 1,
     label: "fixed-label",
@@ -338,10 +343,7 @@ test("a failing cycle's alert reaches a configured webhook, not just the console
 test("runAzcopy rejects on a timeout instead of hanging forever on a stuck child", async () => {
   const slowScript = "setTimeout(() => {}, 10000);"; // never voluntarily exits within the test's patience
   const startedAt = Date.now();
-  await assert.rejects(
-    runAzcopy(process.execPath, ["-e", slowScript], 300),
-    /timed out after 300ms/,
-  );
+  await assert.rejects(runAzcopy(process.execPath, ["-e", slowScript], 300), /timed out after 300ms/);
   assert.ok(Date.now() - startedAt < 5000, "must reject promptly by killing the child, not by waiting it out");
 });
 

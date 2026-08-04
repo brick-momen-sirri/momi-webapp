@@ -64,16 +64,17 @@ test("dispatcher publishes dirty filesystem media while clean reads stay indexed
 
   externalStore.invalidate();
   await waitForPublishedFiles(["first.png", "second.png"]);
-  assert.deepEqual(
-    (await mediaService.scanExistingMediaJobs()).map((job) => job.fileName).sort(),
-    ["first.png", "second.png"],
-  );
+  assert.deepEqual((await mediaService.scanExistingMediaJobs()).map((job) => job.fileName).sort(), ["first.png", "second.png"]);
 });
 
 async function waitForPublishedFiles(expected: string[]) {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {
-    const names = externalStore?.loadPublishedIfNewer(-1)?.jobs.map((job) => job.fileName).sort() ?? [];
+    const names =
+      externalStore
+        ?.loadPublishedIfNewer(-1)
+        ?.jobs.map((job) => job.fileName)
+        .sort() ?? [];
     if (JSON.stringify(names) === JSON.stringify([...expected].sort())) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }

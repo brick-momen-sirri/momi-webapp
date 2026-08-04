@@ -11,8 +11,5 @@ process.env.APP_STATE_DRIVER = "json";
 const { validateRuntimeConfigForStartup } = await import("./config.js");
 
 test("split roles refuse process-local JSON app state", () => {
-  assert.throws(
-    () => validateRuntimeConfigForStartup(),
-    /APP_STATE_DRIVER=sqlite/,
-  );
+  assert.throws(() => validateRuntimeConfigForStartup(), /APP_STATE_DRIVER=sqlite/);
 });

@@ -42,7 +42,10 @@ export function JobPreview({ job }: JobPreviewProps) {
 
   if (job.status === "failed") {
     return (
-      <div ref={previewRef} className="flex min-h-[260px] w-full items-center justify-center rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 sm:min-h-[360px]">
+      <div
+        ref={previewRef}
+        className="flex min-h-[260px] w-full items-center justify-center rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 sm:min-h-[360px]"
+      >
         <div className="w-full max-w-3xl text-center">
           <AlertTriangle className="mx-auto h-6 w-6" />
           <p className="mt-2 text-sm font-semibold">Generation failed</p>
@@ -58,12 +61,17 @@ export function JobPreview({ job }: JobPreviewProps) {
 
   if (job.status === "queued" || job.status === "sending" || job.status === "running") {
     return (
-      <div ref={previewRef} className="flex min-h-[260px] w-full items-center justify-center rounded-lg border border-line bg-stone-100 sm:min-h-[360px]">
+      <div
+        ref={previewRef}
+        className="flex min-h-[260px] w-full items-center justify-center rounded-lg border border-line bg-stone-100 sm:min-h-[360px]"
+      >
         <div className="w-full max-w-sm px-6 text-center">
           <Loader2 className="mx-auto h-7 w-7 animate-spin text-accent" />
           <p className="mt-3 text-sm font-semibold capitalize">{job.status}</p>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
-            <div className={`h-full rounded-full bg-accent ${job.status === "queued" ? "w-1/4" : job.status === "sending" ? "w-1/2" : "w-2/3"}`} />
+            <div
+              className={`h-full rounded-full bg-accent ${job.status === "queued" ? "w-1/4" : job.status === "sending" ? "w-1/2" : "w-2/3"}`}
+            />
           </div>
         </div>
       </div>
@@ -73,9 +81,7 @@ export function JobPreview({ job }: JobPreviewProps) {
   const result = job.resultUrls?.[0] ?? job.resultUrl ?? job.thumbnailUrls?.[0] ?? job.thumbnailUrl;
   const videoPoster = getVideoPoster(job);
   const isVideoOutput =
-    job.outputType === "video" ||
-    (result ? isVideoUrl(result) : false) ||
-    (job.videoLength ? !job.outputType : false);
+    job.outputType === "video" || (result ? isVideoUrl(result) : false) || (job.videoLength ? !job.outputType : false);
   const isSequenceOutput = job.outputType === "sequence";
   const isImageOutput = !isVideoOutput && !isSequenceOutput;
   const imageResults = isImageOutput ? (job.resultUrls?.length ? job.resultUrls : result ? [result] : []) : [];
@@ -100,9 +106,7 @@ export function JobPreview({ job }: JobPreviewProps) {
     return (
       <div ref={previewRef} className="relative aspect-video w-full overflow-hidden rounded-lg border border-line bg-stone-100">
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
-            Media preview
-          </span>
+          <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">Media preview</span>
         </div>
       </div>
     );
@@ -131,7 +135,10 @@ export function JobPreview({ job }: JobPreviewProps) {
           {imageResults.map((url, index) => {
             const name = resultFileName(job, url, index);
             return (
-              <div key={`${url}:${index}`} className="relative aspect-square overflow-hidden rounded-lg border border-line bg-stone-100">
+              <div
+                key={`${url}:${index}`}
+                className="relative aspect-square overflow-hidden rounded-lg border border-line bg-stone-100"
+              >
                 <img
                   src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
                   alt={name}
@@ -204,9 +211,9 @@ export function JobPreview({ job }: JobPreviewProps) {
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10">
           <span className="pointer-events-none flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-sm font-semibold text-ink shadow-card backdrop-blur">
             <PlayCircle className="h-5 w-5 text-ember" />
-          {job.videoLength}
-        </span>
-      </div>
+            {job.videoLength}
+          </span>
+        </div>
       ) : null}
       {result && isVideoOutput ? (
         <a
@@ -241,13 +248,7 @@ function FullscreenImageButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function FullscreenImagePreview({
-  image,
-  onClose,
-}: {
-  image: { url: string; name: string };
-  onClose: () => void;
-}) {
+function FullscreenImagePreview({ image, onClose }: { image: { url: string; name: string }; onClose: () => void }) {
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {

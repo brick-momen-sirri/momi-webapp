@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  UPLOAD_BASE_NAME_MAX_LENGTH,
-  stripUploadIdPrefixes,
-  uploadedMediaBaseName,
-} from "./uploadedMediaName.js";
+import { UPLOAD_BASE_NAME_MAX_LENGTH, stripUploadIdPrefixes, uploadedMediaBaseName } from "./uploadedMediaName.js";
 
 test("leaves a name with no upload-id prefix alone", () => {
   assert.equal(stripUploadIdPrefixes("CAM_S"), "CAM_S");
@@ -19,13 +15,13 @@ test("strips a single upload-id prefix", () => {
 test("strips every chained prefix, not just the outermost", () => {
   // Reproduces the real production case: six accumulated prefixes.
   const chained =
-    "1785755426495-8844bc9dbef0-"
-    + "1785754786520-0da65897d3ed-"
-    + "1785751640462-4daae6fccac3-"
-    + "1785751324905-ef5f0a4de0a8-"
-    + "1785751050111-5cf7adcd665d-"
-    + "1785750855402-6c338c091e98-"
-    + "CAM_S";
+    "1785755426495-8844bc9dbef0-" +
+    "1785754786520-0da65897d3ed-" +
+    "1785751640462-4daae6fccac3-" +
+    "1785751324905-ef5f0a4de0a8-" +
+    "1785751050111-5cf7adcd665d-" +
+    "1785750855402-6c338c091e98-" +
+    "CAM_S";
   assert.equal(stripUploadIdPrefixes(chained), "CAM_S");
   assert.equal(uploadedMediaBaseName(chained, "image-upload"), "CAM_S");
 });

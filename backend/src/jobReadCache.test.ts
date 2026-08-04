@@ -39,7 +39,10 @@ test("incremental merge prepends inserts and removes tombstoned non-active jobs"
     new Set(),
   );
 
-  assert.deepEqual(merged.map((item) => item.id), ["job_new", "job_existing"]);
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ["job_new", "job_existing"],
+  );
   assert.equal(merged[1], existing);
 });
 

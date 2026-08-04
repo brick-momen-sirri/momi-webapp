@@ -88,7 +88,7 @@ export async function syncServerlessCreditUsage({
         continue;
       }
 
-      const result = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      const result = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
       return {
         ok: result.ok !== false,
         url: baseUrl,
@@ -130,20 +130,15 @@ export function buildCreditTrackerRows(
   });
 
   return rows.map((row, index) => {
-    const estimatedCredits = numberFrom(row.total_estimated_credits) ?? (rows.length === 1 ? creditUsage.total_estimated_credits : 0);
-    const estimatedUsd = numberFrom(row.total_estimated_usd) ?? (creditUsage.total_estimated_usd && rows.length === 1
-      ? creditUsage.total_estimated_usd
-      : estimatedCredits / creditsPerUsd);
+    const estimatedCredits =
+      numberFrom(row.total_estimated_credits) ?? (rows.length === 1 ? creditUsage.total_estimated_credits : 0);
+    const estimatedUsd =
+      numberFrom(row.total_estimated_usd) ??
+      (creditUsage.total_estimated_usd && rows.length === 1 ? creditUsage.total_estimated_usd : estimatedCredits / creditsPerUsd);
     const nodeId = stringFrom(row.node_id) || `runpod_${index + 1}`;
     const classType = stringFrom(row.class_type) || "RunPodServerlessComfy";
     const nodeTitle = stringFrom(row.node_title) || stringFrom(row.class_type) || model.name;
-    const dedupeKey = [
-      "runpod_serverless",
-      job.id,
-      job.runpodJobId ?? "",
-      nodeId,
-      roundCredits(estimatedCredits),
-    ].join("|");
+    const dedupeKey = ["runpod_serverless", job.id, job.runpodJobId ?? "", nodeId, roundCredits(estimatedCredits)].join("|");
 
     return {
       timestamp,
@@ -183,7 +178,12 @@ export function configuredTrackerUrls() {
 }
 
 function csvUrls(value: string | undefined) {
-  return value?.split(",").map((url) => url.trim().replace(/\/$/, "")).filter(Boolean) ?? [];
+  return (
+    value
+      ?.split(",")
+      .map((url) => url.trim().replace(/\/$/, ""))
+      .filter(Boolean) ?? []
+  );
 }
 
 function uniqueUrls(urls: string[]) {

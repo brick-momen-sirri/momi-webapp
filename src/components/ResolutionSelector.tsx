@@ -173,9 +173,7 @@ export function ResolutionSelector({
                   key={count}
                   title={`${count} ${count === 1 ? "image" : "images"}`}
                   className={`flex h-7 min-w-10 items-center justify-center rounded text-xs font-bold transition ${
-                    checked
-                      ? "bg-ink text-white"
-                      : "cursor-pointer text-stone-500 hover:bg-stone-50 hover:text-ink"
+                    checked ? "bg-ink text-white" : "cursor-pointer text-stone-500 hover:bg-stone-50 hover:text-ink"
                   }`}
                 >
                   <input

@@ -47,7 +47,9 @@ export function ProjectList({
             : "border-transparent bg-white text-ink hover:border-line hover:bg-stone-50"
         }`}
       >
-        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${selectedProjectId === "all" ? "bg-white/15" : "bg-mist"}`}>
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${selectedProjectId === "all" ? "bg-white/15" : "bg-mist"}`}
+        >
           <Layers className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1">

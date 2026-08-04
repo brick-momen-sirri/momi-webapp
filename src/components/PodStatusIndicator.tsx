@@ -91,17 +91,7 @@ export function PodStatusIndicator({ status }: PodStatusIndicatorProps) {
   );
 }
 
-function IconStat({
-  icon,
-  value,
-  title,
-  className,
-}: {
-  icon: ReactNode;
-  value: number;
-  title: string;
-  className: string;
-}) {
+function IconStat({ icon, value, title, className }: { icon: ReactNode; value: number; title: string; className: string }) {
   return (
     <div
       className={`flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-md bg-mist/70 px-1.5 text-[11px] font-bold ${className}`}

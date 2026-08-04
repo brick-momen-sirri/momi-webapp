@@ -14,13 +14,8 @@ process.env.THUMBNAIL_WIDTHS = "240,480";
 process.env.THUMBNAIL_PASSTHROUGH_MAX_BYTES = "1024";
 
 const sharp = (await import("sharp")).default;
-const {
-  getOrCreateThumbnail,
-  isThumbnailableSource,
-  isVideoSource,
-  normalizeThumbnailWidth,
-  pruneThumbnailCache,
-} = await import("./thumbnailService.js");
+const { getOrCreateThumbnail, isThumbnailableSource, isVideoSource, normalizeThumbnailWidth, pruneThumbnailCache } =
+  await import("./thumbnailService.js");
 
 async function writeSourceImage(name: string, width: number, height: number) {
   const filePath = path.join(tempRoot, name);
@@ -30,7 +25,9 @@ async function writeSourceImage(name: string, width: number, height: number) {
   for (let index = 0; index < pixels.length; index += 1) {
     pixels[index] = (index * 2654435761) % 256;
   }
-  await sharp(pixels, { raw: { width, height, channels: 3 } }).png({ compressionLevel: 0 }).toFile(filePath);
+  await sharp(pixels, { raw: { width, height, channels: 3 } })
+    .png({ compressionLevel: 0 })
+    .toFile(filePath);
   return filePath;
 }
 
@@ -95,7 +92,9 @@ test("a burst of concurrent requests encodes the rendition once", async () => {
 
 test("passes through sources already smaller than the threshold", async () => {
   const tiny = path.join(tempRoot, "tiny.png");
-  await sharp({ create: { width: 8, height: 8, channels: 3, background: "#336699" } }).png().toFile(tiny);
+  await sharp({ create: { width: 8, height: 8, channels: 3, background: "#336699" } })
+    .png()
+    .toFile(tiny);
   assert.ok((await fs.stat(tiny)).size <= 1024, "fixture should be under the configured passthrough threshold");
 
   assert.equal((await getOrCreateThumbnail(tiny, 480)).kind, "passthrough");
@@ -224,7 +223,7 @@ test("prune evicts oldest renditions down to the budget", async () => {
   const result = await pruneThumbnailCache(budget);
 
   assert.ok(result.deletedFiles > 0, "prune should have evicted something");
-  assert.ok(await sizeOf() <= budget, "cache should end up within its budget");
+  assert.ok((await sizeOf()) <= budget, "cache should end up within its budget");
 });
 
 test.after(async () => {

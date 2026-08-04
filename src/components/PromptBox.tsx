@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Camera, Eraser, FileText, Sparkle, Wand2 } from "lucide-react";
-import { describeUploadedImages, generateKlingPromptWithWorkflow, generateSeedancePromptWithWorkflow, improvePromptWithQwen } from "../services/promptApi";
+import {
+  describeUploadedImages,
+  generateKlingPromptWithWorkflow,
+  generateSeedancePromptWithWorkflow,
+  improvePromptWithQwen,
+} from "../services/promptApi";
 import { isKlingWorkflowModel, isSeedanceWorkflowModel, KLING_PROMPT_CHARACTER_LIMIT } from "../services/promptRules";
 import type { ModelType, UploadedImage } from "../types";
 
@@ -12,8 +17,26 @@ type PromptBoxProps = {
 };
 
 const movementActions = {
-  Linear: ["Push In", "Push Out", "Track Left-to-Right", "Track Right-to-Left", "Pan Left", "Pan Right", "Tilt Up", "Tilt Down", "Boom Up", "Boom Down"],
-  Orbit: ["90-Degree Arc", "180-Degree Semi-Circle", "360-Degree Full Orbit", "Spiral In", "Spiral Out", "Continuous Orbit (Loop)"],
+  Linear: [
+    "Push In",
+    "Push Out",
+    "Track Left-to-Right",
+    "Track Right-to-Left",
+    "Pan Left",
+    "Pan Right",
+    "Tilt Up",
+    "Tilt Down",
+    "Boom Up",
+    "Boom Down",
+  ],
+  Orbit: [
+    "90-Degree Arc",
+    "180-Degree Semi-Circle",
+    "360-Degree Full Orbit",
+    "Spiral In",
+    "Spiral Out",
+    "Continuous Orbit (Loop)",
+  ],
   Combined: ["Spiral Reveal", "Crane Orbit Reveal", "Parallax Push-In", "Diagonal Track and Pan", "Dolly Zoom"],
   Static: ["One-Point Perspective", "Macro Close-up", "Locked-Off Wide Shot", "Detail Framing"],
 } as const;
@@ -21,7 +44,18 @@ const movementActions = {
 type MovementStyle = keyof typeof movementActions;
 
 const speedModifiers = ["Extremely slow and cinematic", "Slow and smooth", "Moderate tracking speed", "Dynamic"];
-const subjectPresets = ["Custom", "building facade", "kitchen island", "living room space", "entry lobby", "staircase", "courtyard", "material texture", "window detail", "landscape approach"];
+const subjectPresets = [
+  "Custom",
+  "building facade",
+  "kitchen island",
+  "living room space",
+  "entry lobby",
+  "staircase",
+  "courtyard",
+  "material texture",
+  "window detail",
+  "landscape approach",
+];
 
 const movementStylePrompts: Record<MovementStyle, string> = {
   Linear: "linear camera movement style",
@@ -52,10 +86,12 @@ const cameraActionTemplates: Record<string, string> = {
   "Parallax Push-In": "{speed_modifier} forward push-in with subtle lateral parallax across the {target_subject}",
   "Diagonal Track and Pan": "{speed_modifier} diagonal tracking move with a coordinated pan across the {target_subject}",
   "Dolly Zoom": "{speed_modifier} architectural dolly zoom maintaining focus on the {target_subject}",
-  "One-Point Perspective": "Static tripod shot with precise one-point perspective centered on the {target_subject}, zero camera movement",
+  "One-Point Perspective":
+    "Static tripod shot with precise one-point perspective centered on the {target_subject}, zero camera movement",
   "Macro Close-up": "Fixed macro close-up shot focusing deeply on the texture and intricate details of the {target_subject}",
   "Locked-Off Wide Shot": "Static locked-off wide architectural shot framing the {target_subject}, zero camera movement",
-  "Detail Framing": "Static detailed composition isolating the architectural form and surface qualities of the {target_subject}, zero camera movement",
+  "Detail Framing":
+    "Static detailed composition isolating the architectural form and surface qualities of the {target_subject}, zero camera movement",
 };
 
 export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxProps) {
@@ -206,8 +242,12 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
             {value.length.toLocaleString()} / {KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters
           </p>
           {isKlingPromptTooLong ? (
-            <p role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold leading-5 text-red-700">
-              Kling accepts a maximum of {KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters. Shorten this prompt by {(value.length - KLING_PROMPT_CHARACTER_LIMIT).toLocaleString()} characters before generating.
+            <p
+              role="alert"
+              className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold leading-5 text-red-700"
+            >
+              Kling accepts a maximum of {KLING_PROMPT_CHARACTER_LIMIT.toLocaleString()} characters. Shorten this prompt by{" "}
+              {(value.length - KLING_PROMPT_CHARACTER_LIMIT).toLocaleString()} characters before generating.
             </p>
           ) : null}
         </div>
@@ -220,7 +260,10 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
               <Camera className="h-3.5 w-3.5 text-stone-500" />
               <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Camera</p>
             </div>
-            <label className="flex items-center gap-2 text-xs font-semibold text-stone-600" title="Enable or disable camera instructions in prompt generation">
+            <label
+              className="flex items-center gap-2 text-xs font-semibold text-stone-600"
+              title="Enable or disable camera instructions in prompt generation"
+            >
               <input
                 type="checkbox"
                 checked={cameraHelperEnabled}
@@ -332,7 +375,13 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
             className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-line bg-stone-50 px-3 text-xs font-semibold text-stone-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
           >
             <Sparkle className="h-3.5 w-3.5 text-accent" />
-            {isDescribing ? "Generating..." : isSeedanceWorkflow ? "Generate Seedance prompt" : isKlingWorkflow ? "Generate Kling prompt" : "Generate video prompt"}
+            {isDescribing
+              ? "Generating..."
+              : isSeedanceWorkflow
+                ? "Generate Seedance prompt"
+                : isKlingWorkflow
+                  ? "Generate Kling prompt"
+                  : "Generate video prompt"}
           </button>
         ) : null}
         <button
@@ -388,9 +437,7 @@ function buildCameraPrompt({
     : "the architectural space";
 
   const template = cameraActionTemplates[cleanAction];
-  let cameraPrompt = template
-    .replace("{speed_modifier}", speedModifier)
-    .replaceAll("{target_subject}", cleanSubject);
+  let cameraPrompt = template.replace("{speed_modifier}", speedModifier).replaceAll("{target_subject}", cleanSubject);
 
   cameraPrompt = `${cameraPrompt}, using a ${movementStylePrompts[movementStyle]}`;
 
@@ -406,7 +453,10 @@ function buildCameraPrompt({
     return cameraPrompt;
   }
 
-  return cameraPrompt.slice(0, 350).trim().replace(/[.,;:]+$/, "");
+  return cameraPrompt
+    .slice(0, 350)
+    .trim()
+    .replace(/[.,;:]+$/, "");
 }
 
 function promptModeForModel(model: ModelType) {

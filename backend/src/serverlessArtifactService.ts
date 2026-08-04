@@ -5,7 +5,14 @@ import { runpodOutputMaxBytes } from "./config.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
 import { relativePathFromOutputRoot, resolveProjectOutputRoot, withProjectMutationLock } from "./projectMetadataService.js";
 import { projectFolderName } from "./projectFolderName.js";
-import { assertManifestRecordSafe, ensureJobFolders, fallbackProjectFolder, readJsonFile, safeSegment, writeJsonFile } from "./storageService.js";
+import {
+  assertManifestRecordSafe,
+  ensureJobFolders,
+  fallbackProjectFolder,
+  readJsonFile,
+  safeSegment,
+  writeJsonFile,
+} from "./storageService.js";
 import { invalidateMediaCache } from "./mediaService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
@@ -73,7 +80,16 @@ export async function persistServerlessArtifacts({
   const artifacts: PersistedServerlessArtifact[] = [];
 
   for (let index = 0; index < media.length; index += 1) {
-    artifacts.push(await persistOneArtifact(media[index], index, { project, job, model, folders, jobOutputFolder: jobFolders.output, fetchImpl }));
+    artifacts.push(
+      await persistOneArtifact(media[index], index, {
+        project,
+        job,
+        model,
+        folders,
+        jobOutputFolder: jobFolders.output,
+        fetchImpl,
+      }),
+    );
   }
 
   const selectedArtifacts = selectedMedia
@@ -95,7 +111,9 @@ export async function persistServerlessArtifacts({
     resultUrls,
     thumbnailUrls,
     outputResolution: selectedArtifacts.find((artifact) => artifact.resolution)?.resolution,
-    manifestRecords: artifacts.map((artifact) => artifact.manifestRecord).filter((item): item is Record<string, unknown> => Boolean(item)),
+    manifestRecords: artifacts
+      .map((artifact) => artifact.manifestRecord)
+      .filter((item): item is Record<string, unknown> => Boolean(item)),
   };
 }
 
@@ -118,7 +136,14 @@ async function persistOneArtifact(
   try {
     mediaSource = await openMediaSource(media.url, context.fetchImpl);
     const extension = resultExtension(media, mediaSource.contentType, assetType);
-    const target = await reserveArtifactTarget(context.project, context.job, context.model, context.folders, assetType, extension);
+    const target = await reserveArtifactTarget(
+      context.project,
+      context.job,
+      context.model,
+      context.folders,
+      assetType,
+      extension,
+    );
     reservationPath = target.reservationPath;
     await mediaSource.writeTo(target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
@@ -214,7 +239,8 @@ async function openMediaSource(value: string, fetchImpl: typeof fetch): Promise<
 
   return {
     contentType: response.headers.get("content-type") ?? "",
-    writeTo: (filePath) => writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes).then(() => undefined),
+    writeTo: (filePath) =>
+      writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes).then(() => undefined),
     cancel: () => response.body?.cancel().then(() => undefined) ?? Promise.resolve(),
   };
 }
@@ -231,7 +257,9 @@ function dataUrlMediaSource(value: string): MediaSource {
   const payload = value.slice(commaIndex + 1);
   const byteLength = isBase64 ? estimateBase64Bytes(payload) : Buffer.byteLength(decodeURIComponent(payload), "utf8");
   if (byteLength > runpodOutputMaxBytes) {
-    throw new Error(`Embedded RunPod output is ${formatBytes(byteLength)}, above the ${formatBytes(runpodOutputMaxBytes)} limit.`);
+    throw new Error(
+      `Embedded RunPod output is ${formatBytes(byteLength)}, above the ${formatBytes(runpodOutputMaxBytes)} limit.`,
+    );
   }
 
   return {
@@ -271,17 +299,23 @@ async function reserveArtifactTarget(
     const shotNumber = normalizedSaveNumber(job.workflowOptions?.save?.shotNumber ?? job.workflowOptions?.save?.cameraNumber);
     const cameraToken = normalizeCameraNumber(cameraNumber);
     const shotToken = normalizeShotNumber(shotNumber);
-    const versionItem = assetType === "image"
-      ? [prefixToken, cameraToken].filter(Boolean).join("|") || cameraToken
-      : [prefixToken, shotToken].filter(Boolean).join("|") || shotToken;
+    const versionItem =
+      assetType === "image"
+        ? [prefixToken, cameraToken].filter(Boolean).join("|") || cameraToken
+        : [prefixToken, shotToken].filter(Boolean).join("|") || shotToken;
     const versionKey = `${assetType}|${projectName}|${versionItem}`;
     const scopedVersionKey = job.folderId ? `${assetType}|${projectName}|${job.folderId}|${versionItem}` : versionKey;
 
     for (let attempts = 0; attempts < 1000; attempts += 1) {
       const version = await reserveNextVersion(folders.metadataRoot, scopedVersionKey);
-      const filePath = assetType === "image"
-        ? path.join(folders.imagesRoot, date, `${imageStem(date, projectName, cameraToken, version, modelPrefix)}${extension}`)
-        : path.join(folders.videosRoot, shotToken, `${sequenceStem(date, projectName, shotNumber, version, modelPrefix)}${extension}`);
+      const filePath =
+        assetType === "image"
+          ? path.join(folders.imagesRoot, date, `${imageStem(date, projectName, cameraToken, version, modelPrefix)}${extension}`)
+          : path.join(
+              folders.videosRoot,
+              shotToken,
+              `${sequenceStem(date, projectName, shotNumber, version, modelPrefix)}${extension}`,
+            );
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       const reservationPath = `${filePath}.momi-reservation`;
       let reservation: fs.FileHandle | undefined;
@@ -299,9 +333,7 @@ async function reserveArtifactTarget(
         return { filePath, reservationPath, version, modelPrefix, cameraToken, cameraNumber, shotToken, shotNumber };
       } catch (error) {
         await reservation?.close().catch(() => undefined);
-        const code = typeof error === "object" && error && "code" in error
-          ? String((error as { code?: unknown }).code)
-          : "";
+        const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
         if (code === "EEXIST") continue;
         await fs.rm(reservationPath, { force: true }).catch(() => undefined);
         throw error;
@@ -497,7 +529,11 @@ function imageStem(date: string, projectName: string, cameraToken: string, versi
 }
 
 function sequenceStem(date: string, projectName: string, shotNumber: number, version: number, modelPrefix: string) {
-  return applyModelPrefix(date, `${projectCode(projectName)}_${normalizeShotNumber(shotNumber)}_${normalizeVersion(version)}`, modelPrefix);
+  return applyModelPrefix(
+    date,
+    `${projectCode(projectName)}_${normalizeShotNumber(shotNumber)}_${normalizeVersion(version)}`,
+    modelPrefix,
+  );
 }
 
 function applyModelPrefix(date: string, stemAfterDate: string, modelPrefix: string) {
@@ -512,7 +548,9 @@ function projectCode(projectName: string) {
   const anyDigits = projectName.replace(/\D/g, "");
   if (anyDigits.length >= 4) return anyDigits.slice(0, 4);
 
-  const alnum = sanitizeForFilename(projectName, "PROJ").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const alnum = sanitizeForFilename(projectName, "PROJ")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
   return (alnum.slice(0, 4) || "PROJ").padEnd(4, "0");
 }
 
@@ -538,12 +576,17 @@ function normalizeModelPrefix(value: string) {
 }
 
 function sanitizeForFilename(value: string, fallback = "", maxLength = 140) {
-  const clean = value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim();
+  const clean = value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .trim();
   return (clean || fallback).slice(0, maxLength);
 }
 
 function normalizedSaveNumber(value: string | number | undefined) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return Number(digits || "0");
 }
 

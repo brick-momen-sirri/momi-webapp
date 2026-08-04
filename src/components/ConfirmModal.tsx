@@ -39,9 +39,10 @@ export function ConfirmModal({
     }
   }
 
-  const confirmClasses = tone === "danger"
-    ? "bg-red-600 text-white hover:bg-red-700 focus:ring-red-300"
-    : "bg-accent text-white hover:bg-accent/90 focus:ring-accent/30";
+  const confirmClasses =
+    tone === "danger"
+      ? "bg-red-600 text-white hover:bg-red-700 focus:ring-red-300"
+      : "bg-accent text-white hover:bg-accent/90 focus:ring-accent/30";
 
   return createPortal(
     <div
@@ -55,7 +56,9 @@ export function ConfirmModal({
         <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
           <div className="flex items-center gap-2">
             {tone === "danger" ? <AlertTriangle className="h-5 w-5 shrink-0 text-red-600" /> : null}
-            <h2 id="confirm-modal-title" className="text-sm font-bold text-ink">{title}</h2>
+            <h2 id="confirm-modal-title" className="text-sm font-bold text-ink">
+              {title}
+            </h2>
           </div>
           <button
             type="button"

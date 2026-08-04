@@ -51,11 +51,15 @@ const candidateContainerKeys = new Set([
   "string",
 ]);
 
-export async function extractRunpodTextArtifacts(output: unknown, fetchImpl: typeof fetch = fetch): Promise<RunpodTextArtifact[]> {
+export async function extractRunpodTextArtifacts(
+  output: unknown,
+  fetchImpl: typeof fetch = fetch,
+): Promise<RunpodTextArtifact[]> {
   const collectedCandidates = collectTextCandidates(output);
   const preferredInlineCandidates = collectedCandidates.filter(isPreferredInlineTextCandidate);
-  const candidates = (preferredInlineCandidates.length ? preferredInlineCandidates : collectedCandidates)
-    .sort((a, b) => textCandidatePriority(a) - textCandidatePriority(b));
+  const candidates = (preferredInlineCandidates.length ? preferredInlineCandidates : collectedCandidates).sort(
+    (a, b) => textCandidatePriority(a) - textCandidatePriority(b),
+  );
   const artifacts: RunpodTextArtifact[] = [];
   const seen = new Set<string>();
 
@@ -136,11 +140,7 @@ function textCandidateFromItem(item: unknown, source: string): TextCandidate | u
     stringFrom(item.file) ??
     stringFrom(item.path) ??
     (data && itemLooksLikeReadableUrl(data) ? data : undefined);
-  const filename =
-    stringFrom(item.filename) ??
-    stringFrom(item.file_name) ??
-    stringFrom(item.name) ??
-    filenameFromValue(url);
+  const filename = stringFrom(item.filename) ?? stringFrom(item.file_name) ?? stringFrom(item.name) ?? filenameFromValue(url);
   const type =
     stringFrom(item.content_type) ??
     stringFrom(item.contentType) ??
@@ -171,10 +171,12 @@ function textCandidateFromItem(item: unknown, source: string): TextCandidate | u
 }
 
 function candidateLooksLikeText(candidate: TextCandidate) {
-  return isTextSource(candidate.source)
-    || hasTextExtension(candidate.filename)
-    || hasTextContentType(candidate.type)
-    || hasTextUrl(candidate.url);
+  return (
+    isTextSource(candidate.source) ||
+    hasTextExtension(candidate.filename) ||
+    hasTextContentType(candidate.type) ||
+    hasTextUrl(candidate.url)
+  );
 }
 
 async function readTextCandidate(candidate: TextCandidate, fetchImpl: typeof fetch) {
@@ -216,9 +218,7 @@ function readTextDataUrl(value: string) {
   const header = value.slice(5, commaIndex);
   const payload = value.slice(commaIndex + 1);
   const isBase64 = header.toLowerCase().endsWith(";base64");
-  const buffer = isBase64
-    ? Buffer.from(payload, "base64")
-    : Buffer.from(decodeURIComponent(payload), "utf8");
+  const buffer = isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8");
   if (buffer.byteLength > runpodTextOutputMaxBytes) {
     throw new Error("RunPod text artifact is larger than the configured text limit.");
   }
@@ -226,7 +226,10 @@ function readTextDataUrl(value: string) {
 }
 
 function normalizeText(value: string) {
-  return value.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").trim();
+  return value
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .trim();
 }
 
 function textCandidateKey(candidate: TextCandidate) {

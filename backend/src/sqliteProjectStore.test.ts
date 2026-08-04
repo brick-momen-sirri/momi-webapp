@@ -6,10 +6,9 @@ import test from "node:test";
 import { openSqliteProjectStore } from "./sqliteProjectStore.js";
 import type { Project, ProjectMember } from "./types.js";
 
-async function withStores(run: (
-  a: ReturnType<typeof openSqliteProjectStore>,
-  b: ReturnType<typeof openSqliteProjectStore>,
-) => void) {
+async function withStores(
+  run: (a: ReturnType<typeof openSqliteProjectStore>, b: ReturnType<typeof openSqliteProjectStore>) => void,
+) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-project-sqlite-"));
   const dbPath = path.join(dir, "app-state.sqlite");
   const a = openSqliteProjectStore(dbPath);
@@ -32,7 +31,10 @@ test("project JSON migration is atomic and runs once across connections", async 
     const migrated = b.loadProjectById(seed.id);
     assert.equal(migrated?.jobCount, 0);
     assert.equal(migrated?.creditsUsed, undefined);
-    assert.deepEqual(b.loadProjects().map((item) => item.id), [seed.id]);
+    assert.deepEqual(
+      b.loadProjects().map((item) => item.id),
+      [seed.id],
+    );
   });
 });
 
@@ -45,13 +47,19 @@ test("ACL changes are immediately visible on another connection", async () => {
       current.members.push(member("usr_viewer", "viewer"));
       current.updatedAt = "2026-07-21T01:00:00.000Z";
     });
-    assert.equal(b.loadProjectById(stored.id)?.members.some((item) => item.userId === "usr_viewer"), true);
+    assert.equal(
+      b.loadProjectById(stored.id)?.members.some((item) => item.userId === "usr_viewer"),
+      true,
+    );
 
     b.applyToProject(stored.id, (current) => {
       current.members = current.members.filter((item) => item.userId !== "usr_viewer");
       current.updatedAt = "2026-07-21T02:00:00.000Z";
     });
-    assert.equal(a.loadProjectById(stored.id)?.members.some((item) => item.userId === "usr_viewer"), false);
+    assert.equal(
+      a.loadProjectById(stored.id)?.members.some((item) => item.userId === "usr_viewer"),
+      false,
+    );
   });
 });
 
@@ -76,7 +84,10 @@ test("row transactions preserve edits to different and identical projects", asyn
     });
 
     assert.equal(b.loadProjectById(first.id)?.description, "edited by A");
-    assert.equal(a.loadProjectById(first.id)?.members.some((item) => item.userId === "usr_editor"), true);
+    assert.equal(
+      a.loadProjectById(first.id)?.members.some((item) => item.userId === "usr_editor"),
+      true,
+    );
     assert.equal(a.loadProjectById(second.id)?.description, "edited by B");
   });
 });
@@ -96,10 +107,7 @@ test("renamed paths are immediate and folder identity is unique", async () => {
     });
 
     assert.equal(b.loadProjectById(stored.id)?.folderPath, renamedPath);
-    assert.throws(
-      () => b.insertProject(project("prj_collision", "1000_Client_New")),
-      /UNIQUE/i,
-    );
+    assert.throws(() => b.insertProject(project("prj_collision", "1000_Client_New")), /UNIQUE/i);
   });
 });
 
@@ -116,7 +124,10 @@ test("filesystem discovery never replaces an existing ACL record", async () => {
 
     const result = b.insertDiscoveredProject(discovered);
     assert.equal(result.ownerId, "usr_owner");
-    assert.equal(result.members.some((item) => item.userId === "usr_private"), true);
+    assert.equal(
+      result.members.some((item) => item.userId === "usr_private"),
+      true,
+    );
     assert.equal(a.countProjects(), 1);
   });
 });

@@ -6,9 +6,7 @@ let localInvalidationListener: (() => void) | undefined;
 
 export function initializeSharedMediaIndexStore() {
   mediaIndexStore?.close();
-  mediaIndexStore = appStateDriver === "sqlite"
-    ? openSqliteMediaIndexStore(appStateSqlitePath)
-    : undefined;
+  mediaIndexStore = appStateDriver === "sqlite" ? openSqliteMediaIndexStore(appStateSqlitePath) : undefined;
   return mediaIndexStore;
 }
 

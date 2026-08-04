@@ -20,9 +20,7 @@ export type LocalAccount = {
   lastSignedInAt?: string;
 };
 
-export type AuthResult =
-  | { ok: true; account: LocalAccount }
-  | { ok: false; error: string };
+export type AuthResult = { ok: true; account: LocalAccount } | { ok: false; error: string };
 
 const seedPassword = "Brickvisual2026!";
 const avatarColors = ["#11b8a5", "#ff6b35", "#4f46e5", "#0f766e"];
@@ -68,7 +66,7 @@ export function clearStoredSession() {
 export function getStoredAccounts(): LocalAccount[] {
   try {
     const raw = window.localStorage.getItem(ACCOUNTS_KEY);
-    return raw ? JSON.parse(raw) as LocalAccount[] : [];
+    return raw ? (JSON.parse(raw) as LocalAccount[]) : [];
   } catch {
     return [];
   }
@@ -339,10 +337,12 @@ function fallbackHash(value: string) {
 }
 
 function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "BV";
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "BV"
+  );
 }

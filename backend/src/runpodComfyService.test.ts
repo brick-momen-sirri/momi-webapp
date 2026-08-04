@@ -101,10 +101,12 @@ test("cancel posts to the acknowledged RunPod job without resubmitting", async (
 
   const result = await service.cancelComfyWorkflowOnRunpod("job-cancel-remote", fetchImpl as typeof fetch);
 
-  assert.deepEqual(calls, [{
-    url: "https://api.runpod.ai/v2/endpoint-test/cancel/job-cancel-remote",
-    method: "POST",
-  }]);
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.runpod.ai/v2/endpoint-test/cancel/job-cancel-remote",
+      method: "POST",
+    },
+  ]);
   assert.equal(result.status, "CANCELLED");
 });
 
@@ -178,13 +180,14 @@ test("URL inputs are submitted without inline base64 media", async () => {
 });
 
 test("FAILED unauthorized response includes clear Comfy API message", async () => {
-  const fetchImpl = async () => jsonResponse({
-    id: "job-failed",
-    status: "FAILED",
-    output: {
-      message: "Unauthorized: Please login first to use this node.",
-    },
-  });
+  const fetchImpl = async () =>
+    jsonResponse({
+      id: "job-failed",
+      status: "FAILED",
+      output: {
+        message: "Unauthorized: Please login first to use this node.",
+      },
+    });
 
   await assert.rejects(
     service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch }),

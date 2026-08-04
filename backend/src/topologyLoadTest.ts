@@ -25,7 +25,8 @@ type MockJob = {
 };
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const tinyPng =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const adminEmail = "topology-admin@example.test";
 const adminPassword = "TopologyAdmin123!";
 const userEmail = "topology-user@example.test";
@@ -218,66 +219,87 @@ async function main() {
       token: adminToken,
       body: { client: "Topology", name: "Gate Renamed" },
     });
-    await waitUntil(async () => {
-      const response = await jsonRequest(apiBases[1], `/api/projects/${projectId}`, { token: userToken });
-      return response.project.name === "Gate Renamed"
-        && String(response.project.folderPath).endsWith("9001_Topology_Gate_Renamed");
-    }, 1_000, "project rename/path was not visible cross-worker within 1s");
+    await waitUntil(
+      async () => {
+        const response = await jsonRequest(apiBases[1], `/api/projects/${projectId}`, { token: userToken });
+        return (
+          response.project.name === "Gate Renamed" && String(response.project.folderPath).endsWith("9001_Topology_Gate_Renamed")
+        );
+      },
+      1_000,
+      "project rename/path was not visible cross-worker within 1s",
+    );
 
     const modelResponse = await jsonRequest(apiBases[1], "/api/models", { token: userToken });
-    const model = (modelResponse.models as JsonRecord[]).find((candidate) => candidate.outputType === "image" && !candidate.requiresImage);
+    const model = (modelResponse.models as JsonRecord[]).find(
+      (candidate) => candidate.outputType === "image" && !candidate.requiresImage,
+    );
     assert.ok(model, "isolated workflow model was not loaded");
 
-    const pollers = Array.from({ length: 100 }, (_, index) => (async () => {
-      const base = apiBases[index % apiBases.length];
-      while (polling) {
-        try {
-          const [, snapshot] = await Promise.all([
-            jsonRequest(base, "/api/jobs?limit=80", { token: userToken }),
-            jsonRequest(base, "/api/snapshot", { token: userToken }),
-          ]);
-          pollCycles += 1;
-          observedBackendActive = Math.max(observedBackendActive, Number(snapshot.podStatus?.queue?.runpodActive ?? 0));
-        } catch (error) {
-          pollErrors.push(error instanceof Error ? error.message : String(error));
+    const pollers = Array.from({ length: 100 }, (_, index) =>
+      (async () => {
+        const base = apiBases[index % apiBases.length];
+        while (polling) {
+          try {
+            const [, snapshot] = await Promise.all([
+              jsonRequest(base, "/api/jobs?limit=80", { token: userToken }),
+              jsonRequest(base, "/api/snapshot", { token: userToken }),
+            ]);
+            pollCycles += 1;
+            observedBackendActive = Math.max(observedBackendActive, Number(snapshot.podStatus?.queue?.runpodActive ?? 0));
+          } catch (error) {
+            pollErrors.push(error instanceof Error ? error.message : String(error));
+          }
+          await delay(200);
         }
-        await delay(200);
-      }
-    })());
+      })(),
+    );
 
     const jobCount = 32;
-    const createdJobs = await Promise.all(Array.from({ length: jobCount }, async (_, index) => {
-      const base = apiBases[index % apiBases.length];
-      const startedAt = performance.now();
-      const response = await jsonRequest(base, "/api/jobs", {
-        method: "POST",
-        token: userToken,
-        body: {
-          projectId,
-          modelId: model.id,
-          prompt: `topology-job-${String(index + 1).padStart(3, "0")}`,
-        },
-      });
-      enqueueLatencies.push(performance.now() - startedAt);
-      return response.job as JsonRecord;
-    }));
+    const createdJobs = await Promise.all(
+      Array.from({ length: jobCount }, async (_, index) => {
+        const base = apiBases[index % apiBases.length];
+        const startedAt = performance.now();
+        const response = await jsonRequest(base, "/api/jobs", {
+          method: "POST",
+          token: userToken,
+          body: {
+            projectId,
+            modelId: model.id,
+            prompt: `topology-job-${String(index + 1).padStart(3, "0")}`,
+          },
+        });
+        enqueueLatencies.push(performance.now() - startedAt);
+        return response.job as JsonRecord;
+      }),
+    );
 
-    await Promise.all(createdJobs.map(async (job, index) => {
-      const base = apiBases[(index + 1) % apiBases.length];
-      const startedAt = performance.now();
-      await waitUntil(async () => {
-        const response = await jsonRequest(base, `/api/jobs/${job.id}`, { token: userToken, allowStatus: 404 });
-        return response.statusCode !== 404;
-      }, 1_000, `job ${job.id} was not visible cross-worker within 1s`);
-      visibilityLatencies.push(performance.now() - startedAt);
-    }));
+    await Promise.all(
+      createdJobs.map(async (job, index) => {
+        const base = apiBases[(index + 1) % apiBases.length];
+        const startedAt = performance.now();
+        await waitUntil(
+          async () => {
+            const response = await jsonRequest(base, `/api/jobs/${job.id}`, { token: userToken, allowStatus: 404 });
+            return response.statusCode !== 404;
+          },
+          1_000,
+          `job ${job.id} was not visible cross-worker within 1s`,
+        );
+        visibilityLatencies.push(performance.now() - startedAt);
+      }),
+    );
 
     await waitUntil(() => mock.submissionCount >= 10, 10_000, "dispatcher did not fill the 10-job RunPod cap");
     assert.ok(mock.maxActive <= 10, `mock RunPod observed ${mock.maxActive} active submissions, above the cap`);
-    await waitUntil(async () => {
-      const response = await jsonRequest(apiBases[1], "/api/jobs?limit=80", { token: userToken });
-      return (response.jobs as JsonRecord[]).filter((job) => job.runpodJobId).length >= 10;
-    }, 5_000, "acknowledged RunPod IDs were not persisted before failover");
+    await waitUntil(
+      async () => {
+        const response = await jsonRequest(apiBases[1], "/api/jobs?limit=80", { token: userToken });
+        return (response.jobs as JsonRecord[]).filter((job) => job.runpodJobId).length >= 10;
+      },
+      5_000,
+      "acknowledged RunPod IDs were not persisted before failover",
+    );
 
     // Run a deliberately competing dispatcher to exercise the lease fence.
     // It must remain passive while dispatcher-1 is alive, then take over the
@@ -286,7 +308,11 @@ async function main() {
     runtimes.push(dispatcherStandby);
     await waitForHealth(dispatcherStandby);
     const standbyBefore = await jsonRequest(`http://127.0.0.1:${standbyPort}`, "/api/health");
-    assert.equal(standbyBefore.queue?.dispatcher?.heldByThisProcess, false, "standby dispatcher must not own the live leader's lease");
+    assert.equal(
+      standbyBefore.queue?.dispatcher?.heldByThisProcess,
+      false,
+      "standby dispatcher must not own the live leader's lease",
+    );
     const submissionsBeforeStandby = mock.submissionCount;
     await delay(300);
     assert.equal(mock.submissionCount, submissionsBeforeStandby, "standby dispatcher submitted work without owning the lease");
@@ -295,41 +321,77 @@ async function main() {
     const cancelTarget = (beforeCancel.jobs as JsonRecord[]).find((job) => job.runpodJobId && job.status === "running");
     assert.ok(cancelTarget, "expected an acknowledged active job for the cross-process cancellation check");
     await jsonRequest(apiBases[0], `/api/jobs/${cancelTarget.id}/cancel`, { method: "POST", token: userToken });
-    await waitUntil(async () => {
-      const response = await jsonRequest(apiBases[1], `/api/jobs/${cancelTarget.id}`, { token: userToken });
-      return response.job.cancelRequested === true;
-    }, 1_000, "cancelRequested was not visible on the other API worker within 1s");
+    await waitUntil(
+      async () => {
+        const response = await jsonRequest(apiBases[1], `/api/jobs/${cancelTarget.id}`, { token: userToken });
+        return response.job.cancelRequested === true;
+      },
+      1_000,
+      "cancelRequested was not visible on the other API worker within 1s",
+    );
 
     await forceStopBackend(dispatcher);
-    await waitUntil(async () => {
-      const health = await jsonRequest(`http://127.0.0.1:${standbyPort}`, "/api/health");
-      return health.queue?.dispatcher?.heldByThisProcess === true;
-    }, 5_000, "standby dispatcher did not acquire the lease after leader death");
+    await waitUntil(
+      async () => {
+        const health = await jsonRequest(`http://127.0.0.1:${standbyPort}`, "/api/health");
+        return health.queue?.dispatcher?.heldByThisProcess === true;
+      },
+      5_000,
+      "standby dispatcher did not acquire the lease after leader death",
+    );
 
     let finalJobs: JsonRecord[] = [];
-    await waitUntil(async () => {
-      const response = await jsonRequest(apiBases[1], "/api/jobs?limit=80", { token: userToken });
-      finalJobs = response.jobs as JsonRecord[];
-      const targetJobs = finalJobs.filter((job) => createdJobs.some((created) => created.id === job.id));
-      return targetJobs.length === jobCount && targetJobs.every((job) => ["completed", "failed", "canceled"].includes(job.status));
-    }, 35_000, "queue did not drain after dispatcher failover");
+    await waitUntil(
+      async () => {
+        const response = await jsonRequest(apiBases[1], "/api/jobs?limit=80", { token: userToken });
+        finalJobs = response.jobs as JsonRecord[];
+        const targetJobs = finalJobs.filter((job) => createdJobs.some((created) => created.id === job.id));
+        return (
+          targetJobs.length === jobCount && targetJobs.every((job) => ["completed", "failed", "canceled"].includes(job.status))
+        );
+      },
+      35_000,
+      "queue did not drain after dispatcher failover",
+    );
 
     const targetIds = new Set(createdJobs.map((job) => job.id));
     finalJobs = finalJobs.filter((job) => targetIds.has(job.id));
     const canceledJobs = finalJobs.filter((job) => job.status === "canceled");
     const completedJobs = finalJobs.filter((job) => job.status === "completed");
     const failedJobs = finalJobs.filter((job) => job.status === "failed");
-    assert.deepEqual(failedJobs.map((job) => ({ id: job.id, error: job.errorMessage })), [], "no job may be lost during failover");
+    assert.deepEqual(
+      failedJobs.map((job) => ({ id: job.id, error: job.errorMessage })),
+      [],
+      "no job may be lost during failover",
+    );
     assert.equal(canceledJobs.length, 1, "exactly the requested active job must be canceled");
     assert.equal(canceledJobs[0]?.id, cancelTarget.id);
     assert.equal(completedJobs.length, jobCount - 1);
-    assert.equal(mock.submissionCount, completedJobs.length + canceledJobs.length, "every submitted or completed job must map to one RunPod job");
+    assert.equal(
+      mock.submissionCount,
+      completedJobs.length + canceledJobs.length,
+      "every submitted or completed job must map to one RunPod job",
+    );
     assert.equal(mock.duplicateSubmissionCount, 0, "a workflow prompt was submitted more than once across failover");
-    assert.equal(new Set(completedJobs.map((job) => job.runpodJobId)).size, completedJobs.length, "RunPod job IDs must be unique");
-    assert.equal(new Set(completedJobs.map((job) => job.resultUrls?.[0])).size, completedJobs.length, "reserved output paths must be unique");
-    assert.ok([...completedJobs, ...canceledJobs].every((job) => job.runpodSubmissionState === "submitted"), "acknowledged jobs must retain durable submission state");
+    assert.equal(
+      new Set(completedJobs.map((job) => job.runpodJobId)).size,
+      completedJobs.length,
+      "RunPod job IDs must be unique",
+    );
+    assert.equal(
+      new Set(completedJobs.map((job) => job.resultUrls?.[0])).size,
+      completedJobs.length,
+      "reserved output paths must be unique",
+    );
+    assert.ok(
+      [...completedJobs, ...canceledJobs].every((job) => job.runpodSubmissionState === "submitted"),
+      "acknowledged jobs must retain durable submission state",
+    );
     assert.equal(canceledJobs[0]?.runpodStatus, "CANCELLED", "dispatcher must cancel the acknowledged remote RunPod job");
-    assert.ok(completedJobs.every((job) => job.creditUsage?.total_estimated_credits === 1 && job.creditsUsed === 1), "credits must stay attributed to each job");
+    assert.ok(
+      completedJobs.every((job) => job.creditUsage?.total_estimated_credits === 1 && job.creditsUsed === 1),
+      "credits must stay attributed to each job",
+    );
     assert.equal(mock.syncRows, completedJobs.length, "each completed job must sync exactly one credit row");
 
     const folderResponse = await jsonRequest(apiBases[0], `/api/projects/${projectId}/folders`, {
@@ -344,11 +406,17 @@ async function main() {
       token: userToken,
       body: { destinationFolderId: folderResponse.folder.folderId },
     });
-    await waitUntil(async () => {
-      const health = await jsonRequest(apiBases[1], "/api/health");
-      return Number(health.mediaIndex?.builtRevision ?? 0) > Number(healthBeforeMove.mediaIndex?.builtRevision ?? 0)
-        && Number(health.mediaIndex?.builtRevision ?? 0) >= Number(health.mediaIndex?.dirtyRevision ?? 0);
-    }, 1_000, "dispatcher-published media index did not converge within 1s after a cross-worker move");
+    await waitUntil(
+      async () => {
+        const health = await jsonRequest(apiBases[1], "/api/health");
+        return (
+          Number(health.mediaIndex?.builtRevision ?? 0) > Number(healthBeforeMove.mediaIndex?.builtRevision ?? 0) &&
+          Number(health.mediaIndex?.builtRevision ?? 0) >= Number(health.mediaIndex?.dirtyRevision ?? 0)
+        );
+      },
+      1_000,
+      "dispatcher-published media index did not converge within 1s after a cross-worker move",
+    );
 
     const mediaResponse = await fetch(`${apiBases[1]}/api/jobs/${movedJob.id}/result-media`, {
       headers: { Authorization: `Bearer ${userToken}` },
@@ -372,24 +440,30 @@ async function main() {
     assert.ok(Math.max(...visibilityLatencies) < 1_000, "cross-worker read staleness exceeded 1s");
     assert.ok(Math.max(observedBackendActive, mock.maxActive) <= 10, "global active work exceeded the SQL cap");
 
-    console.log(JSON.stringify({
-      ok: true,
-      clients: 100,
-      pollCycles,
-      jobsCreated: jobCount,
-      jobsCompleted: completedJobs.length,
-      jobsCanceled: canceledJobs.length,
-      runpodSubmissions: mock.submissionCount,
-      duplicateSubmissions: mock.duplicateSubmissionCount,
-      maxRunpodActive: mock.maxActive,
-      maxBackendActive: observedBackendActive,
-      enqueueP99Ms: Math.round(percentile(enqueueLatencies, 99)),
-      maxReadStalenessMs: Math.round(Math.max(...visibilityLatencies)),
-      creditRowsSynced: mock.syncRows,
-      dispatcherFailover: true,
-      mediaIndexConverged: true,
-      tempState: process.env.TOPOLOGY_KEEP_TEMP === "true" ? tempDir : undefined,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          clients: 100,
+          pollCycles,
+          jobsCreated: jobCount,
+          jobsCompleted: completedJobs.length,
+          jobsCanceled: canceledJobs.length,
+          runpodSubmissions: mock.submissionCount,
+          duplicateSubmissions: mock.duplicateSubmissionCount,
+          maxRunpodActive: mock.maxActive,
+          maxBackendActive: observedBackendActive,
+          enqueueP99Ms: Math.round(percentile(enqueueLatencies, 99)),
+          maxReadStalenessMs: Math.round(Math.max(...visibilityLatencies)),
+          creditRowsSynced: mock.syncRows,
+          dispatcherFailover: true,
+          mediaIndexConverged: true,
+          tempState: process.env.TOPOLOGY_KEEP_TEMP === "true" ? tempDir : undefined,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error) {
     polling = false;
     const diagnostics = runtimes.map((runtime) => `===== ${runtime.name} =====\n${runtime.logs.slice(-12_000)}`).join("\n");
@@ -410,13 +484,23 @@ async function prepareIsolatedState(tempDir: string) {
   const workflowDir = path.join(tempDir, "workflow");
   const projectsRoot = path.join(tempDir, "projects");
   const localProjectsRoot = path.join(tempDir, "local-projects");
-  await Promise.all([dataDir, workflowDir, projectsRoot, localProjectsRoot].map((directory) => fs.mkdir(directory, { recursive: true })));
+  await Promise.all(
+    [dataDir, workflowDir, projectsRoot, localProjectsRoot].map((directory) => fs.mkdir(directory, { recursive: true })),
+  );
   const jsonFiles = ["jobs.json", "archived-items.json", "users.json", "sessions.json", "projects.json"];
   await Promise.all(jsonFiles.map((file) => fs.writeFile(path.join(dataDir, file), "[]\n", "utf8")));
-  await fs.writeFile(path.join(workflowDir, "topology_text_to_image.json"), `${JSON.stringify({
-    "1": { class_type: "CLIPTextEncode", inputs: { text: "placeholder" } },
-    "2": { class_type: "SaveImage", inputs: { images: ["1", 0] } },
-  }, null, 2)}\n`, "utf8");
+  await fs.writeFile(
+    path.join(workflowDir, "topology_text_to_image.json"),
+    `${JSON.stringify(
+      {
+        "1": { class_type: "CLIPTextEncode", inputs: { text: "placeholder" } },
+        "2": { class_type: "SaveImage", inputs: { images: ["1", 0] } },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   return { dataDir, workflowDir, projectsRoot, localProjectsRoot };
 }
 
@@ -492,17 +576,21 @@ function startBackend(name: string, role: BackendRuntime["role"], port: number, 
 }
 
 async function waitForHealth(runtime: BackendRuntime) {
-  await waitUntil(async () => {
-    if (runtime.child.exitCode != null) {
-      throw new Error(`${runtime.name} exited during boot (${runtime.child.exitCode}).\n${runtime.logs.slice(-8_000)}`);
-    }
-    try {
-      const response = await jsonRequest(`http://127.0.0.1:${runtime.port}`, "/api/health");
-      return response.ok === true && response.role === runtime.role;
-    } catch {
-      return false;
-    }
-  }, 15_000, `${runtime.name} did not become healthy`);
+  await waitUntil(
+    async () => {
+      if (runtime.child.exitCode != null) {
+        throw new Error(`${runtime.name} exited during boot (${runtime.child.exitCode}).\n${runtime.logs.slice(-8_000)}`);
+      }
+      try {
+        const response = await jsonRequest(`http://127.0.0.1:${runtime.port}`, "/api/health");
+        return response.ok === true && response.role === runtime.role;
+      } catch {
+        return false;
+      }
+    },
+    15_000,
+    `${runtime.name} did not become healthy`,
+  );
 }
 
 async function forceStopBackend(runtime: BackendRuntime) {
@@ -538,12 +626,16 @@ function waitForExit(child: ChildProcess, timeoutMs: number) {
   });
 }
 
-async function jsonRequest(base: string, route: string, options: {
-  method?: string;
-  token?: string;
-  body?: unknown;
-  allowStatus?: number;
-} = {}) {
+async function jsonRequest(
+  base: string,
+  route: string,
+  options: {
+    method?: string;
+    token?: string;
+    body?: unknown;
+    allowStatus?: number;
+  } = {},
+) {
   const headers: Record<string, string> = {};
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
@@ -556,7 +648,7 @@ async function jsonRequest(base: string, route: string, options: {
   const text = await response.text();
   let body: JsonRecord = {};
   try {
-    body = text ? JSON.parse(text) as JsonRecord : {};
+    body = text ? (JSON.parse(text) as JsonRecord) : {};
   } catch {
     body = { raw: text };
   }
@@ -641,6 +733,6 @@ function delay(ms: number) {
 }
 
 void main().catch((error) => {
-  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  console.error(error instanceof Error ? (error.stack ?? error.message) : error);
   process.exitCode = 1;
 });

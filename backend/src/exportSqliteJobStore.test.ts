@@ -51,7 +51,7 @@ test("export round-trips a populated store back to byte-identical JSON", async (
   const p = scratch();
   const jobs = [
     job("job_c", { status: "failed", prompt: "third" } as Partial<Job>),
-    job("job_b", { prompt: "second \"quoted\" and unicode: café 🎬" } as Partial<Job>),
+    job("job_b", { prompt: 'second "quoted" and unicode: café 🎬' } as Partial<Job>),
     job("job_a"),
   ];
   const archived = [job("arch_1", { source: "existing_project_media" } as Partial<Job>)];
@@ -63,7 +63,12 @@ test("export round-trips a populated store back to byte-identical JSON", async (
   seedSqlite(p.archivedSqlite, "archived_jobs", archived);
 
   const result = await exportSqliteJobStoreToJson(
-    { jobsSqlitePath: p.jobsSqlite, jobsJsonPath: p.jobsJson, archivedSqlitePath: p.archivedSqlite, archivedJsonPath: p.archivedJson },
+    {
+      jobsSqlitePath: p.jobsSqlite,
+      jobsJsonPath: p.jobsJson,
+      archivedSqlitePath: p.archivedSqlite,
+      archivedJsonPath: p.archivedJson,
+    },
     { retireSqlite: false },
   );
 
@@ -79,7 +84,12 @@ test("export refuses to run when the SQLite file is missing (no clobber)", async
   const before = readFileSync(p.jobsJson, "utf8");
 
   await assert.rejects(
-    exportSqliteJobStoreToJson({ jobsSqlitePath: p.jobsSqlite, jobsJsonPath: p.jobsJson, archivedSqlitePath: p.archivedSqlite, archivedJsonPath: p.archivedJson }),
+    exportSqliteJobStoreToJson({
+      jobsSqlitePath: p.jobsSqlite,
+      jobsJsonPath: p.jobsJson,
+      archivedSqlitePath: p.archivedSqlite,
+      archivedJsonPath: p.archivedJson,
+    }),
     /SQLite store not found/,
   );
   // jobs.json must be untouched.
@@ -94,7 +104,12 @@ test("export refuses to overwrite a populated JSON with an empty store", async (
   seedSqlite(p.archivedSqlite, "archived_jobs", []);
 
   await assert.rejects(
-    exportSqliteJobStoreToJson({ jobsSqlitePath: p.jobsSqlite, jobsJsonPath: p.jobsJson, archivedSqlitePath: p.archivedSqlite, archivedJsonPath: p.archivedJson }),
+    exportSqliteJobStoreToJson({
+      jobsSqlitePath: p.jobsSqlite,
+      jobsJsonPath: p.jobsJson,
+      archivedSqlitePath: p.archivedSqlite,
+      archivedJsonPath: p.archivedJson,
+    }),
     /Refusing to overwrite .* with an empty export/,
   );
   assert.equal(readFileSync(p.jobsJson, "utf8"), before);
@@ -107,7 +122,12 @@ test("export of an empty store proceeds when allowEmpty is set", async () => {
   seedSqlite(p.archivedSqlite, "archived_jobs", []);
 
   const result = await exportSqliteJobStoreToJson(
-    { jobsSqlitePath: p.jobsSqlite, jobsJsonPath: p.jobsJson, archivedSqlitePath: p.archivedSqlite, archivedJsonPath: p.archivedJson },
+    {
+      jobsSqlitePath: p.jobsSqlite,
+      jobsJsonPath: p.jobsJson,
+      archivedSqlitePath: p.archivedSqlite,
+      archivedJsonPath: p.archivedJson,
+    },
     { allowEmpty: true, retireSqlite: false },
   );
   assert.equal(result.jobs, 0);
@@ -129,6 +149,9 @@ test("export retires the SQLite files so a re-enable re-migrates from JSON", asy
   });
 
   assert.equal(existsSync(p.jobsSqlite), false, "jobs.sqlite should be renamed aside");
-  assert.ok(result.retired.some((f) => f.includes("rolledback")), "should report retired files");
+  assert.ok(
+    result.retired.some((f) => f.includes("rolledback")),
+    "should report retired files",
+  );
   assert.ok(readdirSync(path.dirname(p.jobsSqlite)).some((f) => f.startsWith("jobs.sqlite.rolledback-")));
 });

@@ -72,7 +72,20 @@ test("public IPs that merely look private are not treated as private", () => {
 });
 
 test("private hostname matching covers loopback, RFC1918, link-local and IPv6", () => {
-  for (const host of ["localhost", "app.localhost", "127.0.0.1", "127.1.2.3", "10.1.2.3", "192.168.0.1", "172.16.0.1", "172.31.255.254", "169.254.10.1", "::1", "fd00::1", "fe80::1"]) {
+  for (const host of [
+    "localhost",
+    "app.localhost",
+    "127.0.0.1",
+    "127.1.2.3",
+    "10.1.2.3",
+    "192.168.0.1",
+    "172.16.0.1",
+    "172.31.255.254",
+    "169.254.10.1",
+    "::1",
+    "fd00::1",
+    "fe80::1",
+  ]) {
     assert.equal(isPrivateOriginHostname(host), true, `expected ${host} to be private`);
   }
 });

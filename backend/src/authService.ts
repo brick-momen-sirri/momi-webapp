@@ -1,12 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-  createHash,
-  randomBytes,
-  scrypt as scryptCallback,
-  timingSafeEqual,
-  type ScryptOptions,
-} from "node:crypto";
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual, type ScryptOptions } from "node:crypto";
 import {
   appStateDriver,
   appStateSqlitePath,
@@ -110,9 +104,11 @@ export function getUserById(userId: string) {
 
 export async function login(identifier: string, password: string): Promise<LoginResult> {
   const normalizedIdentifier = normalizeIdentifier(identifier);
-  const user = sqliteAuthStore?.loadUserByIdentifier(normalizedIdentifier) ?? users.find((item) => {
-    return item.email === normalizedIdentifier || normalizeUsername(item.username) === normalizeUsername(normalizedIdentifier);
-  });
+  const user =
+    sqliteAuthStore?.loadUserByIdentifier(normalizedIdentifier) ??
+    users.find((item) => {
+      return item.email === normalizedIdentifier || normalizeUsername(item.username) === normalizeUsername(normalizedIdentifier);
+    });
 
   if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
     throw new Error("Invalid email or password.");
@@ -174,11 +170,7 @@ export async function getAuthenticatedUser(token: string | undefined) {
       sqliteAuthStore.deleteSessionByTokenHash(tokenHash);
       return undefined;
     }
-    sqliteAuthStore.touchSession(
-      tokenHash,
-      nowIso,
-      new Date(now - 60_000).toISOString(),
-    );
+    sqliteAuthStore.touchSession(tokenHash, nowIso, new Date(now - 60_000).toISOString());
     return toPublicUser(user);
   }
 
@@ -258,9 +250,13 @@ export async function updatePinnedProjects(userId: string, projectIds: string[])
 export async function updateUser(userId: string, input: UpdateUserInput) {
   if (sqliteAuthStore) {
     try {
-      const updated = sqliteAuthStore.applyToUser(userId, (user) => {
-        applyUserUpdates(user, input);
-      }, { revokeSessions: input.active === false });
+      const updated = sqliteAuthStore.applyToUser(
+        userId,
+        (user) => {
+          applyUserUpdates(user, input);
+        },
+        { revokeSessions: input.active === false },
+      );
       if (!updated) throw new Error("User not found.");
       return toPublicUser(updated);
     } catch (error) {
@@ -316,13 +312,17 @@ export async function changePassword(userId: string, currentPassword: string, ne
   validatePasswordPair(newPassword, confirmPassword);
   const passwordHash = await hashPassword(newPassword);
   if (sqliteAuthStore) {
-    const updated = sqliteAuthStore.applyToUser(userId, (current) => {
-      if (current.passwordHash !== user.passwordHash) {
-        throw new Error("Current password is incorrect.");
-      }
-      current.passwordHash = passwordHash;
-      current.updatedAt = new Date().toISOString();
-    }, { revokeSessions: true });
+    const updated = sqliteAuthStore.applyToUser(
+      userId,
+      (current) => {
+        if (current.passwordHash !== user.passwordHash) {
+          throw new Error("Current password is incorrect.");
+        }
+        current.passwordHash = passwordHash;
+        current.updatedAt = new Date().toISOString();
+      },
+      { revokeSessions: true },
+    );
     if (!updated) throw new Error("User not found.");
     return toPublicUser(updated);
   }
@@ -338,10 +338,14 @@ export async function resetPassword(userId: string, password: string, confirmPas
   validatePasswordPair(password, confirmPassword);
   const passwordHash = await hashPassword(password);
   if (sqliteAuthStore) {
-    const updated = sqliteAuthStore.applyToUser(userId, (current) => {
-      current.passwordHash = passwordHash;
-      current.updatedAt = new Date().toISOString();
-    }, { revokeSessions: true });
+    const updated = sqliteAuthStore.applyToUser(
+      userId,
+      (current) => {
+        current.passwordHash = passwordHash;
+        current.updatedAt = new Date().toISOString();
+      },
+      { revokeSessions: true },
+    );
     if (!updated) throw new Error("User not found.");
     return toPublicUser(updated);
   }
@@ -468,12 +472,12 @@ async function verifyPassword(password: string, storedHash: string) {
   if (parts.length !== 6 || parts[0] !== passwordHashPrefix) return false;
   const [, rawN, rawR, rawP, salt, rawHash] = parts;
   const expected = Buffer.from(rawHash, "base64url");
-  const derived = await scryptPassword(password, salt, expected.length, {
+  const derived = (await scryptPassword(password, salt, expected.length, {
     N: Number(rawN),
     r: Number(rawR),
     p: Number(rawP),
     maxmem: 64 * 1024 * 1024,
-  }) as Buffer;
+  })) as Buffer;
   return expected.length === derived.length && timingSafeEqual(expected, derived);
 }
 
@@ -579,11 +583,11 @@ function isUsableSession(session: Partial<SessionRecord>) {
   const expiresAt = safeDate(session.expiresAt);
   return Boolean(
     session &&
-      typeof session.id === "string" &&
-      typeof session.userId === "string" &&
-      typeof session.tokenHash === "string" &&
-      expiresAt &&
-      new Date(expiresAt).getTime() > Date.now(),
+    typeof session.id === "string" &&
+    typeof session.userId === "string" &&
+    typeof session.tokenHash === "string" &&
+    expiresAt &&
+    new Date(expiresAt).getTime() > Date.now(),
   );
 }
 

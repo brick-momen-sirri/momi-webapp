@@ -14,6 +14,7 @@ it cannot survive a lost disk or a lost host. Real DR requires shipping snapshot
 `backend/src/sqliteBackupService.ts`, started from `boot()` in `index.ts` — **dispatcher/monolith only**, never on API workers (they'd all snapshot the same shared databases and race on the same staging directory / offsite prefix).
 
 Each cycle, per database:
+
 1. Open the live database **read-only** and take a consistent copy via SQLite's
    online backup API (`better-sqlite3`'s `db.backup()`). This copies committed
    pages including anything still sitting in the WAL — a plain file copy of just
@@ -40,15 +41,15 @@ result) and raises `[alert]` events — routed through the same `emitAlert`/
 
 All flags live in `.env.example` under "SQLite disaster recovery". Summary:
 
-| Variable | Default | Notes |
-|---|---|---|
-| `SQLITE_BACKUP_ENABLED` | `false` | Master switch. |
-| `SQLITE_BACKUP_INTERVAL_MS` | `3600000` (1h) | This is your RPO: up to one interval of data can be lost in the worst case. |
-| `SQLITE_BACKUP_RETENTION_COUNT` | `48` | Local snapshots kept per database. See §4 for the retention/outage interaction. |
-| `SQLITE_BACKUP_STAGING_DIR` | `./data/backups` | Local staging area before/regardless of upload. |
-| `BACKUP_AZURE_SAS_URL` | *(empty)* | Container SAS URL with **write** access. Empty = local snapshots only, no offsite leg — not real DR against host/disk loss. **Never commit this.** Set it in the process environment (or your secrets manager), not in `ecosystem.config.cjs`. |
-| `BACKUP_AZURE_PREFIX` | `momi-backend` | Blob path prefix; a dated subfolder is added per upload. |
-| `AZCOPY_PATH` | `azcopy` | Override if azcopy isn't on `PATH`. |
+| Variable                        | Default          | Notes                                                                                                                                                                                                                                          |
+| ------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SQLITE_BACKUP_ENABLED`         | `false`          | Master switch.                                                                                                                                                                                                                                 |
+| `SQLITE_BACKUP_INTERVAL_MS`     | `3600000` (1h)   | This is your RPO: up to one interval of data can be lost in the worst case.                                                                                                                                                                    |
+| `SQLITE_BACKUP_RETENTION_COUNT` | `48`             | Local snapshots kept per database. See §4 for the retention/outage interaction.                                                                                                                                                                |
+| `SQLITE_BACKUP_STAGING_DIR`     | `./data/backups` | Local staging area before/regardless of upload.                                                                                                                                                                                                |
+| `BACKUP_AZURE_SAS_URL`          | _(empty)_        | Container SAS URL with **write** access. Empty = local snapshots only, no offsite leg — not real DR against host/disk loss. **Never commit this.** Set it in the process environment (or your secrets manager), not in `ecosystem.config.cjs`. |
+| `BACKUP_AZURE_PREFIX`           | `momi-backend`   | Blob path prefix; a dated subfolder is added per upload.                                                                                                                                                                                       |
+| `AZCOPY_PATH`                   | `azcopy`         | Override if azcopy isn't on `PATH`.                                                                                                                                                                                                            |
 
 Enabling requires a restart (`pm2 restart momi-dispatcher` — see the reload
 sequence used for other changes to this backend).
@@ -60,6 +61,7 @@ and confirm `azcopy --version` works from the same account pm2 runs as.
 ## 3. Getting a SAS URL (least-privilege)
 
 Generate a **container-scoped** SAS with only what backups need:
+
 - Permissions: **Write, Create, List** (not Read/Delete — a compromised SAS
   shouldn't be able to read or destroy existing backups).
 - Expiry: as short as your rotation discipline allows (e.g. 90 days), calendared
@@ -81,7 +83,7 @@ out of scope for this v1 but a reasonable follow-up.
 
 ## 4. Known trade-off: the retention window is also your outage grace period
 
-Rotation has no awareness of upload status — it only keeps the newest N *local*
+Rotation has no awareness of upload status — it only keeps the newest N _local_
 files. If offsite upload starts failing (expired SAS, network outage, wrong
 container) and is never fixed, the oldest local snapshot is deleted every cycle
 once the count exceeds retention. With the shipped defaults (hourly, keep 48),

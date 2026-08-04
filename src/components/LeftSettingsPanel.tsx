@@ -82,9 +82,7 @@ export function LeftSettingsPanel({
   const showResolution = selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel);
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
   const use16By9Cropping = !show16By9CropToggle || enable16By9Cropping;
-  const promptImages = use16By9Cropping
-    ? images
-    : images.map((image) => image ? { ...image, croppedUrl: undefined } : image);
+  const promptImages = use16By9Cropping ? images : images.map((image) => (image ? { ...image, croppedUrl: undefined } : image));
   const activeFolders = (selectedProject?.folders ?? []).filter((folder) => !folder.archived);
   const targetFolder = activeFolders.find((folder) => folder.folderId === targetFolderId);
 
@@ -103,37 +101,29 @@ export function LeftSettingsPanel({
           onImageOutputCountChange={onImageOutputCountChange}
         />
       ) : null}
-      <DurationSelector
-        selectedModel={selectedModel}
-        value={selectedDurationSeconds}
-        onChange={onDurationChange}
-      />
+      <DurationSelector selectedModel={selectedModel} value={selectedDurationSeconds} onChange={onDurationChange} />
       <ImageUploader
         images={images}
         onChange={onImagesChange}
         selectedResolution={selectedResolution}
         requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
-        imageSlotCount={selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)}
+        imageSlotCount={
+          selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)
+        }
         requiresLandscape={Boolean(selectedModel.requiresLandscape)}
         enable16By9Cropping={enable16By9Cropping}
         show16By9CropToggle={show16By9CropToggle}
         onEnable16By9CroppingChange={onEnable16By9CroppingChange}
         textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
       />
-      {selectedModel.requiresVideo ? (
-        <VideoUploader video={video} onChange={onVideoChange} />
-      ) : null}
+      {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
       {showArchVizGridControls ? (
         <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
       ) : (
         <PromptBox value={prompt} onChange={onPromptChange} images={promptImages} selectedModel={selectedModel} />
       )}
 
-      <SaveNumberControl
-        selectedModel={selectedModel}
-        value={saveNumber}
-        onChange={onSaveNumberChange}
-      />
+      <SaveNumberControl selectedModel={selectedModel} value={saveNumber} onChange={onSaveNumberChange} />
 
       {selectedProject ? (
         <label className="block rounded-lg border border-line bg-white p-3 shadow-panel">
@@ -153,7 +143,9 @@ export function LeftSettingsPanel({
         </label>
       ) : null}
 
-      <div className={`rounded-lg border p-3 shadow-panel ${selectedProject ? "border-teal-100 bg-teal-50" : "border-amber-200 bg-amber-50"}`}>
+      <div
+        className={`rounded-lg border p-3 shadow-panel ${selectedProject ? "border-teal-100 bg-teal-50" : "border-amber-200 bg-amber-50"}`}
+      >
         <div className="flex items-start gap-2">
           {selectedProject ? (
             <FolderCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />

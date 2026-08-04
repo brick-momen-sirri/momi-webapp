@@ -112,14 +112,30 @@ export function evaluateAlerts(
   for (const rule of Object.keys(firing) as AlertRule[]) {
     if (!active[rule]) {
       const condition = firing[rule]!;
-      events.push({ rule, phase: "firing", severity: condition.severity, detail: condition.detail, role: snapshot.role, pid: snapshot.pid, atMs: nowMs });
+      events.push({
+        rule,
+        phase: "firing",
+        severity: condition.severity,
+        detail: condition.detail,
+        role: snapshot.role,
+        pid: snapshot.pid,
+        atMs: nowMs,
+      });
       active[rule] = { since: nowMs, severity: condition.severity };
     }
   }
   for (const rule of Object.keys(active) as AlertRule[]) {
     if (!firing[rule]) {
       const prior = active[rule]!;
-      events.push({ rule, phase: "resolved", severity: prior.severity, detail: `recovered after ${Math.round((nowMs - prior.since) / 1000)}s`, role: snapshot.role, pid: snapshot.pid, atMs: nowMs });
+      events.push({
+        rule,
+        phase: "resolved",
+        severity: prior.severity,
+        detail: `recovered after ${Math.round((nowMs - prior.since) / 1000)}s`,
+        role: snapshot.role,
+        pid: snapshot.pid,
+        atMs: nowMs,
+      });
       delete active[rule];
     }
   }
@@ -132,7 +148,9 @@ export type WebhookFormat = "json" | "slack";
 export function buildWebhookPayload(event: AlertEvent, format: WebhookFormat): Record<string, unknown> {
   if (format === "slack") {
     const icon = event.phase === "firing" ? (event.severity === "critical" ? "🔴" : "🟠") : "✅";
-    return { text: `${icon} [${event.severity}] ${event.rule} ${event.phase} on ${event.role} (pid ${event.pid}): ${event.detail}` };
+    return {
+      text: `${icon} [${event.severity}] ${event.rule} ${event.phase} on ${event.role} (pid ${event.pid}): ${event.detail}`,
+    };
   }
   return {
     rule: event.rule,
@@ -160,7 +178,14 @@ async function postWebhook(url: string, format: WebhookFormat, event: AlertEvent
 
 export function emitAlert(event: AlertEvent, opts: { webhookUrl?: string; webhookFormat?: WebhookFormat }): void {
   recordAlert(event);
-  const line = { rule: event.rule, phase: event.phase, severity: event.severity, role: event.role, pid: event.pid, detail: event.detail };
+  const line = {
+    rule: event.rule,
+    phase: event.phase,
+    severity: event.severity,
+    role: event.role,
+    pid: event.pid,
+    detail: event.detail,
+  };
   if (event.phase === "firing") {
     console.warn("[alert]", line);
   } else {
@@ -186,7 +211,8 @@ export function createHealthWatchdog(opts: {
   let state = initialWatchdogState();
   let timer: ReturnType<typeof setInterval> | undefined;
   const now = opts.now ?? (() => Date.now());
-  const emit = opts.emit ?? ((event: AlertEvent) => emitAlert(event, { webhookUrl: opts.webhookUrl, webhookFormat: opts.webhookFormat }));
+  const emit =
+    opts.emit ?? ((event: AlertEvent) => emitAlert(event, { webhookUrl: opts.webhookUrl, webhookFormat: opts.webhookFormat }));
 
   async function tickOnce(): Promise<void> {
     let snapshot: ObservabilitySnapshot;

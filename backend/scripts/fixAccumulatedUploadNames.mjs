@@ -33,8 +33,8 @@ const uploadsRoot = path.join(backendRoot, "data", "projects", "_uploads");
 const jobsDbPath = path.join(backendRoot, "data", "jobs.sqlite");
 const projectRoots = [
   path.join(backendRoot, "data", "projects"),
-  process.env.BRICK_PROJECTS_ROOT
-    ?? String.raw`C:\ComfyUI_windows_portable_nvidia_cu128\ComfyUI_windows_portable\ComfyUI\output\projects`,
+  process.env.BRICK_PROJECTS_ROOT ??
+    String.raw`C:\ComfyUI_windows_portable_nvidia_cu128\ComfyUI_windows_portable\ComfyUI\output\projects`,
 ];
 
 const UPLOAD_ID_PREFIX = /^(\d{13}-[0-9a-f]{12}-)/i;
@@ -43,9 +43,15 @@ const log = (line) => console.log(line);
 // --- Safety: refuse to touch anything while the backend is listening ---------
 function portInUse(port) {
   return new Promise((resolve) => {
-    const socket = net.connect({ host: "127.0.0.1", port }, () => { socket.destroy(); resolve(true); });
+    const socket = net.connect({ host: "127.0.0.1", port }, () => {
+      socket.destroy();
+      resolve(true);
+    });
     socket.on("error", () => resolve(false));
-    socket.setTimeout(1500, () => { socket.destroy(); resolve(false); });
+    socket.setTimeout(1500, () => {
+      socket.destroy();
+      resolve(false);
+    });
   });
 }
 
@@ -54,10 +60,17 @@ function buildPlan() {
   const plan = [];
   const walk = (dir) => {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(full); continue; }
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
       const chains = (entry.name.match(/\d{13}-[0-9a-f]{12}-/gi) ?? []).length;
       if (chains < 2) continue;
       const outermost = entry.name.match(UPLOAD_ID_PREFIX)[1];
@@ -88,7 +101,11 @@ function collectReferenceFiles() {
   const files = [];
   const walk = (dir) => {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
@@ -104,14 +121,22 @@ const plan = buildPlan();
 log(`mode                : ${EXECUTE ? "EXECUTE" : "DRY RUN"}`);
 log(`uploads root        : ${uploadsRoot}`);
 log(`files to rename     : ${plan.length}`);
-if (plan.length === 0) { log("nothing to do."); process.exit(0); }
+if (plan.length === 0) {
+  log("nothing to do.");
+  process.exit(0);
+}
 
 const oldMax = Math.max(...plan.map((p) => p.oldPath.length));
 const newMax = Math.max(...plan.map((p) => p.newPath.length));
 log(`longest path        : ${oldMax} -> ${newMax} chars (Windows limit 260)`);
 const dist = new Map();
 for (const p of plan) dist.set(p.chains, (dist.get(p.chains) ?? 0) + 1);
-log(`chain depths        : ${[...dist].sort((a, b) => a[0] - b[0]).map(([c, n]) => `${c}x:${n}`).join("  ")}`);
+log(
+  `chain depths        : ${[...dist]
+    .sort((a, b) => a[0] - b[0])
+    .map(([c, n]) => `${c}x:${n}`)
+    .join("  ")}`,
+);
 
 // Pre-flight checks.
 const problems = [];
@@ -151,11 +176,21 @@ let refFileReplacements = 0;
 const refEdits = [];
 for (const file of referenceFiles) {
   let text;
-  try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    continue;
+  }
   const { out, replacements } = applyRenames(text, plan);
-  if (replacements > 0) { refFileHits += 1; refFileReplacements += replacements; refEdits.push({ file, out }); }
+  if (replacements > 0) {
+    refFileHits += 1;
+    refFileReplacements += replacements;
+    refEdits.push({ file, out });
+  }
 }
-log(`reference files     : ${refFileHits} of ${referenceFiles.length} json/jsonl need edits (${refFileReplacements} replacements)`);
+log(
+  `reference files     : ${refFileHits} of ${referenceFiles.length} json/jsonl need edits (${refFileReplacements} replacements)`,
+);
 
 // Jobs DB scan.
 const db = new Database(jobsDbPath, { readonly: !EXECUTE, fileMustExist: true });
@@ -193,12 +228,17 @@ log(`\njobs.sqlite backed up to ${backupPath}`);
 //    updated the old path must stay valid, so a failure part-way leaves a
 //    consistent system either way.
 let copied = 0;
-for (const p of plan) { fs.copyFileSync(p.oldPath, p.newPath); copied += 1; }
+for (const p of plan) {
+  fs.copyFileSync(p.oldPath, p.newPath);
+  copied += 1;
+}
 log(`copied to new names : ${copied}`);
 
 // 2. Update the DB in one transaction.
 const update = db.prepare("UPDATE jobs SET data = ? WHERE id = ?");
-db.transaction(() => { for (const edit of rowEdits) update.run(edit.data, edit.id); })();
+db.transaction(() => {
+  for (const edit of rowEdits) update.run(edit.data, edit.id);
+})();
 log(`jobs rows updated   : ${rowEdits.length}`);
 
 // 3. Update on-disk references atomically.
@@ -214,12 +254,24 @@ const verification = [];
 const remaining = [];
 for (const file of collectReferenceFiles()) {
   let text;
-  try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
-  for (const p of plan) if (text.includes(p.oldName)) { remaining.push(`${file} still references ${p.oldName}`); break; }
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    continue;
+  }
+  for (const p of plan)
+    if (text.includes(p.oldName)) {
+      remaining.push(`${file} still references ${p.oldName}`);
+      break;
+    }
 }
 for (const row of db.prepare("SELECT id, data FROM jobs").all()) {
   if (typeof row.data !== "string") continue;
-  for (const p of plan) if (row.data.includes(p.oldName)) { remaining.push(`job ${row.id} still references ${p.oldName}`); break; }
+  for (const p of plan)
+    if (row.data.includes(p.oldName)) {
+      remaining.push(`job ${row.id} still references ${p.oldName}`);
+      break;
+    }
 }
 if (remaining.length) verification.push(`${remaining.length} stale references remain`);
 
@@ -249,7 +301,10 @@ log(`verification         : OK (no stale references, all upload paths resolve)`)
 
 // 5. Only now remove the originals.
 let removed = 0;
-for (const p of plan) { fs.rmSync(p.oldPath, { force: true }); removed += 1; }
+for (const p of plan) {
+  fs.rmSync(p.oldPath, { force: true });
+  removed += 1;
+}
 log(`old files removed    : ${removed}`);
 db.close();
 log(`\nMigration complete. Restart with: pm2 start momi-dispatcher momi-api`);

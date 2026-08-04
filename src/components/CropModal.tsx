@@ -30,14 +30,17 @@ type Point = {
 
 export function CropModal({ image, selectedResolution, onCancel, onSave }: CropModalProps) {
   const outputSize = useMemo(() => outputSizeForResolution(selectedResolution, ASPECT_RATIO), [selectedResolution]);
-  const defaultSettings = useMemo<CropSettings>(() => ({
-    scale: 1,
-    offsetX: 0,
-    offsetY: 0,
-    aspectRatio: ASPECT_RATIO,
-    outputWidth: outputSize.width,
-    outputHeight: outputSize.height,
-  }), [outputSize.height, outputSize.width]);
+  const defaultSettings = useMemo<CropSettings>(
+    () => ({
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      aspectRatio: ASPECT_RATIO,
+      outputWidth: outputSize.width,
+      outputHeight: outputSize.height,
+    }),
+    [outputSize.height, outputSize.width],
+  );
   const [settings, setSettings] = useState<CropSettings>(() => normalizeSettings(image.cropSettings ?? defaultSettings));
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const [isSaving, setIsSaving] = useState(false);
@@ -51,19 +54,23 @@ export function CropModal({ image, selectedResolution, onCancel, onSave }: CropM
   const sourceWidth = image.width ?? outputSize.width;
   const sourceHeight = image.height ?? outputSize.height;
   const originalIsReady = isNearAspectRatio(image.width, image.height, ASPECT_RATIO);
-  const willUpscale = Boolean(image.width && image.height && (image.width < outputSize.width || image.height < outputSize.height));
+  const willUpscale = Boolean(
+    image.width && image.height && (image.width < outputSize.width || image.height < outputSize.height),
+  );
   const geometry = useMemo(
     () => getPreviewGeometry(frameSize, sourceWidth, sourceHeight, settings),
     [frameSize, settings, sourceHeight, sourceWidth],
   );
 
   useEffect(() => {
-    setSettings(normalizeSettings({
-      ...(image.cropSettings ?? defaultSettings),
-      aspectRatio: ASPECT_RATIO,
-      outputWidth: outputSize.width,
-      outputHeight: outputSize.height,
-    }));
+    setSettings(
+      normalizeSettings({
+        ...(image.cropSettings ?? defaultSettings),
+        aspectRatio: ASPECT_RATIO,
+        outputWidth: outputSize.width,
+        outputHeight: outputSize.height,
+      }),
+    );
   }, [defaultSettings, image.cropSettings, image.id, outputSize.height, outputSize.width]);
 
   useEffect(() => {
@@ -135,20 +142,24 @@ export function CropModal({ image, selectedResolution, onCancel, onSave }: CropM
   }
 
   function handleFill() {
-    setSettings(normalizeSettings({
-      ...defaultSettings,
-      outputWidth: outputSize.width,
-      outputHeight: outputSize.height,
-    }));
+    setSettings(
+      normalizeSettings({
+        ...defaultSettings,
+        outputWidth: outputSize.width,
+        outputHeight: outputSize.height,
+      }),
+    );
   }
 
   function handleFit() {
     if (!originalIsReady) return;
-    setSettings(normalizeSettings({
-      ...defaultSettings,
-      outputWidth: outputSize.width,
-      outputHeight: outputSize.height,
-    }));
+    setSettings(
+      normalizeSettings({
+        ...defaultSettings,
+        outputWidth: outputSize.width,
+        outputHeight: outputSize.height,
+      }),
+    );
   }
 
   function handleReset() {
@@ -328,8 +339,12 @@ export function CropModal({ image, selectedResolution, onCancel, onSave }: CropM
 
             <div className="rounded-md border border-line bg-mist/70 p-3">
               <p className="text-xs font-semibold uppercase text-stone-500">Output</p>
-              <p className="mt-1 text-sm font-semibold">{selectedResolution} - {outputSize.width} x {outputSize.height}</p>
-              <p className="mt-2 text-xs text-stone-500">Original: {image.width ?? "?"} x {image.height ?? "?"}</p>
+              <p className="mt-1 text-sm font-semibold">
+                {selectedResolution} - {outputSize.width} x {outputSize.height}
+              </p>
+              <p className="mt-2 text-xs text-stone-500">
+                Original: {image.width ?? "?"} x {image.height ?? "?"}
+              </p>
             </div>
 
             {originalIsReady ? (

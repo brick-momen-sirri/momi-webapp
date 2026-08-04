@@ -84,7 +84,7 @@ export async function describeUploadedImages(
     }),
   });
 
-  const data = await response.json().catch(() => ({})) as Partial<DescribeImageResponse> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Partial<DescribeImageResponse> & { error?: string };
   if (!response.ok) {
     throw new Error(data.error || requestSizeError(response) || "Could not describe image.");
   }
@@ -96,10 +96,7 @@ export async function describeUploadedImages(
   return cleanParagraph(data.text);
 }
 
-export async function generateSeedancePromptWithWorkflow(
-  images: UploadedImage[],
-  options: { userPrompt: string },
-) {
+export async function generateSeedancePromptWithWorkflow(images: UploadedImage[], options: { userPrompt: string }) {
   const userPrompt = options.userPrompt.trim();
   if (!userPrompt) {
     throw new Error("Write the initial Seedance idea first.");
@@ -122,7 +119,7 @@ export async function generateSeedancePromptWithWorkflow(
     }),
   });
 
-  const data = await response.json().catch(() => ({})) as Partial<DescribeImageResponse> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Partial<DescribeImageResponse> & { error?: string };
   if (!response.ok) {
     throw new Error(data.error || requestSizeError(response) || "Could not generate Seedance prompt.");
   }
@@ -160,9 +157,11 @@ export async function generateKlingPromptWithWorkflow(
     }),
   });
 
-  const data = await response.json().catch(() => ({})) as Partial<DescribeImageResponse> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Partial<DescribeImageResponse> & { error?: string };
   if (!response.ok) {
-    throw new Error(data.error || requestSizeError(response) || responseStatusError(response) || "Could not generate Kling prompt.");
+    throw new Error(
+      data.error || requestSizeError(response) || responseStatusError(response) || "Could not generate Kling prompt.",
+    );
   }
   if (!data.text) {
     throw new Error("Kling workflow response did not include generated prompt text.");
@@ -210,7 +209,7 @@ export async function improvePromptWithQwen({
     }),
   });
 
-  const data = await response.json().catch(() => ({})) as Partial<DescribeImageResponse> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Partial<DescribeImageResponse> & { error?: string };
   if (!response.ok) {
     throw new Error(data.error || requestSizeError(response) || "Could not improve prompt.");
   }
@@ -260,14 +259,18 @@ function delay(ms: number) {
 
 async function uploadedImageToBase64(image: UploadedImage) {
   const source = image.croppedUrl ?? image.url;
-  const blob = await fetch(source).then((response) => {
-    if (!response.ok) throw new Error("Could not read uploaded image.");
-    return response.blob();
-  }).catch((error) => {
-    throw new Error(error instanceof Error && error.message
-      ? `Could not read uploaded image. ${error.message}`
-      : "Could not read uploaded image.");
-  });
+  const blob = await fetch(source)
+    .then((response) => {
+      if (!response.ok) throw new Error("Could not read uploaded image.");
+      return response.blob();
+    })
+    .catch((error) => {
+      throw new Error(
+        error instanceof Error && error.message
+          ? `Could not read uploaded image. ${error.message}`
+          : "Could not read uploaded image.",
+      );
+    });
 
   const promptBlob = await compressImageForPrompt(blob).catch(() => blob);
   return blobToDataUrl(promptBlob);
@@ -309,7 +312,9 @@ async function compressImageForPrompt(blob: Blob) {
   }
 }
 
-async function decodeImageBlob(blob: Blob): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
+async function decodeImageBlob(
+  blob: Blob,
+): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
   if ("createImageBitmap" in window) {
     try {
       const bitmap = await createImageBitmap(blob);
@@ -341,7 +346,13 @@ async function decodeImageBlob(blob: Blob): Promise<{ source: CanvasImageSource;
   };
 }
 
-async function renderPromptImage(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, maxDimension: number, quality: number) {
+async function renderPromptImage(
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  maxDimension: number,
+  quality: number,
+) {
   const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
   const width = Math.max(1, Math.round(sourceWidth * scale));
   const height = Math.max(1, Math.round(sourceHeight * scale));
@@ -424,15 +435,14 @@ function buildDescribePrompt({
     return IMAGE_DESCRIPTION_PROMPT;
   }
 
-  const base = mode === "klingVideo"
-    ? KLING_VIDEO_PROMPT
-    : mode === "seedanceVideo"
-      ? SEEDANCE_VIDEO_PROMPT
-      : VIDEO_ARCHVIZ_PROMPT;
+  const base =
+    mode === "klingVideo" ? KLING_VIDEO_PROMPT : mode === "seedanceVideo" ? SEEDANCE_VIDEO_PROMPT : VIDEO_ARCHVIZ_PROMPT;
   const context = [
     userPrompt?.trim() ? `User prompt: ${userPrompt.trim()}` : "",
     cameraPrompt?.trim() ? `Camera movement instruction to blend naturally: ${cameraPrompt.trim()}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return context ? `${base}\n\n${context}` : base;
 }
@@ -457,11 +467,12 @@ function buildImprovePrompt({
     ].join("\n");
   }
 
-  const maxRule = mode === "klingVideo"
-    ? "Improve and enhance the prompt with all useful visual, motion, timing, camera, and continuity details. Do not shorten it to a character limit."
-    : mode === "seedanceVideo"
-      ? "Rewrite as a Seedance 2.0 prompt with useful production blocks and preserved reference identity. Return only the final prompt text."
-      : "Keep the final prompt as one clear production paragraph.";
+  const maxRule =
+    mode === "klingVideo"
+      ? "Improve and enhance the prompt with all useful visual, motion, timing, camera, and continuity details. Do not shorten it to a character limit."
+      : mode === "seedanceVideo"
+        ? "Rewrite as a Seedance 2.0 prompt with useful production blocks and preserved reference identity. Return only the final prompt text."
+        : "Keep the final prompt as one clear production paragraph.";
 
   return [
     "Improve this video-generation prompt using the reference image when available.",
@@ -472,5 +483,7 @@ function buildImprovePrompt({
     `Current prompt: ${text}`,
     cameraPrompt?.trim() ? `Camera movement instruction: ${cameraPrompt.trim()}` : "",
     "Return only the improved prompt.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
