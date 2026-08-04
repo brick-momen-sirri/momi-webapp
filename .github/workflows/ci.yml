@@ -39,5 +39,8 @@ jobs:
       - name: Backend tests
         run: pnpm --filter momi-animation-backend run test
 
+      - name: Frontend tests
+        run: pnpm run test
+
       - name: Frontend build (type-check + vite)
         run: pnpm run build

@@ -107,7 +107,39 @@ and restore drills, config-split guards. New backend modules are expected to
 land with a matching `*.test.ts`, registered in the `test` script in
 `backend/package.json`.
 
-The frontend has no tests yet. That is the largest known gap in this repo.
+### Frontend
+
+```bash
+pnpm run test
+```
+
+Vitest + React Testing Library in jsdom, configured in
+[vitest.config.ts](vitest.config.ts) with jsdom shims in
+[src/test/setup.ts](src/test/setup.ts) (IntersectionObserver, HTMLMediaElement
+play/pause, scrollIntoView — none of which jsdom implements).
+
+Coverage is a beachhead, not a suite. What is covered:
+
+| Area                                          | Why it was first                                                                                                                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Media access token lifecycle                  | Built recently, and it fails silently: URLs are assembled during render from a token refreshed on a timer, so a bug produces broken images minutes after a tab opens rather than an error |
+| `saveNumber`                                  | Decides the filename a render is filed under; wrong is only noticed much later                                                                                                            |
+| `promptRules`                                 | The Kling 2500-char limit is duplicated in the backend; a drift means prompts pass the UI and fail at submission                                                                          |
+| `JobFeed` render, search, pagination, actions | Busiest list logic in the app                                                                                                                                                             |
+
+Known gaps, in rough priority order:
+
+- `App.tsx` — 2,100 lines, 39 `useState`, no tests. Needs a mocking harness
+  before it can be rendered at all.
+- `JobFeed`'s status/scope/output filters — they live in a collapsible panel with
+  a staged Reset+Apply flow, which needs its own helper to drive.
+- `backendApi`'s job, project and upload calls. Only the auth and media-token
+  paths are covered.
+- The remaining components: `CreditUsageDashboard`, `RightProjectPanel`,
+  `ImageUploader`, `CropModal`.
+
+When adding a test, prefer asserting the thing a user would notice over the
+implementation detail that produces it.
 
 ## Lint and formatting
 
