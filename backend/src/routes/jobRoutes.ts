@@ -6,6 +6,7 @@ import { getRequestUser } from "../authMiddleware.js";
 import { httpStatusFromError } from "../httpError.js";
 import { getQueryValue, parseBooleanQuery, parseOptionalNumber, parsePaginationNumber } from "../httpQuery.js";
 import { filterJobs } from "../jobFilters.js";
+import { validateJobMediaReferences } from "../jobMediaValidation.js";
 import {
   canAccessJob,
   canCreateJobInProject,
@@ -25,6 +26,7 @@ import {
   permanentlyDeleteArchivedJob,
   restoreArchivedJob,
 } from "../jobQueue.js";
+import { createJobSubmissionHandler } from "../jobSubmissionRoute.js";
 import { getProject } from "../projectService.js";
 import { getWorkflowModel } from "../workflowService.js";
 
@@ -68,33 +70,18 @@ jobRouter.get("/api/jobs/:jobId", (req, res) => {
   res.json({ job });
 });
 
-jobRouter.post("/api/jobs", async (req, res) => {
-  try {
-    const user = getRequestUser(req);
-    if (isDemoAccount(user)) {
-      return res.status(403).json({ error: "Demo accounts are view-only and cannot generate tasks." });
-    }
-    const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : "";
-    const project = getProject(projectId);
-    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-    if (!canCreateJobInProject(user, project)) return res.status(403).json({ error: "Project editor access required." });
-    const modelId = typeof req.body?.modelId === "string" ? req.body.modelId : "";
-    const model = getWorkflowModel(modelId);
-    if (user.role !== "admin" && model && isSeedanceModel(model) && is4KResolution(req.body?.resolution)) {
-      return res.status(403).json({ error: "Seedance 4K generation is available to administrators only." });
-    }
-    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
-    if (model && isKlingVideoModel(model) && prompt.length > KLING_PROMPT_CHARACTER_LIMIT) {
-      return res.status(400).json({
-        error: `Kling prompts are limited to ${KLING_PROMPT_CHARACTER_LIMIT} characters; this prompt is ${prompt.length}. Shorten it and try again.`,
-      });
-    }
-    const job = await createJob({ ...(req.body ?? {}), userId: user.id });
-    res.status(201).json({ job });
-  } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Could not create job" });
-  }
-});
+jobRouter.post(
+  "/api/jobs",
+  createJobSubmissionHandler({
+    getProject,
+    getWorkflowModel,
+    canViewProject,
+    canCreateJobInProject,
+    isDemoAccount,
+    validateMedia: validateJobMediaReferences,
+    createJob,
+  }),
+);
 
 jobRouter.post("/api/jobs/:jobId/retry", async (req, res) => {
   try {
@@ -130,29 +117,6 @@ jobRouter.post("/api/jobs/:jobId/retry", async (req, res) => {
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not retry job" });
   }
 });
-
-function isSeedanceModel(model: { id: string; name: string; category: string; workflowPath: string }) {
-  return `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("seedance");
-}
-
-// Kept in sync with KLING_PROMPT_CHARACTER_LIMIT in src/services/promptRules.ts.
-const KLING_PROMPT_CHARACTER_LIMIT = 2500;
-
-function isKlingVideoModel(model: { id: string; name: string; category: string; workflowPath: string; outputType: string }) {
-  return (
-    model.outputType === "video" &&
-    `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("kling")
-  );
-}
-
-function is4KResolution(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const resolution = value as { width?: unknown; height?: unknown; label?: unknown };
-  const label = typeof resolution.label === "string" ? resolution.label.toLowerCase().replace(/\s+/g, "") : "";
-  const width = Number(resolution.width);
-  const height = Number(resolution.height);
-  return label === "4k" || (Math.max(width, height) === 3840 && Math.min(width, height) === 2160);
-}
 
 jobRouter.post("/api/jobs/:jobId/cancel", async (req, res) => {
   const user = getRequestUser(req);

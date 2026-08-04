@@ -12,9 +12,10 @@
 // mounted the routers in a different order would pass while proving nothing about
 // production. If you change the order in index.ts, change it here too.
 //
-// Scope note: POST /api/jobs is deliberately never called. Creating a job is the
-// one route that can dispatch a paid RunPod workflow, and no test is worth the risk
-// of a real submission. Job read paths are covered by seeding the store directly.
+// POST /api/jobs is safe here because ROLE=api is fixed before any application
+// import. An API-role process can persist queued work but cannot own dispatcher
+// work. The focused creation test also installs an outbound-fetch tripwire, so a
+// future regression that tries to contact a provider fails immediately.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -61,6 +62,7 @@ const { requireAuth, resolveMediaAccessToken } = await import("./authMiddleware.
 const authService = await import("./authService.js");
 const projectService = await import("./projectService.js");
 const jobQueue = await import("./jobQueue.js");
+const workflowService = await import("./workflowService.js");
 
 const { authPublicRouter } = await import("./routes/authPublicRoutes.js");
 const { authSessionRouter } = await import("./routes/authSessionRoutes.js");
@@ -126,6 +128,7 @@ before(async () => {
   await authService.loadAuthData();
   await projectService.loadProjects();
   await jobQueue.loadJobs();
+  await workflowService.loadWorkflowModels();
   const login = await call("POST", "/api/auth/login", { body: { email: adminEmail, password: adminPassword } });
   assert.equal(login.status, 200, `login failed: ${login.text}`);
   adminToken = String((login.body as { token?: string }).token);
@@ -177,6 +180,7 @@ test("every route below requireAuth refuses an unauthenticated request", async (
     ["GET", "/api/users"],
     ["GET", "/api/pods/status"],
     ["POST", "/api/projects"],
+    ["POST", "/api/jobs"],
     ["PATCH", "/api/projects/prj_1"],
     ["POST", "/api/projects/prj_1/folders"],
     ["POST", "/api/jobs/job_1/archive"],
@@ -248,6 +252,51 @@ test("the creator is recorded as the project owner", async () => {
   assert.equal(response.status, 200, response.text);
   const project = (response.body as { project?: { ownerId?: string } }).project ?? response.body;
   assert.equal(typeof (project as { ownerId?: string }).ownerId, "string");
+});
+
+test("POST /api/jobs persists a queued job without provider or network dispatch", async () => {
+  const model = workflowService.getWorkflowModels()[0];
+  assert.ok(model, "expected at least one workflow model fixture");
+  const supportedResolution = model.supportedResolutions?.[0] ?? "1080p";
+  const resolution = resolutionFor(supportedResolution);
+  const imageData = "data:image/png;base64,AQID";
+  const videoData = "data:video/mp4;base64,AQID";
+  const body = {
+    projectId: testProjectId,
+    modelId: model.id,
+    prompt: model.requiresPrompt ? "A safe route integration render" : "",
+    resolution,
+    durationSeconds: model.supportedDurations?.[0],
+    inputImages: model.requiredInputs.includes("single_image") ? [imageData] : undefined,
+    startFrame: model.requiredInputs.includes("start_frame") ? imageData : undefined,
+    endFrame: model.requiredInputs.includes("end_frame") ? imageData : undefined,
+    inputVideo: model.requiredInputs.includes("video") ? videoData : undefined,
+  };
+
+  const nativeFetch = globalThis.fetch;
+  let outboundAttempt = "";
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (!url.startsWith(baseUrl)) {
+      outboundAttempt = url;
+      throw new Error(`TEST SAFETY TRIPWIRE: outbound request attempted: ${url}`);
+    }
+    return nativeFetch(input, init);
+  };
+
+  try {
+    const response = await asAdmin("POST", "/api/jobs", body);
+    assert.equal(response.status, 201, response.text);
+    const created = (response.body as { job?: { id?: string; status?: string; userId?: string; creditsEstimated?: number } }).job;
+    assert.ok(created?.id);
+    assert.equal(created.status, "queued");
+    assert.equal(created.userId, "usr_momen");
+    assert.equal(typeof created.creditsEstimated, "number");
+    assert.equal(jobQueue.getJob(created.id)?.status, "queued");
+    assert.equal(outboundAttempt, "");
+  } finally {
+    globalThis.fetch = nativeFetch;
+  }
 });
 
 test("a project fetch by unknown id is a 404, not an empty 200", async () => {
@@ -448,3 +497,19 @@ test("the comfy pool routes report disabled rather than failing", async () => {
   const response = await asAdmin("GET", "/api/comfy/servers");
   assert.ok(response.status === 200 || response.status === 404, `got ${response.status}`);
 });
+
+function resolutionFor(value: string) {
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  const aliases: Record<string, [number, number]> = {
+    auto: [1024, 1024],
+    "1k": [1024, 1024],
+    "2k": [2048, 2048],
+    "720p": [1280, 720],
+    "1080p": [1920, 1080],
+    "4k": [3840, 2160],
+  };
+  const dimensions = aliases[normalized] ?? normalized.split("x").map(Number);
+  const [width, height] = dimensions;
+  assert.ok(Number.isFinite(width) && Number.isFinite(height), `unsupported test resolution: ${value}`);
+  return { width, height, label: value };
+}

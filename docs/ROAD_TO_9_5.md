@@ -104,11 +104,20 @@ how to roll back the change.
 - Tests required before changing it: auth/ownership, validation matrix, successful
   observable state, idempotent retry, reservation/creation/queue/provider/database
   failures, exactly-once refund, cancellation race, and a network/provider tripwire.
-- Implementation status: pending; design follows the two defect fixes.
-- Verification results: pending.
-- Remaining risks: requested reservation/idempotency guarantees may not exist in
-  the present implementation; the map must distinguish absent production behavior
-  from merely untested behavior before adding a transaction contract.
+- Implementation status: complete for the current production contract. The route
+  now has a narrow injected submission port, fail-closed request/media validation,
+  persistence-before-dispatch rollback, a controlled in-memory route harness, and
+  a real API-role/SQLite integration test with an outbound-network tripwire. See
+  `docs/POST_JOBS_SAFETY.md` for the dependency and capability map.
+- Verification results: route tests cover successful owned creation, deterministic
+  estimate/state, auth roles, malformed/invalid inputs, media ownership/type/size,
+  provider options, persistence failure, and zero provider/network dispatch. The
+  production router test observes the queued job in the real queue/store path.
+- Remaining risks: the repository has no reservation ledger, insufficient-balance
+  transaction, exactly-once refund, or idempotency key. Those guarantees remain
+  explicitly unimplemented rather than simulated by a fake test. Provider and
+  cancellation failures occur asynchronously after the 201 response and belong to
+  lifecycle tests.
 - Rollback approach: keep production defaults behind the compatibility export and
   revert the harness/submission commit; tests never use production configuration.
 
@@ -126,8 +135,8 @@ how to roll back the change.
 - Tests required before changing it: competing/stale claims, cancellation/completion
   races, archive while active, worker/dispatcher restart, duplicate result and
   settlement, settlement retry, orphan recovery, snapshot restoration, and shutdown.
-- Implementation status: blocked by checklist order; do not begin until items 1-3
-  are complete and this checklist is reviewed/updated.
+- Implementation status: ready to start after the updated checklist checkpoint;
+  items 1-3 are complete for their documented scope.
 - Verification results: pending.
 - Remaining risks: multi-process behavior may depend on persistence-driver atomicity;
   extraction cannot manufacture stronger guarantees without a schema/lease change.
@@ -212,3 +221,7 @@ how to roll back the change.
   complete gate at this checkpoint passed (422 frontend + 502 backend = 924 tests,
   ESLint and TypeScript clean). Port 8190 and all production/provider state remain
   untouched.
+- 2026-08-04: added the safe job-submission seam, validation and ownership gates,
+  API-role SQLite integration path, provider/network tripwire, and durable-write
+  rollback. The billing/idempotency features absent from production are recorded
+  as explicit remaining design work, not fake-covered behavior.

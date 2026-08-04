@@ -84,6 +84,7 @@ import {
   resultExtension,
   type StoreCacheCursor,
 } from "./jobQueue/index.js";
+import { commitQueuedJob } from "./jobQueue/queuedJobCommit.js";
 
 export { chooseRunpodImageInputNames, isRemoteResultMediaUrl, jobRemoteMediaEntries } from "./jobQueue/index.js";
 export type { RemoteMediaEntry } from "./jobQueue/index.js";
@@ -527,9 +528,18 @@ export async function createJob(request: CreateJobRequest) {
     createdAt: new Date().toISOString(),
   };
 
-  jobs = [job, ...jobs];
-  await persistUpsert(job);
-  void dispatchQueue();
+  await commitQueuedJob(job, {
+    add: (created) => {
+      jobs = [created, ...jobs];
+    },
+    remove: (jobId) => {
+      jobs = jobs.filter((candidate) => candidate.id !== jobId);
+    },
+    persist: persistUpsert,
+    notifyDispatcher: () => {
+      void dispatchQueue();
+    },
+  });
   return job;
 }
 
