@@ -120,26 +120,32 @@ play/pause, scrollIntoView — none of which jsdom implements).
 
 Coverage is a beachhead, not a suite. What is covered:
 
-| Area                                          | Why it was first                                                                                                                                                                          |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Media access token lifecycle                  | Built recently, and it fails silently: URLs are assembled during render from a token refreshed on a timer, so a bug produces broken images minutes after a tab opens rather than an error |
-| `saveNumber`                                  | Decides the filename a render is filed under; wrong is only noticed much later                                                                                                            |
-| `promptRules`                                 | The Kling 2500-char limit is duplicated in the backend; a drift means prompts pass the UI and fail at submission                                                                          |
-| `JobFeed` render, search, pagination, actions | Busiest list logic in the app                                                                                                                                                             |
+| Area                                                                                                                            | Why it was first                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Media access token lifecycle                                                                                                    | Built recently, and it fails silently: URLs are assembled during render from a token refreshed on a timer, so a bug produces broken images minutes after a tab opens rather than an error |
+| `saveNumber`                                                                                                                    | Decides the filename a render is filed under; wrong is only noticed much later                                                                                                            |
+| `promptRules`                                                                                                                   | The Kling 2500-char limit is duplicated in the backend; a drift means prompts pass the UI and fail at submission                                                                          |
+| `JobFeed` — every filter (status, model, scope, specific-user, generation type), sort, Reset/Apply, search, pagination, actions | Busiest list logic in the app; a filter that silently drops a job reads to an artist as "my render is missing"                                                                            |
 
 Known gaps, in rough priority order:
 
 - `App.tsx` — 2,100 lines, 39 `useState`, no tests. Needs a mocking harness
   before it can be rendered at all.
-- `JobFeed`'s status/scope/output filters — they live in a collapsible panel with
-  a staged Reset+Apply flow, which needs its own helper to drive.
 - `backendApi`'s job, project and upload calls. Only the auth and media-token
   paths are covered.
 - The remaining components: `CreditUsageDashboard`, `RightProjectPanel`,
   `ImageUploader`, `CropModal`.
 
 When adding a test, prefer asserting the thing a user would notice over the
-implementation detail that produces it.
+implementation detail that produces it. Two traps already caught here:
+
+- **Verify a new test can fail.** Break the code it covers and confirm it goes
+  red. Both suites here were mutation-checked that way; the `JobFeed` filter
+  tests caught 5, 3, 1 and 1 failures against four separate broken predicates.
+- **`{ exact: false }` in Testing Library is also case-insensitive.** A job
+  prompted "my job" matched the scope dropdown's own "Scope: My jobs" option, so
+  the assertions passed while checking nothing. Use case-sensitive matching and
+  fixture text that cannot collide with the component's own labels.
 
 ## Lint and formatting
 
