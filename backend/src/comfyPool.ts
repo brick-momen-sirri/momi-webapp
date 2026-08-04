@@ -6,7 +6,7 @@ import { getSystemStats } from "./comfyClient.js";
 import { isPathWithinRoot } from "./pathContainment.js";
 import type { ComfyServerStatus } from "./types.js";
 
-type ServerRecord = {
+export type ServerRecord = {
   url: string;
   port: number;
   status: ComfyServerStatus;
@@ -14,57 +14,73 @@ type ServerRecord = {
   errorMessage?: string;
 };
 
-const busy = new Set<string>();
-let cache: ServerRecord[] = comfyServers.map((url) => ({ url, port: portFromUrl(url), status: "offline" }));
+type HealthCheck = (url: string) => Promise<unknown>;
 
-export async function refreshServers() {
-  cache = await Promise.all(
-    comfyServers.map(async (url) => {
-      try {
-        await getSystemStats(url);
-        return {
-          url,
-          port: portFromUrl(url),
-          status: busy.has(url) ? "busy" : "idle",
-          lastChecked: new Date().toISOString(),
-        } satisfies ServerRecord;
-      } catch (error) {
-        busy.delete(url);
-        return {
-          url,
-          port: portFromUrl(url),
-          status: "offline",
-          lastChecked: new Date().toISOString(),
-          errorMessage: error instanceof Error ? error.message : "Unknown health check error",
-        } satisfies ServerRecord;
-      }
-    }),
-  );
-  return cache;
-}
+/** Deterministic process-local worker selection; provider I/O is injected for tests. */
+export class ComfyServerPool {
+  private readonly busy = new Set<string>();
+  private cache: ServerRecord[];
 
-export function getServers() {
-  return cache.map((server) => ({ ...server, status: busy.has(server.url) ? "busy" : server.status }));
-}
-
-export async function acquireIdleServer() {
-  const servers = await refreshServers();
-  const idle = servers.find((server) => server.status === "idle" && !busy.has(server.url));
-  if (!idle) {
-    return undefined;
+  constructor(
+    private readonly serverUrls: string[],
+    private readonly healthCheck: HealthCheck = getSystemStats,
+    private readonly now: () => string = () => new Date().toISOString(),
+  ) {
+    this.cache = serverUrls.map((url) => ({ url, port: portFromUrl(url), status: "offline" }));
   }
-  busy.add(idle.url);
-  cache = cache.map((server) => (server.url === idle.url ? { ...server, status: "busy" } : server));
-  return idle.url;
+
+  async refreshServers() {
+    this.cache = await Promise.all(
+      this.serverUrls.map(async (url) => {
+        try {
+          await this.healthCheck(url);
+          return {
+            url,
+            port: portFromUrl(url),
+            status: this.busy.has(url) ? "busy" : "idle",
+            lastChecked: this.now(),
+          } satisfies ServerRecord;
+        } catch (error) {
+          this.busy.delete(url);
+          return {
+            url,
+            port: portFromUrl(url),
+            status: "offline",
+            lastChecked: this.now(),
+            errorMessage: error instanceof Error ? error.message : "Unknown health check error",
+          } satisfies ServerRecord;
+        }
+      }),
+    );
+    return this.getServers();
+  }
+
+  getServers() {
+    return this.cache.map((server) => ({ ...server, status: this.busy.has(server.url) ? "busy" : server.status }));
+  }
+
+  async acquireIdleServer() {
+    const servers = await this.refreshServers();
+    const idle = servers.find((server) => server.status === "idle" && !this.busy.has(server.url));
+    if (!idle) return undefined;
+    this.busy.add(idle.url);
+    this.cache = this.cache.map((server) => (server.url === idle.url ? { ...server, status: "busy" } : server));
+    return idle.url;
+  }
+
+  releaseServer(url?: string) {
+    if (!url || !this.cache.some((server) => server.url === url)) return;
+    this.busy.delete(url);
+    this.cache = this.cache.map((server) => (server.url === url ? { ...server, status: "idle" } : server));
+  }
 }
 
-export function releaseServer(url?: string) {
-  if (!url) {
-    return;
-  }
-  busy.delete(url);
-  cache = cache.map((server) => (server.url === url ? { ...server, status: "idle" } : server));
-}
+const defaultServerPool = new ComfyServerPool(comfyServers);
+
+export const refreshServers = () => defaultServerPool.refreshServers();
+export const getServers = () => defaultServerPool.getServers();
+export const acquireIdleServer = () => defaultServerPool.acquireIdleServer();
+export const releaseServer = (url?: string) => defaultServerPool.releaseServer(url);
 
 export type ComfyPoolAction = "start" | "stop" | "restart" | "start-safe" | "start-all" | "stop-all" | "open-manager";
 
@@ -73,30 +89,51 @@ type RunComfyPoolActionInput = {
   port?: number;
 };
 
-export async function runComfyPoolAction({ action, port }: RunComfyPoolActionInput) {
+type ComfyPoolActionDependencies = {
+  requireAllowedPort: (port: number | undefined) => void;
+  runCheckedPoolScript: (scriptName: string, args: string[], timeoutMs: number) => Promise<PoolScriptResult>;
+  launchPoolScript: (scriptName: string, args: string[]) => Promise<void>;
+  openDesktopManager: () => Promise<void>;
+};
+
+const defaultActionDependencies: ComfyPoolActionDependencies = {
+  requireAllowedPort,
+  runCheckedPoolScript,
+  launchPoolScript,
+  openDesktopManager,
+};
+
+export function createComfyPoolActionRunner(dependencies: ComfyPoolActionDependencies) {
+  return (input: RunComfyPoolActionInput) => runComfyPoolAction(input, dependencies);
+}
+
+export async function runComfyPoolAction(
+  { action, port }: RunComfyPoolActionInput,
+  dependencies: ComfyPoolActionDependencies = defaultActionDependencies,
+) {
   switch (action) {
     case "start":
-      requireAllowedPort(port);
+      dependencies.requireAllowedPort(port);
       return actionResult(
         action,
         port,
         `Start finished for ${port}. Waiting for ComfyUI to become reachable.`,
-        await runCheckedPoolScript("Start-ComfyPool.ps1", ["-Port", String(port)], 60000),
+        await dependencies.runCheckedPoolScript("Start-ComfyPool.ps1", ["-Port", String(port)], 60000),
       );
     case "stop":
-      requireAllowedPort(port);
+      dependencies.requireAllowedPort(port);
       return actionResult(
         action,
         port,
         `Stop finished for ${port}.`,
-        await runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000),
+        await dependencies.runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000),
       );
     // Braced so these two consts are scoped to this case rather than leaking
     // into the sibling cases in the same switch block.
     case "restart": {
-      requireAllowedPort(port);
-      const stopResult = await runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000);
-      const startResult = await runCheckedPoolScript("Start-ComfyPool.ps1", ["-Port", String(port)], 60000);
+      dependencies.requireAllowedPort(port);
+      const stopResult = await dependencies.runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000);
+      const startResult = await dependencies.runCheckedPoolScript("Start-ComfyPool.ps1", ["-Port", String(port)], 60000);
       return actionResult(action, port, `Restart finished for ${port}. Waiting for ComfyUI to become reachable.`, {
         exitCode: 0,
         output: [stopResult.output, startResult.output].filter(Boolean).join("\n"),
@@ -104,15 +141,20 @@ export async function runComfyPoolAction({ action, port }: RunComfyPoolActionInp
       });
     }
     case "start-safe":
-      await launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "15", "-MaxInstances", "4"]);
+      await dependencies.launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "15", "-MaxInstances", "4"]);
       return actionResult(action, undefined, "Start 4 launched in the background.");
     case "start-all":
-      await launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "20"]);
+      await dependencies.launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "20"]);
       return actionResult(action, undefined, "Start all launched in the background. It can take several minutes.");
     case "stop-all":
-      return actionResult(action, undefined, "Stop all finished.", await runCheckedPoolScript("Stop-ComfyPool.ps1", [], 120000));
+      return actionResult(
+        action,
+        undefined,
+        "Stop all finished.",
+        await dependencies.runCheckedPoolScript("Stop-ComfyPool.ps1", [], 120000),
+      );
     case "open-manager":
-      await openDesktopManager();
+      await dependencies.openDesktopManager();
       return actionResult(action, undefined, "Desktop manager opened.");
     default:
       throw new Error("Unsupported Comfy pool action.");

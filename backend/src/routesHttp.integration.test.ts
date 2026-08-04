@@ -19,6 +19,7 @@
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -48,6 +49,7 @@ process.env.SESSIONS_STORE_PATH = path.join(tempDir, "sessions.json");
 process.env.LOCAL_PROJECTS_ROOT = localProjectsRoot;
 process.env.BRICK_PROJECTS_ROOT = brickProjectsRoot;
 process.env.UPLOADED_MEDIA_ROOT = path.join(tempDir, "uploads");
+process.env.MEDIA_UPLOAD_MAX_BYTES = "16";
 process.env.THUMBNAIL_CACHE_DIR = path.join(tempDir, "thumbnails");
 process.env.MOMI_ADMIN_EMAIL = adminEmail;
 process.env.MOMI_ADMIN_PASSWORD = adminPassword;
@@ -120,6 +122,21 @@ async function call(method: string, routePath: string, options: { token?: string
     json = undefined;
   }
   return { status: response.status, body: json as Record<string, unknown> | undefined, text };
+}
+
+async function callBinary(
+  method: string,
+  routePath: string,
+  options: { token?: string; body?: Uint8Array; headers?: Record<string, string> } = {},
+) {
+  const headers = { ...(options.headers ?? {}) };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  const response = await fetch(`${baseUrl}${routePath}`, {
+    method,
+    headers,
+    body: options.body as BodyInit | undefined,
+  });
+  return { response, bytes: Buffer.from(await response.arrayBuffer()) };
 }
 
 const asAdmin = (method: string, routePath: string, body?: unknown) => call(method, routePath, { token: adminToken, body });
@@ -222,6 +239,8 @@ test("snapshot bundles the small polled values into one response", async () => {
 });
 
 let testProjectId = "";
+let createdJobId = "";
+let testMediaUrl = "";
 
 test("a created project is returned by the project list", async () => {
   const before = await asAdmin("GET", "/api/projects");
@@ -252,6 +271,100 @@ test("the creator is recorded as the project owner", async () => {
   assert.equal(response.status, 200, response.text);
   const project = (response.body as { project?: { ownerId?: string } }).project ?? response.body;
   assert.equal(typeof (project as { ownerId?: string }).ownerId, "string");
+});
+
+test("media upload enforces MIME, size, body, range, and cache/disposition behavior", async () => {
+  const encodedName = encodeURIComponent('reference "hero".png');
+  const uploaded = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image&name=${encodedName}`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: Buffer.from("0123456789"),
+  });
+  assert.equal(uploaded.response.status, 201);
+  const payload = JSON.parse(uploaded.bytes.toString()) as { url: string; bytes: number; name: string };
+  testMediaUrl = payload.url;
+  assert.equal(payload.bytes, 10);
+  assert.equal(payload.name.includes('"'), false);
+
+  const ranged = await callBinary("GET", payload.url, {
+    token: adminToken,
+    headers: { Range: "bytes=2-5" },
+  });
+  assert.equal(ranged.response.status, 206);
+  assert.equal(ranged.bytes.toString(), "2345");
+  assert.equal(ranged.response.headers.get("content-range"), "bytes 2-5/10");
+  assert.equal(ranged.response.headers.get("accept-ranges"), "bytes");
+  assert.match(ranged.response.headers.get("content-disposition") ?? "", /^inline; filename="[^"]+"$/);
+  assert.equal(ranged.response.headers.get("cache-control"), "private, max-age=3600");
+
+  const unsatisfiable = await callBinary("GET", payload.url, {
+    token: adminToken,
+    headers: { Range: "bytes=100-200" },
+  });
+  assert.equal(unsatisfiable.response.status, 416);
+  assert.equal(unsatisfiable.response.headers.get("content-range"), "bytes */10");
+
+  const wrongMime = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=video`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: Buffer.from([1]),
+  });
+  assert.equal(wrongMime.response.status, 415);
+
+  const oversized = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: Buffer.alloc(17),
+  });
+  assert.equal(oversized.response.status, 413);
+
+  const empty = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: new Uint8Array(),
+  });
+  assert.equal(empty.response.status, 400);
+});
+
+test("media reads hide uploaded project inputs from an unrelated authenticated user", async () => {
+  const uploaded = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image&name=private.png`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: Buffer.from("private"),
+  });
+  const payload = JSON.parse(uploaded.bytes.toString()) as { url: string };
+  const intruder = await authService.createUser({
+    email: "media-intruder@example.com",
+    name: "Media Intruder",
+    password: "IntruderPass1",
+    role: "user",
+  });
+  assert.ok(intruder.id);
+  const login = await call("POST", "/api/auth/login", {
+    body: { email: "media-intruder@example.com", password: "IntruderPass1" },
+  });
+  const intruderToken = String((login.body as { token?: string }).token);
+
+  for (const routePath of [payload.url, payload.url.replace("/api/media?", "/api/media/thumbnail?")]) {
+    const hidden = await callBinary("GET", routePath, { token: intruderToken });
+    assert.equal(hidden.response.status, 404, `${routePath} leaked uploaded project media`);
+  }
+
+  const ownerThumbnail = await callBinary("GET", payload.url.replace("/api/media?", "/api/media/thumbnail?"), {
+    token: adminToken,
+  });
+  assert.equal(ownerThumbnail.response.status, 200);
+  assert.equal(ownerThumbnail.bytes.toString(), "private");
+});
+
+test("media reads reject traversal and distinguish missing allowed files", async () => {
+  const outside = path.join(tempDir, "outside", "secret.png");
+  const traversal = await callBinary("GET", `/api/media?path=${encodeURIComponent(outside)}`, { token: adminToken });
+  assert.equal(traversal.response.status, 403);
+
+  const missing = path.join(process.env.UPLOADED_MEDIA_ROOT!, testProjectId, "usr_momen", "missing.png");
+  const absent = await callBinary("GET", `/api/media?path=${encodeURIComponent(missing)}`, { token: adminToken });
+  assert.equal(absent.response.status, 404);
 });
 
 test("POST /api/jobs persists a queued job without provider or network dispatch", async () => {
@@ -289,6 +402,7 @@ test("POST /api/jobs persists a queued job without provider or network dispatch"
     assert.equal(response.status, 201, response.text);
     const created = (response.body as { job?: { id?: string; status?: string; userId?: string; creditsEstimated?: number } }).job;
     assert.ok(created?.id);
+    createdJobId = created.id;
     assert.equal(created.status, "queued");
     assert.equal(created.userId, "usr_momen");
     assert.equal(typeof created.creditsEstimated, "number");
@@ -296,6 +410,64 @@ test("POST /api/jobs persists a queued job without provider or network dispatch"
     assert.equal(outboundAttempt, "");
   } finally {
     globalThis.fetch = nativeFetch;
+  }
+});
+
+test("local result download and media routes preserve attachment, inline, and range semantics", async () => {
+  const job = jobQueue.getJob(createdJobId);
+  assert.ok(job && testMediaUrl);
+  job.status = "completed";
+  job.outputType = "image";
+  job.resultUrls = [testMediaUrl];
+  job.thumbnailUrls = [];
+
+  const media = await callBinary("GET", `/api/jobs/${job.id}/result-media`, {
+    token: adminToken,
+    headers: { Range: "bytes=3-6" },
+  });
+  assert.equal(media.response.status, 206);
+  assert.equal(media.bytes.toString(), "3456");
+  assert.match(media.response.headers.get("content-disposition") ?? "", /^inline;/);
+  assert.equal(media.response.headers.get("content-type"), "image/png");
+
+  const download = await callBinary("GET", `/api/jobs/${job.id}/result-file`, { token: adminToken });
+  assert.equal(download.response.status, 200);
+  assert.equal(download.bytes.toString(), "0123456789");
+  assert.match(download.response.headers.get("content-disposition") ?? "", /^attachment;/);
+  assert.equal((download.response.headers.get("content-disposition") ?? "").includes('"one"'), false);
+});
+
+test("remote result media forwards ranges and safe upstream response headers", async () => {
+  const job = jobQueue.getJob(createdJobId);
+  assert.ok(job);
+  let observedRange = "";
+  const upstream = http.createServer((req, res) => {
+    observedRange = String(req.headers.range ?? "");
+    res.statusCode = observedRange ? 206 : 200;
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Range", "bytes 1-3/5");
+    res.setHeader("ETag", '"remote-v1"');
+    res.end("bcd");
+  });
+  upstream.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => upstream.once("listening", resolve));
+  const upstreamUrl = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/result.mp4`;
+  job.resultUrls = [upstreamUrl];
+
+  try {
+    const response = await callBinary("GET", `/api/jobs/${job.id}/result-media`, {
+      token: adminToken,
+      headers: { Range: "bytes=1-3" },
+    });
+    assert.equal(response.response.status, 206);
+    assert.equal(response.bytes.toString(), "bcd");
+    assert.equal(observedRange, "bytes=1-3");
+    assert.equal(response.response.headers.get("content-range"), "bytes 1-3/5");
+    assert.equal(response.response.headers.get("etag"), '"remote-v1"');
+    assert.match(response.response.headers.get("content-disposition") ?? "", /^inline;/);
+  } finally {
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });
 

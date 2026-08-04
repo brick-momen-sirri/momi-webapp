@@ -93,11 +93,21 @@ async function authorizeMediaRead(
     return { ok: false, status: 404, error: "Media file not found" };
   }
 
+  const user = getRequestUser(req);
+  const canonicalUploadRoot = await fs.realpath(uploadedMediaRoot).catch(() => path.resolve(uploadedMediaRoot));
+  if (isWithinRoot(resolvedPath, canonicalUploadRoot)) {
+    const [projectId] = path.relative(canonicalUploadRoot, resolvedPath).split(path.sep);
+    const uploadProject = getProject(projectId);
+    if (!uploadProject || !canViewProject(user, uploadProject)) {
+      return { ok: false, status: 404, error: "Media file not found" };
+    }
+  }
+
   // Boundary-aware, for the same reason isAllowedMediaPath is: a bare startsWith
   // makes "<folderPath>-other" look like it belongs to this project and applies
   // the wrong project's permissions to it.
   const project = getProjects().find((item) => item.folderPath && isWithinRoot(resolvedPath, item.folderPath));
-  if (project && !canViewProject(getRequestUser(req), project)) {
+  if (project && !canViewProject(user, project)) {
     return { ok: false, status: 404, error: "Media file not found" };
   }
 

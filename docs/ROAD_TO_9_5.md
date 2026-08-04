@@ -159,9 +159,25 @@ how to roll back the change.
   transport or clock seams where deterministic testing requires them.
 - Tests required before changing it: the matrices in the phase request, prioritized
   by ownership, payment/provider inputs, timeouts, recovery, and stream behavior.
-- Implementation status: pending.
-- Verification results: pending.
-- Remaining risks: line percentage is not evidence of race coverage.
+- Implementation status: complete for the repository's implemented behavior.
+  Workflow discovery/input-name/snapshot/error behavior is characterized;
+  provider materialization now runs against a local fake Comfy transport; media
+  routes are exercised over a real isolated HTTP socket; and Comfy health/action
+  decisions use injectable adapters without changing the production facade.
+- Verification results: backend coverage moved from 75.08% lines / 74.45%
+  branches / 83.31% functions to 78.80% / 74.40% / 87.55%. Sensitive module
+  line coverage moved from 71.51% to 77.14% (`workflowService`), 18.85% to
+  76.54% (`mediaRoutes`), 22.18% to 85.09% (`providerInputs`), and 20.15% to
+  69.83% (`comfyPool`). The full backend suite passes 560 tests with zero skips.
+  New media tests found and fixed an uploaded-input disclosure: uploaded paths
+  were not mapped back to their project ACL, so an unrelated authenticated user
+  who knew a path could read it.
+- Remaining risks: workflow disabling and per-model provider selection are not
+  repository capabilities, so no fake coverage claims are made for them. Comfy
+  tests cover health transitions and command routing/time budgets but deliberately
+  do not launch the real desktop scripts. Media abort/error plumbing still relies
+  partly on the focused stream helper tests; local tests cannot reproduce every
+  client disconnect and Windows file-lock timing.
 - Rollback approach: tests and small seams land separately from behavior changes.
 
 ### 6. `CreditUsageDashboard` split and frontend async audit
@@ -234,3 +250,7 @@ how to roll back the change.
 - 2026-08-04: documented and decomposed the real job lifecycle behind its existing
   compatibility facade. Added immutable execution claims and focused RunPod/local
   Comfy executors without changing the persisted job schema or touching a provider.
+- 2026-08-04: added risk-focused workflow, provider-input, media-route, and Comfy
+  pool coverage. Fixed uploaded-media read authorization by resolving the upload's
+  project ID and applying that project's ACL before either original or thumbnail
+  streaming.

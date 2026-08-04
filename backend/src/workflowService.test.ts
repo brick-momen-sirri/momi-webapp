@@ -3,7 +3,16 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { getWorkflowModels, loadWorkflowForRunpod, loadWorkflowModels } from "./workflowService.js";
+import {
+  detectWorkflowLoadImageNames,
+  detectWorkflowLoadVideoNames,
+  getWorkflowModel,
+  getWorkflowModels,
+  loadWorkflowForRunpod,
+  loadWorkflowModels,
+  loadWorkflowPrompt,
+  saveWorkflowSnapshot,
+} from "./workflowService.js";
 import type { CreateJobRequest, WorkflowModel } from "./types.js";
 
 await loadWorkflowModels();
@@ -19,6 +28,136 @@ const gptResolutionOptions = [
   "3840x2160",
   "2160x3840",
 ];
+
+test("workflow discovery produces unique, internally consistent production models", () => {
+  const models = getWorkflowModels();
+  assert.ok(models.length > 0);
+  assert.equal(new Set(models.map((model) => model.id)).size, models.length);
+
+  for (const model of models) {
+    assert.equal(getWorkflowModel(model.id), model);
+    assert.ok(path.isAbsolute(model.workflowPath));
+    assert.ok(model.supportedResolutions?.length);
+    assert.ok(model.supportedResolutions?.includes(model.defaultResolution ?? model.supportedResolutions[0]));
+    assert.equal(model.requiresPrompt, model.requiredInputs.includes("prompt"));
+    assert.equal(
+      model.requiresStartEndFrames,
+      model.requiredInputs.includes("start_frame") && model.requiredInputs.includes("end_frame"),
+    );
+    assert.equal(model.outputType === "video", model.category.includes("video"));
+    assert.ok(Number.isFinite(model.estimatedCredits) && model.estimatedCredits >= 0);
+    assert.deepEqual(
+      model.supportedDurations,
+      [...(model.supportedDurations ?? [])].sort((a, b) => a - b),
+    );
+    if (model.defaultDurationSeconds != null) {
+      assert.ok(model.supportedDurations?.includes(model.defaultDurationSeconds));
+    }
+  }
+  assert.equal(getWorkflowModel("workflow_that_does_not_exist"), undefined);
+});
+
+test("detects provider image/video field names from API and UI workflow shapes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-input-names-"));
+  try {
+    const apiPath = path.join(tempDir, "api.json");
+    await fs.writeFile(
+      apiPath,
+      JSON.stringify({
+        "1": { class_type: "LoadImage", inputs: { image: "api-first.png" } },
+        "2": { class_type: "LoadImage", inputs: { image: "api-second.png" } },
+        "3": { class_type: "LoadVideo", inputs: { file: "api-source.mp4" } },
+      }),
+    );
+    const base = requiredModel("brick_api_kling_v3_video");
+    const apiModel = { ...base, workflowPath: apiPath };
+    assert.deepEqual(await detectWorkflowLoadImageNames(apiModel), ["api-first.png", "api-second.png"]);
+    assert.deepEqual(await detectWorkflowLoadVideoNames(apiModel), ["api-source.mp4"]);
+
+    const uiPath = path.join(tempDir, "ui.json");
+    await fs.writeFile(
+      uiPath,
+      JSON.stringify({
+        nodes: [
+          { id: 8, type: "LoadImage", widgets_values: ["ui-image.png"] },
+          { id: 9, type: "LoadVideo", widgets_values: ["ui-video.mov"] },
+        ],
+        links: [],
+      }),
+    );
+    const uiModel = { ...base, workflowPath: uiPath };
+    assert.deepEqual(await detectWorkflowLoadImageNames(uiModel), ["ui-image.png"]);
+    assert.deepEqual(await detectWorkflowLoadVideoNames(uiModel), ["ui-video.mov"]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("local Comfy prompt loading survives unavailable object info and maps core inputs", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-local-workflow-"));
+  const workflowPath = path.join(tempDir, "local.json");
+  try {
+    await fs.writeFile(
+      workflowPath,
+      JSON.stringify({
+        "1": { class_type: "LoadImage", inputs: { image: "old.png" } },
+        "2": { class_type: "CLIPTextEncode", inputs: { text: "old prompt" } },
+        "3": { class_type: "KSampler", inputs: { seed: 1 } },
+      }),
+    );
+    const base = requiredModel("brick_api_openai_gpt_image_2_i2i");
+    const model: WorkflowModel = { ...base, workflowPath, imageSlotCount: 1 };
+    const prompt = (await loadWorkflowPrompt(
+      model,
+      { ...request(model, ["new.png"]), prompt: "new prompt" },
+      "1234_Project",
+      "http://127.0.0.1:1",
+    )) as Record<string, any>;
+
+    assert.equal(prompt["1"].inputs.image, "new.png");
+    assert.equal(prompt["2"].inputs.text, "new prompt");
+    assert.ok(Number.isInteger(prompt["3"].inputs.seed));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("invalid or missing workflow JSON fails explicitly", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-invalid-workflow-"));
+  try {
+    const invalidPath = path.join(tempDir, "invalid.json");
+    await fs.writeFile(invalidPath, "{ invalid json", "utf8");
+    const base = requiredModel("brick_api_kling_v3_video");
+
+    await assert.rejects(
+      loadWorkflowForRunpod({ ...base, workflowPath: invalidPath }, request(base, ["image.png"]), "Project", ["image.png"]),
+      SyntaxError,
+    );
+    await assert.rejects(
+      loadWorkflowForRunpod(
+        { ...base, workflowPath: path.join(tempDir, "missing.json") },
+        request(base, ["image.png"]),
+        "Project",
+        ["image.png"],
+      ),
+      /enoent/i,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workflow snapshots round-trip and reject embedded media payloads", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-snapshot-"));
+  try {
+    const snapshotPath = path.join(tempDir, "nested", "workflow.json");
+    await saveWorkflowSnapshot(snapshotPath, { node: { inputs: { prompt: "safe" } } });
+    assert.deepEqual(JSON.parse(await fs.readFile(snapshotPath, "utf8")), { node: { inputs: { prompt: "safe" } } });
+    await assert.rejects(saveWorkflowSnapshot(snapshotPath, { image: "data:image/png;base64,AQID" }), /embedded media/i);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("new serverless workflows are discovered with multi-image and video requirements", () => {
   const gpt = requiredModel("brick_api_openai_gpt_image_2_i2i");
