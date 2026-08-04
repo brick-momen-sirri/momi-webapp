@@ -49,7 +49,9 @@ export function createFrontendGateway(options: FrontendGatewayOptions) {
       index: false,
       fallthrough: true,
       setHeaders: (res, filePath) => {
-        if (isHashedAsset(filePath)) {
+        if (path.basename(filePath).toLowerCase() === "index.html") {
+          res.setHeader("Cache-Control", "no-cache");
+        } else if (isHashedAsset(filePath)) {
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         } else {
           res.setHeader("Cache-Control", "public, max-age=3600");
@@ -59,7 +61,7 @@ export function createFrontendGateway(options: FrontendGatewayOptions) {
   );
 
   app.get("*", (req, res, next) => {
-    if (!req.accepts("html")) {
+    if (isMissingStaticAsset(req.path) || !req.accepts("html")) {
       next();
       return;
     }
@@ -85,6 +87,10 @@ function securityHeaders(_req: express.Request, res: express.Response, next: exp
 
 function isHashedAsset(filePath: string) {
   return /[\\/]assets[\\/].+-[A-Za-z0-9_-]{6,}\.[^.]+$/.test(filePath);
+}
+
+function isMissingStaticAsset(requestPath: string) {
+  return requestPath.startsWith("/assets/") || path.posix.extname(requestPath) !== "";
 }
 
 function proxyApiRequest(req: express.Request, res: express.Response, apiTarget: string) {

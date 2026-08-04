@@ -18,6 +18,7 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:gateway-smoke": "pnpm --dir backend run test:gateway-smoke",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

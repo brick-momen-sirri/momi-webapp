@@ -226,10 +226,27 @@ how to roll back the change.
   syntax without reload; write exact approval-gated deploy/rollback commands.
 - Tests required before changing it: build/backend builds plus automated HTTP and
   browser smoke coverage on the isolated port.
-- Implementation status: pending.
-- Verification results: pending.
-- Remaining risks: local verification cannot prove production cookies, proxy,
-  networking, monitoring, or rollback; those remain approval-gated deployment work.
+- Implementation status: complete for safe local work. Gateway cache/fallback
+  behavior was corrected, request/cookie/CORS and ranged-media proxying expanded,
+  strict port parsing and bounded graceful shutdown added, and the PM2 topology
+  syntax characterized. `scripts/start-on-login.ps1` now waits for a PM2-managed
+  gateway instead of racing it with Vite while retaining the current fallback
+  until first deployment. `docs/PRODUCTION_GATEWAY_DEPLOYMENT.md` contains the
+  exact approval-gated cutover, health, log, and rollback sequence.
+- Verification results: the full backend suite passes 566 tests with zero skips.
+  The compiled smoke harness passed health, cache, gzip, SPA, missing-asset,
+  API/cookie, ranged-media, ops-blocking, and graceful-shutdown checks against a
+  fake API. A real browser rendered the built sign-in screen, persisted theme,
+  survived deep-link hard refresh, showed the handled dead-API error, loaded only
+  the hashed bundle (no Vite client), and produced zero console warnings/errors.
+  Build, lint, TypeScript, formatting, PowerShell syntax, and PM2 config syntax are
+  clean. Port 8190 remained Vite PID 34928; isolated ports were closed afterward.
+- Remaining risks: local verification cannot prove production HTTPS/Secure-cookie
+  behavior, real authenticated API/media access, LAN routing, log/monitoring
+  stability, PM2 resurrection after reboot, or rollback timing. Those remain
+  explicit authorization-gated production checks. The currently running
+  dispatcher binds `0.0.0.0:3334`, unlike the repository default, and warrants a
+  separate access review without coupling it to this frontend rollout.
 - Rollback approach: no production change during this phase; isolated process is
   terminated and temporary state removed.
 
@@ -274,3 +291,7 @@ how to roll back the change.
   summary, table, hook, and pure-selector boundaries. Fixed unstable descending
   ties plus three demonstrated frontend teardown leaks/races (URL image loading,
   uploader completion/message timers, and Comfy follow-up refresh timers).
+- 2026-08-04: verified the compiled production gateway with automated HTTP and
+  real-browser smoke tests. Fixed direct-index caching and missing-asset SPA
+  fallthrough, added graceful shutdown/strict port handling, hardened login-time
+  resurrection, and documented an approval-gated frontend-only cutover/rollback.

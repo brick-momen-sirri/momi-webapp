@@ -16,6 +16,10 @@ test("production gateway serves hashed assets, SPA routes, and security/cache he
     assert.match(asset.headers.get("cache-control") ?? "", /immutable/);
     assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
     assert.match(asset.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+    assert.equal(asset.headers.get("content-encoding"), "gzip");
+
+    const directIndex = await fetch(`${fixture.gatewayUrl}/index.html`);
+    assert.match(directIndex.headers.get("cache-control") ?? "", /no-cache/);
 
     const spa = await fetch(`${fixture.gatewayUrl}/projects/example`, { headers: { Accept: "text/html" } });
     assert.equal(spa.status, 200);
@@ -25,6 +29,22 @@ test("production gateway serves hashed assets, SPA routes, and security/cache he
     const health = await fetch(`${fixture.gatewayUrl}/healthz`);
     assert.deepEqual(await health.json(), { ok: true });
     assert.equal(health.headers.get("cache-control"), "no-store");
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("production gateway does not turn missing static assets into SPA responses", async () => {
+  const fixture = await gatewayFixture();
+  try {
+    const asset = await fetch(`${fixture.gatewayUrl}/assets/missing-deadbeef.js`, {
+      headers: { Accept: "text/html,*/*" },
+    });
+    assert.equal(asset.status, 404);
+    assert.deepEqual(await asset.json(), { error: "Not found." });
+
+    const icon = await fetch(`${fixture.gatewayUrl}/favicon.ico`, { headers: { Accept: "text/html" } });
+    assert.equal(icon.status, 404);
   } finally {
     await fixture.close();
   }
@@ -46,6 +66,40 @@ test("production gateway proxies application APIs and blocks operational endpoin
   }
 });
 
+test("production gateway preserves request bodies, cookies, CORS, and media ranges", async () => {
+  const fixture = await gatewayFixture();
+  try {
+    const echo = await fetch(`${fixture.gatewayUrl}/api/echo`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: "momi_session=session-in",
+        Origin: "http://127.0.0.1:8190",
+      },
+      body: JSON.stringify({ prompt: "local smoke" }),
+    });
+    assert.equal(echo.status, 201);
+    assert.equal(echo.headers.get("access-control-allow-origin"), "http://127.0.0.1:8190");
+    assert.match(echo.headers.get("set-cookie") ?? "", /momi_session=session-out/);
+    assert.deepEqual(await echo.json(), {
+      method: "POST",
+      body: '{"prompt":"local smoke"}',
+      cookie: "momi_session=session-in",
+      origin: "http://127.0.0.1:8190",
+      forwardedHost: new URL(fixture.gatewayUrl).host,
+      forwardedProto: "http",
+    });
+
+    const media = await fetch(`${fixture.gatewayUrl}/api/media/large`, { headers: { Range: "bytes=1024-2047" } });
+    assert.equal(media.status, 206);
+    assert.equal(media.headers.get("accept-ranges"), "bytes");
+    assert.equal(media.headers.get("content-range"), "bytes 1024-2047/2097152");
+    assert.equal((await media.arrayBuffer()).byteLength, 1024);
+  } finally {
+    await fixture.close();
+  }
+});
+
 async function gatewayFixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "momi-frontend-gateway-"));
   await fs.mkdir(path.join(directory, "assets"));
@@ -55,6 +109,35 @@ async function gatewayFixture() {
   let requests = 0;
   const apiServer = http.createServer((req, res) => {
     requests += 1;
+    if (req.url === "/api/media/large") {
+      res.statusCode = 206;
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Range", "bytes 1024-2047/2097152");
+      res.setHeader("Content-Length", "1024");
+      res.end(Buffer.alloc(1024, 7));
+      return;
+    }
+    if (req.url === "/api/echo") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        res.statusCode = 201;
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Set-Cookie", "momi_session=session-out; HttpOnly; SameSite=Lax");
+        res.setHeader("Access-Control-Allow-Origin", String(req.headers.origin ?? ""));
+        res.end(
+          JSON.stringify({
+            method: req.method,
+            body: Buffer.concat(chunks).toString("utf8"),
+            cookie: req.headers.cookie,
+            origin: req.headers.origin,
+            forwardedHost: req.headers["x-forwarded-host"],
+            forwardedProto: req.headers["x-forwarded-proto"],
+          }),
+        );
+      });
+      return;
+    }
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ path: req.url }));
   });
@@ -83,5 +166,8 @@ function listen(server: http.Server) {
 }
 
 function closeServer(server: http.Server) {
-  return new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+    server.closeIdleConnections?.();
+  });
 }

@@ -14,6 +14,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:web": "node dist/frontendServer.js",
+    "test:gateway-smoke": "pnpm run build && node scripts/frontendGatewaySmoke.mjs",
     "test:topology": "pnpm run build && tsx src/topologyLoadTest.ts",
     "export:job-store": "tsx src/exportSqliteJobStore.ts",
     "export:app-state": "tsx src/exportSqliteAuthStore.ts",
