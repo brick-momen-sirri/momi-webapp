@@ -135,9 +135,15 @@ how to roll back the change.
 - Tests required before changing it: competing/stale claims, cancellation/completion
   races, archive while active, worker/dispatcher restart, duplicate result and
   settlement, settlement retry, orphan recovery, snapshot restoration, and shutdown.
-- Implementation status: ready to start after the updated checklist checkpoint;
-  items 1-3 are complete for their documented scope.
-- Verification results: pending.
+- Implementation status: complete. `jobQueue.ts` was reduced from about 1,593 to
+  1,098 lines while preserving its public exports. Pure lifecycle transitions,
+  immutable execution claims, queued-job construction, archive/media listing,
+  and both provider executors now live in focused modules under `jobQueue/`.
+- Verification results: 19 focused extraction tests cover claim identity,
+  restart substates, cancel/complete ordering, idempotent settlement, orphan and
+  archive rules, construction/listing, and local result de-duplication. The full
+  backend suite passes 538 tests with zero failures or skips; backend TypeScript
+  build is clean.
 - Remaining risks: multi-process behavior may depend on persistence-driver atomicity;
   extraction cannot manufacture stronger guarantees without a schema/lease change.
 - Rollback approach: small behavior-neutral extraction commits, preserved facade,
@@ -225,3 +231,6 @@ how to roll back the change.
   API-role SQLite integration path, provider/network tripwire, and durable-write
   rollback. The billing/idempotency features absent from production are recorded
   as explicit remaining design work, not fake-covered behavior.
+- 2026-08-04: documented and decomposed the real job lifecycle behind its existing
+  compatibility facade. Added immutable execution claims and focused RunPod/local
+  Comfy executors without changing the persisted job schema or touching a provider.

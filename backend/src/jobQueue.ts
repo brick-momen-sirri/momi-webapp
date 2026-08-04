@@ -1,12 +1,9 @@
 import path from "node:path";
-import { projectFolderName } from "./projectFolderName.js";
-import { getHistory, queuePrompt, toViewUrl } from "./comfyClient.js";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
   archivedItemsSqlitePath,
   archivedItemsStorePath,
   comfyRoot,
-  creditBalanceDeltaAccountingEnabled,
   dispatcherLeaseHeartbeatMs,
   dispatcherLeaseTtlMs,
   dispatcherPollIntervalMs,
@@ -16,75 +13,49 @@ import {
   jobStoreDriver,
   jobsSqlitePath,
   jobsStorePath,
-  runpodOutputMaxBytes,
   runpodTimeoutMs,
 } from "./config.js";
-import { estimateFallbackCreditUsage, estimateWorkflowCredits } from "./creditEstimator.js";
-import { BackendHttpError } from "./httpError.js";
 import { mergeJobChangesById, mergeJobSnapshotById } from "./jobReadCache.js";
-import { getCredits } from "./creditService.js";
-import { syncServerlessCreditUsage } from "./creditTrackerSyncService.js";
-import {
-  balanceDeltaCredits,
-  COMPANY_BALANCE_DELTA_SOURCE,
-  creditsSpentForAccounting,
-  isCountedCreditUsage,
-} from "./creditUsageAccounting.js";
 import { getActualCreditsByPromptIds } from "./creditUsageService.js";
-import { detectMediaResolution } from "./mediaResolutionService.js";
 import { getProject } from "./projectService.js";
 import {
   appendAudit,
   appendManifestEvent,
-  folderDisplayName,
   loadProjectFolders,
   validateDisplayName,
   withProjectMutationLock,
 } from "./projectMetadataService.js";
-import {
-  RunpodComfyCanceledError,
-  RunpodComfyError,
-  cancelComfyWorkflowOnRunpod,
-  resumeComfyWorkflowOnRunpod,
-  runComfyWorkflowOnRunpod,
-  type RunpodMediaResult,
-} from "./runpodComfyService.js";
+import { cancelComfyWorkflowOnRunpod } from "./runpodComfyService.js";
 import { isDispatcher } from "./processRole.js";
-import {
-  beginRunpodBillableOperation,
-  hasExclusiveRunpodActivityWindow,
-  runpodActivityBaseline,
-  type RunpodActivityBaseline,
-} from "./runpodActivityTracker.js";
 import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
-import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
-import { ensureJobFolders, readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
+import { readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
 import { moveResultFiles } from "./resultMoveService.js";
-import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
-import { getWorkflowModel, loadWorkflowForRunpod, loadWorkflowPrompt, saveWorkflowSnapshot } from "./workflowService.js";
-import type { CreateJobRequest, CreditBalanceSnapshot, Job } from "./types.js";
-import type { ComfyGraph } from "./comfyGraph.js";
+import { getWorkflowModel } from "./workflowService.js";
+import type { CreateJobRequest, Job } from "./types.js";
 import {
   DebouncedJobPersistence,
-  ensureWorkerProjectFolder,
   externalizeJobInputMedia,
   DispatcherLeaseCoordinator,
-  jobRemoteMediaEntries,
-  inferInputType,
   loadConsistentChanges,
   loadConsistentSnapshot,
-  materializeComfyInputImages,
-  materializeComfyInputVideo,
-  materializeRunpodInputImages,
-  materializeRunpodInputVideo,
-  normalizeDurationSeconds,
   RemoteResultRecovery,
-  resultExtension,
   type StoreCacheCursor,
 } from "./jobQueue/index.js";
 import { commitQueuedJob } from "./jobQueue/queuedJobCommit.js";
+import { buildJobListing } from "./jobQueue/archiveMembership.js";
+import { ActiveExecutionRegistry, type ExecutionClaim } from "./jobQueue/executionRegistry.js";
+import {
+  applyCancellationSettlement,
+  assertJobCanBeArchived,
+  isExpiredOrphan,
+  isTerminalJobStatus,
+  normalizeInterruptedRunpodJob,
+} from "./jobQueue/lifecycleState.js";
+import { buildQueuedJob } from "./jobQueue/jobFactory.js";
+import { executeLocalComfyJob } from "./jobQueue/localComfyExecution.js";
+import { executeRunpodJob } from "./jobQueue/runpodExecution.js";
 
 export { chooseRunpodImageInputNames, isRemoteResultMediaUrl, jobRemoteMediaEntries } from "./jobQueue/index.js";
 export type { RemoteMediaEntry } from "./jobQueue/index.js";
@@ -98,7 +69,7 @@ let sqliteStore: SqliteJobStore | undefined;
 let archivedStore: SqliteJobStore | undefined;
 let jobsCacheCursor: StoreCacheCursor | undefined;
 let archivedCacheCursor: StoreCacheCursor | undefined;
-const inFlightJobIds = new Set<string>();
+const activeExecutions = new ActiveExecutionRegistry();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 let dispatchPollTimer: NodeJS.Timeout | undefined;
 let dispatcherHeartbeatTimer: NodeJS.Timeout | undefined;
@@ -147,23 +118,14 @@ export async function loadJobs() {
 function normalizeInterruptedRunpodJobs(): Job[] {
   if (!ownsDispatcherWork() || generationBackend !== "runpod") return [];
   const normalizedJobs: Job[] = [];
+  const normalizedAt = new Date().toISOString();
   for (const job of jobs) {
-    if (job.status !== "sending" && job.status !== "running") continue;
-    if (job.runpodJobId) continue; // Resumed by ID separately; never resubmit.
-
-    if (job.runpodSubmissionState === "preparing") {
-      job.status = job.cancelRequested ? "canceled" : "queued";
-      delete job.startedAt;
-      delete job.completedAt;
-      delete job.runpodSubmissionState;
-      normalizedJobs.push(job);
-    } else if (shouldNormalizeInterruptedJob(job)) {
-      job.status = job.cancelRequested ? "canceled" : "failed";
-      job.completedAt = job.completedAt ?? new Date().toISOString();
-      if (!job.cancelRequested) {
-        job.errorMessage = job.errorMessage ?? "Backend restarted before this RunPod job returned. Retry the job if needed.";
-      }
-      job.creditsUsed = job.creditsUsed ?? 0;
+    if (
+      normalizeInterruptedRunpodJob(job, {
+        shouldNormalize: shouldNormalizeInterruptedJob(job),
+        now: normalizedAt,
+      })
+    ) {
       normalizedJobs.push(job);
     }
   }
@@ -240,12 +202,12 @@ function refreshMainJobsCache() {
   const { changes, dataVersion } = loadConsistentChanges(sqliteStore, jobsCacheCursor.revision);
   if (changes.fullSnapshotRequired) {
     const stable = loadConsistentSnapshot(sqliteStore);
-    jobs = mergeJobSnapshotById(jobs, stable.snapshot, inFlightJobIds);
+    jobs = mergeJobSnapshotById(jobs, stable.snapshot, activeExecutions.jobIds());
     jobsCacheCursor = stable.cursor;
     return;
   }
 
-  jobs = mergeJobChangesById(jobs, changes, inFlightJobIds);
+  jobs = mergeJobChangesById(jobs, changes, activeExecutions.jobIds());
   jobsCacheCursor = { dataVersion, revision: changes.revision };
 }
 
@@ -279,36 +241,7 @@ export async function getJobsWithExistingMedia(options: { archived?: boolean } =
   logMemory("before-media-scan");
   const mediaJobs = archived ? [] : await scanExistingMediaJobs();
   logMemory("after-media-scan");
-  const backendResultPaths = new Set(
-    jobs
-      .flatMap((job) => [...job.resultUrls, ...job.thumbnailUrls])
-      .map(mediaFilePathFromUrl)
-      .filter((item): item is string => Boolean(item)),
-  );
-  const archivedMediaIds = new Set(archivedMediaJobs.map((job) => job.id));
-  const map = new Map<string, Job>();
-  for (const job of mediaJobs) {
-    if (archivedMediaIds.has(job.id)) {
-      continue;
-    }
-    const mediaPaths = [...job.resultUrls, ...job.thumbnailUrls]
-      .map(mediaFilePathFromUrl)
-      .filter((item): item is string => Boolean(item));
-    if (mediaPaths.some((filePath) => backendResultPaths.has(filePath))) {
-      continue;
-    }
-    map.set(job.id, job);
-  }
-  for (const job of jobs) {
-    if (Boolean(job.archivedAt) !== archived) continue;
-    map.set(job.id, { ...job, source: job.source ?? "backend_job" });
-  }
-  if (archived) {
-    for (const job of archivedMediaJobs) {
-      map.set(job.id, { ...job, source: "existing_project_media" });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return buildJobListing({ jobs, mediaJobs, archivedMediaJobs, archived, mediaFilePathFromUrl });
 }
 
 export function getJob(id: string) {
@@ -408,12 +341,13 @@ function startDispatcherCoordination() {
 function resumeAcknowledgedRunpodJobs() {
   if (generationBackend !== "runpod" || !ownsDispatcherWork()) return;
   for (const job of jobs) {
-    if (!job.runpodJobId || (job.status !== "sending" && job.status !== "running") || inFlightJobIds.has(job.id)) continue;
+    if (!job.runpodJobId || (job.status !== "sending" && job.status !== "running")) continue;
+    const execution = activeExecutions.begin(job.id);
+    if (!execution) continue;
 
     activeRunpodJobs += 1;
-    inFlightJobIds.add(job.id);
-    void runRunpodJob(job).finally(() => {
-      inFlightJobIds.delete(job.id);
+    void runRunpodJob(job, execution).finally(() => {
+      activeExecutions.finish(execution);
       activeRunpodJobs = Math.max(0, activeRunpodJobs - 1);
       void dispatchQueue();
     });
@@ -476,57 +410,12 @@ function jobStatusSummary(job: Job) {
 }
 
 export async function createJob(request: CreateJobRequest) {
-  const model = getWorkflowModel(request.modelId);
-  if (!model) {
-    throw new Error(`Unknown workflow model: ${request.modelId}`);
-  }
-  const project = getProject(request.projectId);
-  if (!project) {
-    throw new Error(`Unknown project: ${request.projectId}`);
-  }
-  const jobId = `job_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
-  const preparedRequest = await externalizeJobInputMedia(project, jobId, request);
-  const durationSeconds = normalizeDurationSeconds(request.durationSeconds, model);
-  const targetFolderId =
-    typeof request.targetFolderId === "string" && request.targetFolderId.trim() ? request.targetFolderId.trim() : null;
-  const projectFolders = await loadProjectFolders(project);
-  if (targetFolderId && !projectFolders.some((folder) => folder.folderId === targetFolderId && !folder.archived)) {
-    throw new Error("Target folder not found.");
-  }
-
-  const job: Job = {
-    id: jobId,
-    projectId: project.id,
-    folderId: targetFolderId,
-    folderName: folderDisplayName(targetFolderId, projectFolders),
-    userId: preparedRequest.userId,
-    modelId: model.id,
-    modelName: model.name,
-    title: model.name,
-    category: model.category,
-    inputType: inferInputType(preparedRequest),
-    prompt: preparedRequest.prompt,
-    resolution: preparedRequest.resolution,
-    durationSeconds,
-    workflowOptions: preparedRequest.workflowOptions,
-    status: "queued",
-    inputImages:
-      preparedRequest.inputImages ?? ([preparedRequest.startFrame, preparedRequest.endFrame].filter(Boolean) as string[]),
-    inputVideo: preparedRequest.inputVideo,
-    resultUrls: [],
-    thumbnailUrls: [],
-    outputType: model.outputType,
-    projectFolderPath: project.folderPath,
-    workflowPath: model.workflowPath,
-    creditsEstimated: estimateWorkflowCredits(
-      model,
-      durationSeconds,
-      preparedRequest.resolution,
-      preparedRequest.workflowOptions,
-    ),
-    source: "backend_job",
-    createdAt: new Date().toISOString(),
-  };
+  const job = await buildQueuedJob(request, {
+    getWorkflowModel,
+    getProject,
+    externalizeInputMedia: externalizeJobInputMedia,
+    loadProjectFolders,
+  });
 
   await commitQueuedJob(job, {
     add: (created) => {
@@ -566,10 +455,6 @@ export async function cancelJob(jobId: string) {
   return job;
 }
 
-function isTerminalJobStatus(status: Job["status"]) {
-  return status === "completed" || status === "failed" || status === "canceled";
-}
-
 function mergeCancellationRequestIntoMemory(updated: Job) {
   const cached = getJob(updated.id);
   if (!cached) {
@@ -596,7 +481,8 @@ function cancellationRequested(job: Job) {
 // Only dispatcher-capable roles call this lifecycle transition. The SQLite
 // branch applies it to the latest row atomically so a concurrent API metadata
 // edit is preserved; the in-flight object is then updated in place.
-async function settleRequestedCancellation(job: Job) {
+async function settleRequestedCancellation(job: Job, execution?: ExecutionClaim) {
+  if (execution && !activeExecutions.isCurrent(execution)) return false;
   if (!isDispatcher() || !cancellationRequested(job)) return false;
 
   let canceledRunpodStatus: string | undefined;
@@ -617,10 +503,7 @@ async function settleRequestedCancellation(job: Job) {
 
   if (jobRowLevelWrites && sqliteStore) {
     const updated = sqliteStore.applyToJob(job.id, (current) => {
-      if (!current.cancelRequested || isTerminalJobStatus(current.status)) return current;
-      current.status = "canceled";
-      if (canceledRunpodStatus) current.runpodStatus = canceledRunpodStatus;
-      current.completedAt = current.completedAt ?? new Date().toISOString();
+      applyCancellationSettlement(current, new Date().toISOString(), canceledRunpodStatus);
       return current;
     });
     if (!updated) return false;
@@ -628,10 +511,9 @@ async function settleRequestedCancellation(job: Job) {
     return updated.status === "canceled";
   }
 
-  if (isTerminalJobStatus(job.status)) return job.status === "canceled";
-  job.status = "canceled";
-  if (canceledRunpodStatus) job.runpodStatus = canceledRunpodStatus;
-  job.completedAt = job.completedAt ?? new Date().toISOString();
+  if (!applyCancellationSettlement(job, new Date().toISOString(), canceledRunpodStatus)) {
+    return job.status === "canceled";
+  }
   await persistUpsert(job);
   return true;
 }
@@ -665,14 +547,6 @@ export async function archiveJob(jobId: string, userId: string) {
   archivedMediaJobs = [archivedJob, ...archivedMediaJobs.filter((job) => job.id !== jobId)];
   await persistArchivedUpsert(archivedJob);
   return archivedJob;
-}
-
-function assertJobCanBeArchived(job: Job) {
-  if (isTerminalJobStatus(job.status)) return;
-  throw new BackendHttpError("Cancel the job and wait for it to stop before archiving it.", {
-    statusCode: 409,
-    code: "job_not_terminal",
-  });
 }
 
 export async function restoreArchivedJob(jobId: string) {
@@ -924,9 +798,13 @@ async function dispatchQueue() {
         continue;
       }
 
-      inFlightJobIds.add(next.id);
-      void runLocalComfyJob(next, serverUrl).finally(() => {
-        inFlightJobIds.delete(next.id);
+      const execution = activeExecutions.begin(next.id);
+      if (!execution) {
+        releaseServer(serverUrl);
+        continue;
+      }
+      void runLocalComfyJob(next, serverUrl, execution).finally(() => {
+        activeExecutions.finish(execution);
         releaseServer(serverUrl);
         void dispatchQueue();
       });
@@ -939,11 +817,7 @@ async function dispatchQueue() {
 async function failExpiredOrphanedRunpodJobs() {
   if (generationBackend !== "runpod") return;
   const cutoff = Date.now() - runpodTimeoutMs;
-  const expired = jobs.filter((job) => {
-    if (inFlightJobIds.has(job.id) || (job.status !== "sending" && job.status !== "running")) return false;
-    const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : Number.NaN;
-    return !Number.isFinite(startedAt) || startedAt <= cutoff;
-  });
+  const expired = jobs.filter((job) => isExpiredOrphan(job, activeExecutions.has(job.id), cutoff));
 
   for (const job of expired) {
     job.status = "failed";
@@ -964,10 +838,11 @@ async function dispatchRunpodJobs() {
     if (!next) return;
     if (await settleRequestedCancellation(next)) continue;
 
+    const execution = activeExecutions.begin(next.id);
+    if (!execution) continue;
     activeRunpodJobs += 1;
-    inFlightJobIds.add(next.id);
-    void runRunpodJob(next).finally(() => {
-      inFlightJobIds.delete(next.id);
+    void runRunpodJob(next, execution).finally(() => {
+      activeExecutions.finish(execution);
       activeRunpodJobs = Math.max(0, activeRunpodJobs - 1);
       void dispatchQueue();
     });
@@ -992,375 +867,25 @@ function claimNextJobForDispatch(concurrencyLimit: number) {
   return claimed;
 }
 
-async function runRunpodJob(job: Job) {
-  logMemory("job-start", job.id);
-  if (await settleRequestedCancellation(job)) return;
-  const project = getProject(job.projectId);
-  let outputProject = project;
-  const model = getWorkflowModel(job.modelId);
-  if (!project || !model) {
-    job.status = "failed";
-    job.errorMessage = "Missing project or workflow model.";
-    await persistUpsert(job);
-    return;
-  }
-
-  const endBillableOperation = beginRunpodBillableOperation();
-  const activityBaseline = runpodActivityBaseline();
-  let dispatcherLeaseLost = false;
-  try {
-    if (await settleRequestedCancellation(job)) return;
-    if (job.status !== "sending") {
-      job.status = "sending";
-      job.startedAt = new Date().toISOString();
-      await persistUpsert(job);
-    }
-
-    if (!job.runpodJobId) job.runpodSubmissionState = "preparing";
-    job.creditBalanceBefore = job.creditBalanceBefore ?? (await captureCreditBalanceSnapshot());
-    if (job.creditBalanceBefore) {
-      await persistUpsert(job);
-    }
-
-    const folders = await ensureJobFolders(project, job.id);
-    const projectFolder = projectFolderName(project.folderPath);
-    const runpodImages = await materializeRunpodInputImages(job, model);
-    const runpodVideo = await materializeRunpodInputVideo(job, model, folders.input);
-    const workflow = await loadWorkflowForRunpod(
-      model,
-      {
-        projectId: job.projectId,
-        modelId: job.modelId,
-        prompt: job.prompt,
-        resolution: job.resolution,
-        durationSeconds: job.durationSeconds,
-        inputImages: runpodImages.imageNames,
-        startFrame: model.requiresStartEndFrames ? runpodImages.imageNames[0] : undefined,
-        endFrame: model.requiresStartEndFrames ? runpodImages.imageNames[1] : undefined,
-        inputVideo: runpodVideo?.videoName,
-        workflowOptions: job.workflowOptions,
-        userId: job.userId,
-      },
-      projectFolder,
-      runpodImages.imageNames,
-    );
-    await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
-    job.workflowSnapshotPath = folders.workflowSnapshotPath;
-    if (await settleRequestedCancellation(job)) return;
-    job.status = "running";
-    if (!job.runpodJobId) job.runpodSubmissionState = "submitting";
-    await persistUpsert(job);
-
-    logMemory("before-runpod-request", job.id);
-    const shouldStopRunpodWork = () => cancellationRequested(job) || !ownsDispatcherWork();
-    const result = job.runpodJobId
-      ? await resumeComfyWorkflowOnRunpod({
-          jobId: job.runpodJobId,
-          shouldCancel: shouldStopRunpodWork,
-        })
-      : await runComfyWorkflowOnRunpod({
-          workflow,
-          images: runpodImages.images,
-          videos: runpodVideo?.videos ?? [],
-          shouldCancel: shouldStopRunpodWork,
-          onSubmitted: async ({ jobId, status }) => {
-            if (!ownsDispatcherWork()) throw new DispatcherLeaseLostError();
-            job.runpodJobId = jobId;
-            job.runpodStatus = status;
-            job.runpodSubmissionState = "submitted";
-            await persistUpsert(job);
-          },
-        });
-    logMemory("after-runpod-request", job.id);
-    if (!ownsDispatcherWork()) throw new DispatcherLeaseLostError();
-    if (await settleRequestedCancellation(job)) return;
-    job.runpodJobId = result.jobId;
-    job.runpodStatus = result.status;
-    job.generatedPrompt = result.generatedText;
-    job.textArtifacts = result.textArtifacts;
-    await captureRunpodPostBalance(job, activityBaseline);
-
-    const media = result.media;
-    const selectedMedia = preferredResultMedia(media);
-    if (!selectedMedia.length) {
-      throw new Error("RunPod completed without returning any output media.");
-    }
-
-    const creditUsage = result.creditUsage ?? estimateFallbackCreditUsage(model, workflow, job.durationSeconds, job.resolution);
-    job.creditUsage = creditUsage;
-    applyAccountingCreditsToJob(job);
-    job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
-
-    logMemory("before-runpod-download", job.id);
-    // A project may be renamed while RunPod is processing. Resolve its shared
-    // row again before writing outputs so a resumed dispatcher never recreates
-    // the old project path.
-    outputProject = getProject(job.projectId) ?? project;
-    const artifacts = await persistServerlessArtifacts({ project: outputProject, job, model, media, selectedMedia });
-    logMemory("after-runpod-download", job.id);
-    job.resultUrls = artifacts.resultUrls;
-    job.thumbnailUrls = artifacts.thumbnailUrls;
-    job.fileName = artifacts.selectedArtifacts[0]?.fileName ?? selectedMedia[0]?.filename;
-    job.outputResolution = artifacts.outputResolution;
-
-    if (isCountedCreditUsage(creditUsage)) {
-      const syncResult = await syncServerlessCreditUsage({
-        project: outputProject,
-        job,
-        model,
-        creditUsage,
-        outputFiles: artifacts.artifacts.map((artifact) => artifact.filePath).filter((item): item is string => Boolean(item)),
-      });
-      if (!syncResult.ok) {
-        console.warn(`Credit Tracker sync failed for ${job.id}: ${syncResult.error ?? "unknown error"}`);
-      }
-    }
-
-    if (await settleRequestedCancellation(job)) return;
-    job.status = "completed";
-    job.completedAt = new Date().toISOString();
-    if (jobRemoteMediaEntries(job).length) {
-      // Some outputs could not be saved locally; retry soon while the remote
-      // signed URLs are still valid.
-      scheduleRemoteResultRecovery();
-    }
-    logMemory("job-finished", job.id);
-  } catch (error) {
-    if (error instanceof DispatcherLeaseLostError || (error instanceof RunpodComfyCanceledError && !ownsDispatcherWork())) {
-      dispatcherLeaseLost = true;
-      console.warn(`Dispatcher lease lost while handling ${job.id}; the current lease owner will resume it.`);
-      return;
-    }
-    const canceled = await settleRequestedCancellation(job);
-    if (!canceled && job.status !== "canceled") {
-      job.status = "failed";
-      job.completedAt = new Date().toISOString();
-      await captureRunpodPostBalance(job, activityBaseline);
-      if (error instanceof RunpodComfyError) {
-        job.runpodJobId = error.jobId ?? job.runpodJobId;
-        job.runpodStatus = error.status;
-        job.errorMessage = error.message;
-        if (error.creditUsage) {
-          job.creditUsage = error.creditUsage;
-          applyAccountingCreditsToJob(job);
-        } else {
-          applyAccountingCreditsToJob(job);
-        }
-      } else {
-        job.errorMessage = error instanceof Error ? error.message : "Unknown RunPod job error";
-        applyAccountingCreditsToJob(job);
-      }
-    }
-    logMemory(canceled || error instanceof RunpodComfyCanceledError ? "job-canceled" : "job-failed", job.id);
-  } finally {
-    endBillableOperation();
-    if (!dispatcherLeaseLost) {
-      await persistUpsert(job);
-      await saveJobMetadata(job, getProject(job.projectId) ?? outputProject);
-    }
-  }
+function runRunpodJob(job: Job, execution: ExecutionClaim) {
+  return executeRunpodJob(job, execution, {
+    isExecutionCurrent: (claim) => activeExecutions.isCurrent(claim),
+    isCancellationRequested: cancellationRequested,
+    ownsDispatcherWork,
+    persistJob: persistUpsert,
+    scheduleRemoteResultRecovery,
+    settleRequestedCancellation,
+  });
 }
 
-class DispatcherLeaseLostError extends Error {
-  constructor() {
-    super("Dispatcher lease lost.");
-    this.name = "DispatcherLeaseLostError";
-  }
-}
-
-async function captureCreditBalanceSnapshot(): Promise<CreditBalanceSnapshot | undefined> {
-  try {
-    const credits = await getCredits();
-    if (typeof credits.creditsLeft !== "number" || !Number.isFinite(credits.creditsLeft)) return undefined;
-    return {
-      creditsLeft: credits.creditsLeft,
-      source: credits.source,
-      capturedAt:
-        credits.updatedAt && Number.isFinite(new Date(credits.updatedAt).getTime())
-          ? credits.updatedAt
-          : new Date().toISOString(),
-    };
-  } catch (error) {
-    console.warn(`Could not capture credit balance snapshot: ${error instanceof Error ? error.message : "unknown error"}`);
-    return undefined;
-  }
-}
-
-async function captureRunpodPostBalance(job: Job, activityBaseline: RunpodActivityBaseline) {
-  if (job.creditBalanceAfter) return;
-  const snapshot = await captureCreditBalanceSnapshot();
-  if (!snapshot) return;
-
-  job.creditBalanceAfter = snapshot;
-  if (!creditBalanceDeltaAccountingEnabled) return;
-  // Only attribute the balance delta when this job was provably the only
-  // billable RunPod activity between its before/after snapshots. Concurrent
-  // queue jobs and prompt helper calls spend from the same account balance,
-  // so any overlap would misattribute their credits to this job.
-  if (!hasExclusiveRunpodActivityWindow(activityBaseline)) return;
-
-  const actualCredits = balanceDeltaCredits(job.creditBalanceBefore, job.creditBalanceAfter);
-  if (actualCredits == null) return;
-
-  job.creditsActual = actualCredits;
-  job.creditsActualSource = COMPANY_BALANCE_DELTA_SOURCE;
-  job.creditsUsed = actualCredits;
-}
-
-function applyAccountingCreditsToJob(job: Job) {
-  const credits = creditsSpentForAccounting(job);
-  if (credits > 0) {
-    job.creditsUsed = credits;
-    return;
-  }
-
-  delete job.creditsUsed;
-}
-
-async function runLocalComfyJob(job: Job, serverUrl: string) {
-  if (await settleRequestedCancellation(job)) return;
-  const project = getProject(job.projectId);
-  const model = getWorkflowModel(job.modelId);
-  if (!project || !model) {
-    job.status = "failed";
-    job.errorMessage = "Missing project or workflow model.";
-    await persistUpsert(job);
-    return;
-  }
-
-  try {
-    if (await settleRequestedCancellation(job)) return;
-    job.status = "sending";
-    job.comfyServerUrl = serverUrl;
-    job.startedAt = new Date().toISOString();
-    await persistUpsert(job);
-
-    const folders = await ensureJobFolders(project, job.id);
-    await ensureWorkerProjectFolder(serverUrl, project.folderName ?? projectFolderName(project.folderPath));
-    const projectFolder = projectFolderName(project.folderPath);
-    const workflow = await loadWorkflowPrompt(
-      model,
-      {
-        projectId: job.projectId,
-        modelId: job.modelId,
-        prompt: job.prompt,
-        resolution: job.resolution,
-        durationSeconds: job.durationSeconds,
-        inputImages: await materializeComfyInputImages(job, serverUrl),
-        inputVideo: await materializeComfyInputVideo(job, serverUrl),
-        workflowOptions: job.workflowOptions,
-        userId: job.userId,
-      },
-      projectFolder,
-      serverUrl,
-    );
-    await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
-    job.workflowSnapshotPath = folders.workflowSnapshotPath;
-    if (await settleRequestedCancellation(job)) return;
-
-    const queued = await queuePrompt(serverUrl, workflow, `momi-${job.id}`);
-    job.comfyPromptId = queued.prompt_id;
-    job.status = "running";
-    await persistUpsert(job);
-
-    const history = await waitForHistory(serverUrl, queued.prompt_id, job);
-    const resultUrls = extractResultUrls(serverUrl, history, queued.prompt_id);
-    const persistedResultUrls = await persistResultMedia(resultUrls, folders.output, job.id);
-    job.resultUrls = persistedResultUrls;
-    job.thumbnailUrls = persistedResultUrls.slice(0, 1);
-    job.outputResolution = await detectFirstPersistedResultResolution(persistedResultUrls, job.outputType);
-    if (await settleRequestedCancellation(job)) return;
-    job.status = "completed";
-    job.completedAt = new Date().toISOString();
-    await reconcileActualCreditsForStoredJobs();
-  } catch (error) {
-    const canceled = await settleRequestedCancellation(job);
-    if (!canceled && job.status !== "canceled") {
-      job.status = "failed";
-      job.errorMessage = error instanceof Error ? error.message : "Unknown ComfyUI job error";
-      job.completedAt = new Date().toISOString();
-    }
-  } finally {
-    await persistUpsert(job);
-    await saveJobMetadata(job, project);
-  }
-}
-
-async function waitForHistory(serverUrl: string, promptId: string, job: Job) {
-  const maxChecks = Number(process.env.COMFY_HISTORY_CHECKS ?? 180);
-  const intervalMs = Number(process.env.COMFY_HISTORY_INTERVAL_MS ?? 2500);
-
-  for (let index = 0; index < maxChecks; index += 1) {
-    if (await settleRequestedCancellation(job)) throw new Error("Job canceled.");
-    const history = await getHistory(serverUrl, promptId).catch(() => ({}));
-    if (history && Object.keys(history).length) {
-      const promptHistory = getPromptHistory(history, promptId);
-      const status = promptHistory?.status;
-      if (status?.status_str === "error") {
-        throw new Error(comfyHistoryErrorMessage(promptHistory) ?? "ComfyUI execution failed.");
-      }
-      if (status?.completed) {
-        return history;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error("Timed out waiting for ComfyUI history.");
-}
-
-function extractResultUrls(serverUrl: string, history: Record<string, unknown>, promptId: string) {
-  const promptHistory = getPromptHistory(history, promptId);
-  const outputs = promptHistory.outputs ?? {};
-  const urls: string[] = [];
-
-  for (const output of Object.values(outputs) as Array<Record<string, unknown>>) {
-    for (const key of ["images", "videos", "gifs"]) {
-      const items = output[key];
-      if (Array.isArray(items)) {
-        for (const item of items) {
-          if (item && typeof item === "object") urls.push(toViewUrl(serverUrl, item as Record<string, unknown>));
-        }
-      }
-    }
-  }
-
-  const uniqueUrls = Array.from(new Set(urls));
-  if (!uniqueUrls.length) {
-    throw new Error("ComfyUI completed without returning any output media.");
-  }
-  return uniqueUrls;
-}
-
-async function persistResultMedia(resultUrls: string[], outputFolder: string, jobId: string) {
-  const persistedUrls: string[] = [];
-
-  for (let index = 0; index < resultUrls.length; index += 1) {
-    const resultUrl = resultUrls[index];
-    try {
-      const url = new URL(resultUrl);
-      const response = await fetch(url, { signal: AbortSignal.timeout(120000) });
-      if (!response.ok) {
-        persistedUrls.push(resultUrl);
-        continue;
-      }
-
-      const contentType = response.headers.get("content-type") ?? "";
-      const extension = resultExtension(url, contentType);
-      const filePath = path.join(outputFolder, `${jobId}_${String(index + 1).padStart(2, "0")}${extension}`);
-      const contentLength = Number(response.headers.get("content-length") ?? 0);
-      if (Number.isFinite(contentLength) && contentLength > runpodOutputMaxBytes) {
-        response.body?.cancel().catch(() => undefined);
-        persistedUrls.push(resultUrl);
-        continue;
-      }
-      await writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes);
-      persistedUrls.push(`/api/media?path=${encodeURIComponent(filePath)}`);
-    } catch {
-      persistedUrls.push(resultUrl);
-    }
-  }
-
-  return persistedUrls;
+function runLocalComfyJob(job: Job, serverUrl: string, execution: ExecutionClaim) {
+  return executeLocalComfyJob(job, serverUrl, execution, {
+    isExecutionCurrent: (claim) => activeExecutions.isCurrent(claim),
+    mediaDiskPathFromUrl,
+    persistJob: persistUpsert,
+    reconcileActualCredits: reconcileActualCreditsForStoredJobs,
+    settleRequestedCancellation,
+  });
 }
 
 export function scheduleRemoteResultRecovery(delayMs = 60_000) {
@@ -1370,36 +895,6 @@ export function scheduleRemoteResultRecovery(delayMs = 60_000) {
 export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) {
   refreshMainJobsCache();
   return remoteResultRecovery.recover(fetchImpl);
-}
-
-async function detectFirstPersistedResultResolution(resultUrls: string[], outputType: Job["outputType"]) {
-  for (const resultUrl of resultUrls) {
-    const filePath = mediaDiskPathFromUrl(resultUrl);
-    if (!filePath) continue;
-    const resolution = await detectMediaResolution(filePath, outputType).catch(() => undefined);
-    if (resolution) return resolution;
-  }
-  return undefined;
-}
-
-function getPromptHistory(history: Record<string, unknown>, promptId: string) {
-  return (history[promptId] ?? history) as ComfyGraph;
-}
-
-function comfyHistoryErrorMessage(promptHistory: ComfyGraph) {
-  const messages = Array.isArray(promptHistory.status?.messages) ? promptHistory.status.messages : [];
-  const executionError = messages
-    .map((message: unknown) => (Array.isArray(message) ? message : undefined))
-    .find((message: unknown[] | undefined) => message?.[0] === "execution_error")?.[1] as Record<string, unknown> | undefined;
-
-  const nodeType = typeof executionError?.node_type === "string" ? executionError.node_type : "ComfyUI node";
-  const exception = typeof executionError?.exception_message === "string" ? executionError.exception_message.trim() : "";
-  return exception ? `${nodeType}: ${exception}` : undefined;
-}
-
-function preferredResultMedia(media: RunpodMediaResult[]) {
-  const videos = media.filter((item) => item.isVideo);
-  return videos.length ? videos : media;
 }
 
 function normalizeEditableSaveNumber(value: unknown) {
@@ -1521,7 +1016,7 @@ export function closeJobStore() {
   archivedStore?.close();
   archivedStore = undefined;
   archivedCacheCursor = undefined;
-  inFlightJobIds.clear();
+  activeExecutions.clear();
 }
 
 async function persistArchivedMediaJobs() {
