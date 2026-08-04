@@ -348,14 +348,74 @@ export function clearStoredAuthToken() {
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 }
 
+/*
+ * Media access token.
+ *
+ * <img src> and <video src> cannot send an Authorization header, so media URLs
+ * have to carry a credential in the query string. That used to be the session
+ * token itself, which put a 14-day full-account credential into server access
+ * logs and Referer headers. The backend now issues a short-lived token that only
+ * works on the media read routes.
+ *
+ * Held in memory rather than localStorage on purpose: it is re-issued with every
+ * /api/auth/me call, so persisting it would only lengthen its life. Refreshed
+ * ahead of expiry because withMediaAccessToken() is called synchronously during
+ * render and cannot await.
+ */
+type MediaAccess = { token: string; expiresAt: string };
+
+let mediaAccess: MediaAccess | undefined;
+let mediaAccessRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Refresh at 60% of the remaining lifetime, leaving room for a failed attempt to
+// be retried before anything actually expires. Floored so a short TTL cannot
+// produce a busy loop.
+const MEDIA_ACCESS_REFRESH_FRACTION = 0.6;
+const MEDIA_ACCESS_MIN_REFRESH_MS = 30_000;
+
+function storeMediaAccess(next: MediaAccess | undefined) {
+  mediaAccess = next;
+  if (mediaAccessRefreshTimer) {
+    clearTimeout(mediaAccessRefreshTimer);
+    mediaAccessRefreshTimer = undefined;
+  }
+  if (!next || typeof window === "undefined") return;
+
+  const remainingMs = new Date(next.expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(remainingMs)) return;
+  const delayMs = Math.max(MEDIA_ACCESS_MIN_REFRESH_MS, remainingMs * MEDIA_ACCESS_REFRESH_FRACTION);
+  mediaAccessRefreshTimer = setTimeout(() => {
+    void refreshMediaAccessToken();
+  }, delayMs);
+}
+
+export async function refreshMediaAccessToken() {
+  // Without a session there is nothing to refresh against, and asking would just
+  // produce a 401 on a page that is already signed out.
+  if (!getStoredAuthToken()) return;
+  try {
+    const data = await api<{ mediaAccess: MediaAccess }>("/api/media/access-token", { method: "POST" });
+    storeMediaAccess(data.mediaAccess);
+  } catch {
+    // Leave the existing token in place; it is still valid for the remaining 40%
+    // of its lifetime, and the next /api/auth/me will re-issue one anyway.
+  }
+}
+
+export function clearMediaAccessToken() {
+  storeMediaAccess(undefined);
+}
+
 export async function signInBackend(email: string, password: string): Promise<AuthResult> {
   try {
-    const data = await api<{ token: string; user: AuthUser }>("/api/auth/login", {
+    const data = await api<{ token: string; user: AuthUser; mediaAccess?: MediaAccess }>("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
     setStoredAuthToken(data.token);
+    // Issued with the session, so the first render already has a media credential.
+    storeMediaAccess(data.mediaAccess);
     return { ok: true, account: mapUser(data.user), token: data.token };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not sign in." };
@@ -363,7 +423,10 @@ export async function signInBackend(email: string, password: string): Promise<Au
 }
 
 export async function fetchCurrentAccount() {
-  const data = await api<{ user: AuthUser }>("/api/auth/me");
+  const data = await api<{ user: AuthUser; mediaAccess?: MediaAccess }>("/api/auth/me");
+  // This is the session-restore path on a page load, so it is also where the
+  // media credential for this page's lifetime comes from.
+  storeMediaAccess(data.mediaAccess);
   return mapUser(data.user);
 }
 
@@ -372,6 +435,7 @@ export async function logoutBackend() {
     await api<{ ok: true }>("/api/auth/logout", { method: "POST" });
   } finally {
     clearStoredAuthToken();
+    clearMediaAccessToken();
   }
 }
 
@@ -1062,8 +1126,11 @@ function resolveMediaUrl(url: string) {
   return url;
 }
 
+// Appends the short-lived media token, never the session token. If no media token
+// has been issued yet the URL is returned unchanged: same-origin requests still
+// carry the momi_session cookie, which is the fallback the backend accepts.
 function withMediaAccessToken(url: string) {
-  const token = getStoredAuthToken();
+  const token = mediaAccess?.token;
   if (!token || url.includes("access_token=")) return url;
   return `${url}${url.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`;
 }

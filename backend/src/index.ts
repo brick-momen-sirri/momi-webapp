@@ -70,7 +70,8 @@ import {
   updateOwnProfile,
   updateUser,
 } from "./authService.js";
-import { extractAuthToken, getRequestUser, requireAdmin, requireAuth } from "./authMiddleware.js";
+import { extractAuthToken, getRequestUser, requireAdmin, requireAuth, resolveMediaAccessToken } from "./authMiddleware.js";
+import { createMediaAccessToken } from "./mediaAccessToken.js";
 import { isOriginAllowed } from "./corsOrigin.js";
 import { requireOpsAccess } from "./opsAccessGuard.js";
 import { createLoginRateLimiter, loginRateLimitKeys } from "./loginRateLimiter.js";
@@ -306,7 +307,10 @@ app.post("/api/auth/login", async (req, res) => {
     const result = await login(identifier, password);
     loginRateLimiter.recordSuccess(rateLimitKeys);
     setSessionCookie(res, result.token, result.expiresAt);
-    res.json(result);
+    // Issued alongside the session so the first render already has a credential
+    // for its <img>/<video> URLs -- no gap where media would 401, and no extra
+    // round trip.
+    res.json({ ...result, mediaAccess: createMediaAccessToken(result.user.id) });
   } catch (error) {
     loginRateLimiter.recordFailure(rateLimitKeys, Date.now());
     res.status(401).json({ error: error instanceof Error ? error.message : "Could not sign in." });
@@ -319,10 +323,22 @@ app.post("/api/auth/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
+// Must precede requireAuth: it resolves the media-only query token on media read
+// paths so those requests arrive already authenticated. Everything else still has
+// to present a session in a header or cookie.
+app.use(resolveMediaAccessToken);
 app.use(requireAuth);
 
 app.get("/api/auth/me", (req, res) => {
-  res.json({ user: getRequestUser(req) });
+  const user = getRequestUser(req);
+  res.json({ user, mediaAccess: createMediaAccessToken(user.id) });
+});
+
+// Refresh endpoint for a page that has been open longer than the token TTL. Sits
+// behind requireAuth, so refreshing needs the session -- a media token cannot
+// renew itself into an unbounded credential.
+app.post("/api/media/access-token", (req, res) => {
+  res.json({ mediaAccess: createMediaAccessToken(getRequestUser(req).id) });
 });
 
 function runtimeInfo() {

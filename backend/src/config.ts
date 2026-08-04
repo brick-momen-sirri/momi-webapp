@@ -1,5 +1,6 @@
 import "./env.js";
 import path from "node:path";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { BackendHttpError } from "./httpError.js";
 import { backendProcessRole } from "./processRole.js";
@@ -144,6 +145,34 @@ export const runpodInputBaseUrl = (process.env.RUNPOD_INPUT_BASE_URL ?? process.
   .trim()
   .replace(/\/$/, "");
 export const runpodInputTokenSecret = (process.env.RUNPOD_INPUT_URL_SECRET ?? runpodApiKey).trim();
+
+// --- Media access tokens ---
+// Browsers cannot put an Authorization header on <img src>, so media URLs carry
+// a credential in the query string. That credential is a short-lived media-only
+// token (see mediaAccessToken.ts), not the session token.
+//
+// The secret must be identical across every api worker and stable across
+// restarts, or a token minted by one worker fails on the next request that lands
+// elsewhere. Preference order:
+//   1. MEDIA_ACCESS_TOKEN_SECRET, if set.
+//   2. A key derived from the existing RunPod signing secret, so a correctly
+//      configured production host needs no new env var. Derived through a hash
+//      with a distinct label rather than used directly, so this key and the
+//      RunPod input signing key cannot be interchanged.
+//   3. A random per-process value, for local development with no RunPod
+//      configuration at all. Media tokens then only verify on the process that
+//      minted them, which is fine for a single-process monolith and is refused
+//      outright for split roles in validateRuntimeConfigForStartup.
+const mediaAccessTokenSecretOverride = process.env.MEDIA_ACCESS_TOKEN_SECRET?.trim() || "";
+const derivedMediaAccessTokenSecret = runpodInputTokenSecret
+  ? createHash("sha256").update(`momi-media-access-v1:${runpodInputTokenSecret}`).digest("hex")
+  : "";
+export const mediaAccessTokenSecretIsEphemeral = !mediaAccessTokenSecretOverride && !derivedMediaAccessTokenSecret;
+export const mediaAccessTokenSecret =
+  mediaAccessTokenSecretOverride || derivedMediaAccessTokenSecret || randomBytes(32).toString("hex");
+// Kept short because these tokens are self-verifying and therefore cannot be
+// revoked before they expire. The frontend refreshes well before this elapses.
+export const mediaAccessTokenTtlMs = positiveNumber(process.env.MEDIA_ACCESS_TOKEN_TTL_MS, 30 * 60 * 1000);
 export const runpodInputUrlTtlMs = positiveNumber(process.env.RUNPOD_INPUT_URL_TTL_MS, runpodTimeoutMs + 15 * 60_000);
 export const runpodInlineMediaMaxBytes = positiveNumber(process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES, 6 * 1024 * 1024);
 export const runpodRequestBodyMaxBytes = positiveNumber(process.env.RUNPOD_REQUEST_BODY_MAX_BYTES, 9 * 1024 * 1024);
@@ -284,6 +313,11 @@ export function validateRuntimeConfigForStartup() {
   }
   if (backendProcessRole !== "monolith" && !jobRowLevelWrites) {
     throw new Error("ROLE=dispatcher/api requires JOB_STORE_DRIVER=sqlite and JOBS_ROW_LEVEL_WRITES=true.");
+  }
+  if (backendProcessRole !== "monolith" && mediaAccessTokenSecretIsEphemeral) {
+    throw new Error(
+      "ROLE=dispatcher/api requires MEDIA_ACCESS_TOKEN_SECRET (or a configured RunPod signing secret) so media tokens minted by one worker verify on the others.",
+    );
   }
   if (backendProcessRole !== "monolith" && appStateDriver !== "sqlite") {
     throw new Error("ROLE=dispatcher/api requires APP_STATE_DRIVER=sqlite for shared app state and media indexing.");

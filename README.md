@@ -82,6 +82,14 @@ Secrets are never committed: `.env`, `backend/data/`, and all logs are
 gitignored. The Azure backup SAS URL and provider API keys are set in the
 process environment on the host only.
 
+Session tokens travel in the `Authorization` header or the `momi_session`
+cookie, never in a URL. Media URLs — which `<img>` and `<video>` load directly,
+and so cannot attach a header to — carry a separate short-lived token that only
+works on the media read routes; see
+[mediaAccessToken.ts](backend/src/mediaAccessToken.ts). If you add a route that a
+browser element loads directly, add it to the allowlist there rather than
+widening what the session token accepts.
+
 ## Tests
 
 ```bash
