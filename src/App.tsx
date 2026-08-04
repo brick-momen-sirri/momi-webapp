@@ -66,6 +66,7 @@ import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, Upload
 import { estimateModelCreditLabel, estimateModelCredits } from "./utils/creditEstimator";
 import { getImageSize } from "./utils/imageCrop";
 import { createClientId } from "./utils/id";
+import { useResetWhenChanged } from "./utils/useResetWhenChanged";
 
 const JOB_PAGE_SIZE = 30;
 const ALL_PROJECTS_ID = "all";
@@ -223,33 +224,49 @@ function App() {
   });
   const hasMoreBackendJobs = backendAvailable && backendJobsOffset < backendJobsTotal;
 
-  useEffect(() => {
+  // Switching project invalidates both folder selections. Done during render
+  // rather than in an effect so the panels never paint one frame with the previous
+  // project's folder still selected.
+  useResetWhenChanged(selectedProjectId, () => {
     setSelectedFolderId("all");
     setTargetFolderId("");
-  }, [selectedProjectId]);
+  });
 
-  useEffect(() => {
-    const folderIds = new Set(
-      (selectedProject?.folders ?? []).filter((folder) => !folder.archived).map((folder) => folder.folderId),
-    );
+  // Folders arrive from the backend and can be archived or deleted underneath a
+  // selection. The key reproduces the old dependency list exactly -- the live
+  // folder set plus both selections -- so the prune fires in the same situations,
+  // just during render instead of after a painted frame.
+  const activeFolderIdSignature = (selectedProject?.folders ?? [])
+    .filter((folder) => !folder.archived)
+    .map((folder) => folder.folderId)
+    .join(",");
+  useResetWhenChanged(`${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}`, () => {
+    const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
     if (targetFolderId && !folderIds.has(targetFolderId)) {
       setTargetFolderId("");
     }
     if (selectedFolderId !== "all" && selectedFolderId !== "root" && !folderIds.has(selectedFolderId)) {
       setSelectedFolderId("all");
     }
-  }, [selectedFolderId, selectedProject, targetFolderId]);
+  });
 
-  useEffect(() => {
+  // A new model has its own supported durations and resolutions, so the current
+  // choices are re-normalised against it. Keyed on the id plus the 4K flag because
+  // selectedModel is a fresh object on most renders.
+  useResetWhenChanged(`${selectedModel.id}:${allowSeedance4K}`, () => {
     setSelectedDurationSeconds((current) => normalizeDurationSeconds(current, selectedModel));
     setSelectedResolution((current) => normalizeResolutionForModel(current, selectedModel, allowSeedance4K));
-  }, [allowSeedance4K, selectedModel]);
+  });
 
-  useEffect(() => {
+  // Models that cannot produce several images at once are forced back to one.
+  // Keyed on the id, which is also what the old effect's dependency list used --
+  // the eslint exhaustive-deps warning about the whole object was pointing at a
+  // dependency the effect deliberately did not want.
+  useResetWhenChanged(selectedModelBase.id, () => {
     if (!supportsImageOutputCount(selectedModelBase)) {
       setImageOutputCount(1);
     }
-  }, [selectedModelBase.id]);
+  });
 
   useEffect(() => {
     writePersistedGenerationSettings({
@@ -281,12 +298,17 @@ function App() {
     writeFavoriteJobIds(favoriteJobIds);
   }, [favoriteJobIds]);
 
-  useEffect(() => {
+  // Signing out is a reset, so it happens during render. Loading the workspace is
+  // genuinely asynchronous and stays in the effect below.
+  useResetWhenChanged(account?.id ?? null, () => {
     if (!account) {
       setLoadedWorkspaceAccountId(null);
       setPodStatus(undefined);
-      return;
     }
+  });
+
+  useEffect(() => {
+    if (!account) return;
     const accountId = account.id;
     let mounted = true;
 

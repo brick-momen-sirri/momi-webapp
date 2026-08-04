@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { Job } from "../types";
 import type { AuthResult, AuthUser } from "../services/backendApi";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { ThemeToggle, type ThemeMode } from "./ThemeToggle";
 
 type AccountPanelProps = {
@@ -470,7 +471,10 @@ function AdminUsersPanel({
   }, [drafts, roleFilter, statusFilter, userSearch, users]);
   const visibleUsers = hasUserFilter || showAllUsers ? filteredUsers : [];
 
-  useEffect(() => {
+  // Drafts are seeded from whatever users have arrived. Keyed on the id list so
+  // it re-seeds when the list changes, without an effect and the extra render it
+  // caused every time the user list loaded.
+  useResetWhenChanged(users.map((user) => user.id).join(","), () => {
     setDrafts((current) => {
       const next = { ...current };
       for (const user of users) {
@@ -488,7 +492,7 @@ function AdminUsersPanel({
       }
       return next;
     });
-  }, [users]);
+  });
 
   async function handleCreateUser(event: FormEvent) {
     event.preventDefault();

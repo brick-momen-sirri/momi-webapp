@@ -2,6 +2,7 @@ import { type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useM
 import { createPortal } from "react-dom";
 import { Crop, Maximize2, Minimize2, MoveHorizontal, MoveVertical, RotateCcw, Save, Scan, X } from "lucide-react";
 import type { UploadedImage } from "../types";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { cropImageToDataUrl, isNearAspectRatio, outputSizeForResolution, type CropSettings } from "../utils/imageCrop";
 
 const ASPECT_RATIO = 16 / 9;
@@ -62,7 +63,10 @@ export function CropModal({ image, selectedResolution, onCancel, onSave }: CropM
     [frameSize, settings, sourceHeight, sourceWidth],
   );
 
-  useEffect(() => {
+  // A different image, or a different output size, invalidates the current crop.
+  // During render so the preview never paints a frame with the previous image's
+  // crop applied to the new one.
+  useResetWhenChanged(`${image.id}:${outputSize.width}x${outputSize.height}`, () => {
     setSettings(
       normalizeSettings({
         ...(image.cropSettings ?? defaultSettings),
@@ -71,7 +75,7 @@ export function CropModal({ image, selectedResolution, onCancel, onSave }: CropM
         outputHeight: outputSize.height,
       }),
     );
-  }, [defaultSettings, image.cropSettings, image.id, outputSize.height, outputSize.width]);
+  });
 
   useEffect(() => {
     const element = previewRef.current;

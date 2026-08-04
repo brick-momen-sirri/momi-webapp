@@ -25,6 +25,12 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
   const runningCount = servers.filter((server) => server.status === "idle" || server.status === "busy").length;
   const busyCount = servers.filter((server) => server.status === "busy").length;
 
+  // This is what effects are for, and the rule's own guidance says so: it reacts to
+  // `servers`, which is polled state arriving from outside React, and reports when
+  // the instance being watched has finished starting. There is nothing to derive --
+  // the message depends on a transition in external data, not on current props --
+  // and the alternative would be for the parent to own a watch it has no reason to
+  // know about.
   useEffect(() => {
     if (watchedPort == null) {
       return;
@@ -32,9 +38,11 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
 
     const watchedServer = servers.find((server) => serverPort(server) === watchedPort);
     if (watchedServer?.status === "idle" || watchedServer?.status === "busy") {
+      /* eslint-disable react-hooks/set-state-in-effect -- reacting to polled external state; see the note above. */
       setPendingMessage("");
       setActionMessage(`Instance ${watchedPort} is ${watchedServer.status}.`);
       setWatchedPort(undefined);
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [servers, watchedPort]);
 

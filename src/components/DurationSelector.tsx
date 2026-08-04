@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Timer } from "lucide-react";
 import type { ModelType } from "../types";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 
 type DurationSelectorProps = {
   selectedModel: ModelType;
@@ -22,9 +23,10 @@ export function DurationSelector({ selectedModel, value, onChange }: DurationSel
   const isContiguous = options.every((option, index) => index === 0 || option - options[index - 1] === 1);
   const sliderKey = `${selectedModel.id}-${options.join("-")}`;
 
-  useEffect(() => {
-    setSelectedValue(normalizedValue);
-  }, [normalizedValue, selectedModel.id]);
+  // A different model, or a value the current model does not offer, re-seeds the
+  // local selection. During render rather than in an effect so the slider never
+  // paints one frame showing a duration this model cannot actually produce.
+  useResetWhenChanged(`${selectedModel.id}:${normalizedValue}`, () => setSelectedValue(normalizedValue));
 
   if (!isVideoModel) {
     return null;

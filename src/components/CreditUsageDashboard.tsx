@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowUpDown, BarChart3, Coins, Download, Loader2, RefreshCw, Search, WalletCards, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   fetchBackendCreditDashboard,
@@ -53,7 +53,10 @@ export function CreditUsageDashboard({
   const [customFrom, setCustomFrom] = useState(() => toDateInput(addDays(new Date(), -29)));
   const [customTo, setCustomTo] = useState(() => toDateInput(new Date()));
 
-  async function loadDashboard() {
+  // Memoised so the effect below can depend on it honestly rather than omitting it.
+  // Also a click handler for the two refresh controls, so it cannot simply be
+  // inlined into the effect.
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -69,12 +72,15 @@ export function CreditUsageDashboard({
     } finally {
       setLoading(false);
     }
-  }
+  }, [customFrom, customTo, rangePreset]);
 
   useEffect(() => {
     if (!open) return;
+    // Fetching is exactly what an effect is for, and the loading flag it sets is
+    // intrinsic to the fetch rather than state that could be derived.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     void loadDashboard();
-  }, [open, rangePreset]);
+  }, [loadDashboard, open]);
 
   useEffect(() => {
     if (!open) return;

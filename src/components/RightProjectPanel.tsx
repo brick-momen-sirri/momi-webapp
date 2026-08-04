@@ -329,11 +329,10 @@ function ManageMembersModal({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  useEffect(() => {
-    if (!selectedUserId && availableUsers[0]) {
-      setSelectedUserId(availableUsers[0].id);
-    }
-  }, [availableUsers, selectedUserId]);
+  // No effect needed: "first available user unless one was picked" is derivable.
+  // Storing it meant an extra render once the user list arrived, and a stale id if
+  // the list changed under it.
+  const effectiveUserId = selectedUserId || availableUsers[0]?.id || "";
 
   function closeOnOverlay(event: MouseEvent<HTMLDivElement>) {
     if (event.currentTarget === event.target) {
@@ -355,13 +354,13 @@ function ManageMembersModal({
       return;
     }
 
-    if (!selectedUserId) {
+    if (!effectiveUserId) {
       setMessage("Select a user to add.");
       return;
     }
 
     const member: ProjectMember = {
-      userId: selectedUserId,
+      userId: effectiveUserId,
       role: userRole,
       addedAt: new Date().toISOString(),
       addedBy: currentUserId,
@@ -538,7 +537,7 @@ function ManageMembersModal({
                   className="h-9 w-full rounded-md border border-line px-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
                 <select
-                  value={selectedUserId}
+                  value={effectiveUserId}
                   onChange={(event) => setSelectedUserId(event.target.value)}
                   className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none"
                 >
