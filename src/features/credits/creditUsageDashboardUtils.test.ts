@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendCreditDashboardGroup, BackendCreditDashboardRecentJob } from "../../services/backendApi";
 import {
   buildChartRows,
   dashboardRangeParams,
+  exportRecentCsv,
   filterRecentJobs,
   formatCredits,
   formatExpectedDelta,
@@ -49,6 +50,17 @@ describe("dashboard range selection", () => {
       to: undefined,
     });
   });
+
+  it.each(["today", "last7", "last30", "thisMonth", "lastMonth"] as const)(
+    "leaves date-boundary calculation to the backend for %s",
+    (range) => {
+      expect(dashboardRangeParams(range, "1900-01-01", "2999-12-31")).toEqual({
+        range,
+        from: undefined,
+        to: undefined,
+      });
+    },
+  );
 });
 
 describe("chart aggregation", () => {
@@ -87,6 +99,33 @@ describe("chart aggregation", () => {
     const chart = buildChartRows([{ date: "2026-08-01", credits: 0, usd: 0, jobs: 0 }], [], "total");
     expect(chart.rows).toEqual([{ date: "2026-08-01", total: 0, segments: [] }]);
   });
+
+  it("preserves four-digit project names as labels", () => {
+    const chart = buildChartRows(
+      [{ date: "2026-08-01", credits: 12, usd: 0.48, jobs: 1 }],
+      [event({ projectName: "2024 Glass Tower", credits: 12 })],
+      "project",
+    );
+    expect(chart.legend.map((row) => row.label)).toEqual(["2024 Glass Tower"]);
+    expect(chart.rows[0].segments[0]).toMatchObject({ label: "2024 Glass Tower", credits: 12 });
+  });
+
+  it("keeps the top five groups, rolls the rest into Other, and produces finite totals", () => {
+    const events = Array.from({ length: 2_000 }, (_, index) =>
+      event({
+        jobId: `job_${index}`,
+        projectName: `Project ${index % 10}`,
+        credits: (index % 10) + 1,
+      }),
+    );
+    const total = events.reduce((sum, row) => sum + row.credits, 0);
+    const chart = buildChartRows([{ date: "2026-08-01", credits: total, usd: 0, jobs: events.length }], events, "project");
+
+    expect(chart.legend).toHaveLength(6);
+    expect(chart.legend.at(-1)?.label).toBe("Other");
+    expect(chart.rows[0].segments.reduce((sum, segment) => sum + segment.credits, 0)).toBe(total);
+    expect(chart.rows[0].segments.every((segment) => Number.isFinite(segment.credits))).toBe(true);
+  });
 });
 
 describe("cost and comparison formatting", () => {
@@ -99,6 +138,7 @@ describe("cost and comparison formatting", () => {
     expect(formatExpectedDelta(group("Unknown", 0, 0))).toBe("No expected price");
     expect(formatCredits(Number.NaN)).toBe("0");
     expect(formatUsd(0)).toBe("$0");
+    expect(formatUsd(0.123456)).toBe("$0.1235");
   });
 });
 
@@ -115,9 +155,43 @@ describe("recent-event preparation", () => {
     expect(rows.map((row) => row.jobId)).toEqual(["job_1", "job_2"]);
   });
 
+  it.each(["asc", "desc"] as const)("preserves source order for equal values when sorting %s", (direction) => {
+    const rows = [
+      event({ jobId: "job_first", credits: 10 }),
+      event({ jobId: "job_middle", credits: 5 }),
+      event({ jobId: "job_second", credits: 10 }),
+    ];
+    const sorted = sortRecentJobs(rows, "credits", direction).filter((row) => row.credits === 10);
+    expect(sorted.map((row) => row.jobId)).toEqual(["job_first", "job_second"]);
+  });
+
   it("produces escaped, machine-readable CSV", () => {
     const csv = recentJobsCsv([event({ projectName: 'Tower, "North"' })]);
     expect(csv).toContain('"Tower, ""North"""');
     expect(csv.split("\n")).toHaveLength(2);
+  });
+});
+
+describe("CSV export lifecycle", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("clicks a temporary download and revokes its object URL", () => {
+    const createObjectURL = vi.fn(() => "blob:credit-events");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const click = vi.fn();
+    const remove = vi.fn();
+    const link = { href: "", download: "", click, remove } as unknown as HTMLAnchorElement;
+    vi.spyOn(document, "createElement").mockReturnValue(link);
+    const appendChild = vi.spyOn(document.body, "appendChild").mockImplementation((node) => node);
+
+    exportRecentCsv([event()]);
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(link.download).toMatch(/^credit-events-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(appendChild).toHaveBeenCalledWith(link);
+    expect(click).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:credit-events");
   });
 });

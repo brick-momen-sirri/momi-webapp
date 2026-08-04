@@ -129,6 +129,19 @@ describe("opening", () => {
     renderDashboard();
     await expect(openDashboard(user)).resolves.toBeUndefined();
   });
+
+  it("restores body scrolling and removes the dialog when Escape closes it", async () => {
+    const user = userEvent.setup();
+    document.body.style.overflow = "clip";
+    renderDashboard();
+    await openDashboard(user);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.body.style.overflow).toBe("clip");
+  });
 });
 
 describe("failure handling", () => {

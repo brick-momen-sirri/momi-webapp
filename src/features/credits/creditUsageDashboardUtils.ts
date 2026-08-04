@@ -149,13 +149,19 @@ export function filterRecentJobs(rows: BackendCreditDashboardRecentJob[], search
 }
 
 export function sortRecentJobs(rows: BackendCreditDashboardRecentJob[], sortKey: SortKey, direction: SortDirection) {
-  const sorted = [...rows].sort((a, b) => {
-    const left = recentSortValue(a, sortKey);
-    const right = recentSortValue(b, sortKey);
-    if (typeof left === "number" && typeof right === "number") return left - right;
-    return String(left ?? "").localeCompare(String(right ?? ""));
-  });
-  return direction === "desc" ? sorted.reverse() : sorted;
+  const directionMultiplier = direction === "desc" ? -1 : 1;
+  return rows
+    .map((job, sourceIndex) => ({ job, sourceIndex }))
+    .sort((a, b) => {
+      const left = recentSortValue(a.job, sortKey);
+      const right = recentSortValue(b.job, sortKey);
+      const comparison =
+        typeof left === "number" && typeof right === "number"
+          ? left - right
+          : String(left ?? "").localeCompare(String(right ?? ""));
+      return comparison === 0 ? a.sourceIndex - b.sourceIndex : comparison * directionMultiplier;
+    })
+    .map(({ job }) => job);
 }
 
 function recentSortValue(job: BackendCreditDashboardRecentJob, sortKey: SortKey) {

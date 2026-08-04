@@ -193,10 +193,26 @@ how to roll back the change.
 - Tests required before changing it: project grouping, four-digit names, dates,
   Comfy and Project Dream totals, zero/missing/duplicate/invalid rows, empty/large
   data, stable sort, and four-decimal rounding.
-- Implementation status: pending.
-- Verification results: pending.
-- Remaining risks: snapshot-like UI tests can miss numeric drift; pure selector
-  assertions are required.
+- Implementation status: complete. The public component is now a 54-line facade;
+  dialog/request control, dashboard composition/chart state, summary panels, and
+  tabular presentation are separate modules under `components/credit-usage/`.
+  Existing pure selectors remain in `features/credits/creditUsageDashboardUtils.ts`.
+  The audit also fixed stable descending ties, bounded URL-image loading, stale
+  upload completion/object-URL cleanup, transient message timers, and delayed
+  Comfy-pool refresh timers after unmount.
+- Verification results: selector tests now cover all presets, four-digit project
+  names, 2,000-row top-five/Other aggregation, duplicate/invalid/zero data,
+  four-decimal USD display, stable ascending/descending ties, and synchronous CSV
+  object-URL revocation. Component/hook tests cover lazy fetching, stale responses,
+  errors, Escape/body-scroll cleanup, upload teardown, image timeout/abort, and
+  Comfy refresh teardown. The full frontend suite passes 439 tests with zero skips;
+  TypeScript is clean.
+- Remaining risks: dashboard requests use request identity to prevent stale state
+  but do not pass a caller-owned AbortSignal through the API facade, so a closed
+  dialog may leave transport work running until the shared client timeout. The
+  result is discarded safely; end-to-end cancellation would require a broader API
+  signature change. Very large recent-event payloads are still sorted client-side,
+  although the expensive derived arrays are memoized by their real dependencies.
 - Rollback approach: compatibility re-export and a sequence of extraction-only commits.
 
 ### 7. Isolated production-gateway verification and deployment runbook
@@ -254,3 +270,7 @@ how to roll back the change.
   pool coverage. Fixed uploaded-media read authorization by resolving the upload's
   project ID and applying that project's ACL before either original or thumbnail
   streaming.
+- 2026-08-04: split credit analytics into facade, dialog controller, composition,
+  summary, table, hook, and pure-selector boundaries. Fixed unstable descending
+  ties plus three demonstrated frontend teardown leaks/races (URL image loading,
+  uploader completion/message timers, and Comfy follow-up refresh timers).

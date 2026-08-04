@@ -1,4 +1,4 @@
-import { ChangeEvent, ClipboardEvent, DragEvent, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { ClipboardPaste, Crop, ImagePlus, Replace, Trash2, UploadCloud } from "lucide-react";
 import { fetchBackendClipboardImage, getStoredAuthToken } from "../services/backendApi";
 import type { UploadedImage } from "../types";
@@ -45,9 +45,41 @@ export function ImageUploader({
   const [activeCropIndex, setActiveCropIndex] = useState<number | null>(null);
   const [pasteMessage, setPasteMessage] = useState("");
   const [isPasting, setIsPasting] = useState(false);
+  const mountedRef = useRef(false);
+  const imageProbeControllerRef = useRef<AbortController | null>(null);
+  const pasteMessageTimerRef = useRef<number | null>(null);
   const slots = textOnly ? [] : imageSlots(requiresTwoImages, imageSlotCount);
   const cropOutputSize = outputSizeForResolution(selectedResolution);
   const use16By9Cropping = requiresLandscape && (!show16By9CropToggle || enable16By9Cropping);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    imageProbeControllerRef.current = new AbortController();
+    return () => {
+      mountedRef.current = false;
+      imageProbeControllerRef.current?.abort();
+      imageProbeControllerRef.current = null;
+      if (pasteMessageTimerRef.current != null) {
+        window.clearTimeout(pasteMessageTimerRef.current);
+        pasteMessageTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function showPasteMessage(message: string, clearAfterMs?: number) {
+    if (!mountedRef.current) return;
+    if (pasteMessageTimerRef.current != null) {
+      window.clearTimeout(pasteMessageTimerRef.current);
+      pasteMessageTimerRef.current = null;
+    }
+    setPasteMessage(message);
+    if (clearAfterMs != null) {
+      pasteMessageTimerRef.current = window.setTimeout(() => {
+        pasteMessageTimerRef.current = null;
+        if (mountedRef.current) setPasteMessage("");
+      }, clearAfterMs);
+    }
+  }
 
   function handle16By9CroppingChange(enabled: boolean) {
     onEnable16By9CroppingChange(enabled);
@@ -63,7 +95,7 @@ export function ImageUploader({
     let size: { width: number; height: number } | undefined;
 
     try {
-      size = await getImageSize(url);
+      size = await getImageSize(url, { signal: imageProbeControllerRef.current?.signal });
     } catch {
       size = undefined;
     }
@@ -82,6 +114,10 @@ export function ImageUploader({
 
   async function applyFile(slotIndex: number, file: File) {
     const nextImage = await buildUploadedImage(file);
+    if (!mountedRef.current) {
+      revokeImageObjectUrls(nextImage);
+      return false;
+    }
 
     const previous = images[slotIndex];
     const nextImages = [...images];
@@ -92,6 +128,7 @@ export function ImageUploader({
     if (use16By9Cropping && nextImage.cropRequired) {
       setActiveCropIndex(slotIndex);
     }
+    return true;
   }
 
   async function applyDraggedResult(slotIndex: number, dragData: ResultImageDragData) {
@@ -99,19 +136,17 @@ export function ImageUploader({
     const label = targetSlot?.label ?? "image slot";
 
     setIsPasting(true);
-    setPasteMessage(`Loading result into ${label}...`);
+    showPasteMessage(`Loading result into ${label}...`);
 
     try {
       const file = await resultImageDragDataToFile(dragData);
-      await applyFile(slotIndex, file);
-      setPasteMessage(`Loaded result into ${label}.`);
-      window.setTimeout(() => setPasteMessage(""), 2200);
+      if (!mountedRef.current || !(await applyFile(slotIndex, file))) return;
+      showPasteMessage(`Loaded result into ${label}.`, 2200);
     } catch (error) {
       const detail = error instanceof Error ? ` ${error.message}` : "";
-      setPasteMessage(`Could not load the dragged result image.${detail}`);
-      window.setTimeout(() => setPasteMessage(""), 8000);
+      showPasteMessage(`Could not load the dragged result image.${detail}`, 8000);
     } finally {
-      setIsPasting(false);
+      if (mountedRef.current) setIsPasting(false);
     }
   }
 
@@ -130,14 +165,14 @@ export function ImageUploader({
 
   async function pasteFilesFromClipboardData(data: DataTransfer) {
     setIsPasting(true);
-    setPasteMessage("Pasting image...");
+    showPasteMessage("Pasting image...");
     const result = await clipboardImageFiles(data);
     await applyPastedFiles(result.files, noImageMessage(result.details));
   }
 
   async function pasteFilesFromSystemClipboard() {
     setIsPasting(true);
-    setPasteMessage("Pasting image...");
+    showPasteMessage("Pasting image...");
     const browserResult = await browserClipboardImageFiles();
     if (browserResult.files.length) {
       await applyPastedFiles(dedupeFiles(browserResult.files), noImageMessage(browserResult.details));
@@ -152,23 +187,26 @@ export function ImageUploader({
   }
 
   async function applyPastedFiles(files: File[], emptyMessage: string) {
+    if (!mountedRef.current) return;
     const targetSlot = nextPasteTargetSlot(slots, images);
     if (!files.length) {
       setIsPasting(false);
-      setPasteMessage(emptyMessage);
-      window.setTimeout(() => setPasteMessage(""), 8000);
+      showPasteMessage(emptyMessage, 8000);
       return;
     }
 
     if (!targetSlot) {
       setIsPasting(false);
-      setPasteMessage("All image slots are full.");
-      window.setTimeout(() => setPasteMessage(""), 2200);
+      showPasteMessage("All image slots are full.", 2200);
       return;
     }
 
     try {
       const uploaded = await buildUploadedImage(files[0]);
+      if (!mountedRef.current) {
+        revokeImageObjectUrls(uploaded);
+        return;
+      }
       const previous = images[targetSlot.index];
       const nextImages = [...images];
 
@@ -177,18 +215,16 @@ export function ImageUploader({
       onChange(nextImages);
       revokeImageObjectUrls(previous);
 
-      setPasteMessage(`Pasted into ${targetSlot.label}.`);
-      window.setTimeout(() => setPasteMessage(""), 2200);
+      showPasteMessage(`Pasted into ${targetSlot.label}.`, 2200);
 
       if (use16By9Cropping && uploaded.cropRequired) {
         setActiveCropIndex(targetSlot.index);
       }
     } catch (error) {
       const detail = error instanceof Error ? ` ${error.message}` : "";
-      setPasteMessage(`Could not read the pasted image.${detail}`);
-      window.setTimeout(() => setPasteMessage(""), 8000);
+      showPasteMessage(`Could not read the pasted image.${detail}`, 8000);
     } finally {
-      setIsPasting(false);
+      if (mountedRef.current) setIsPasting(false);
     }
   }
 

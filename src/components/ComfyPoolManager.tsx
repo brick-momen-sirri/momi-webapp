@@ -1,6 +1,6 @@
 import { Activity, ExternalLink, MonitorCog, Play, RefreshCw, RotateCcw, Settings, Square, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComfyPoolAction, ComfyPoolActionResult, ComfyServer } from "../services/backendApi";
 
 type ComfyPoolManagerProps = {
@@ -19,11 +19,22 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
   const [actionMessage, setActionMessage] = useState("");
   const [actionDetail, setActionDetail] = useState("");
   const [watchedPort, setWatchedPort] = useState<number | undefined>();
+  const mountedRef = useRef(false);
+  const followUpRefreshTimersRef = useRef<number[]>([]);
 
   const sortedServers = useMemo(() => [...servers].sort((a, b) => serverPort(a) - serverPort(b)), [servers]);
   const selectedServer = sortedServers.find((server) => serverPort(server) === selectedPort) ?? sortedServers[0];
   const runningCount = servers.filter((server) => server.status === "idle" || server.status === "busy").length;
   const busyCount = servers.filter((server) => server.status === "busy").length;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      followUpRefreshTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      followUpRefreshTimersRef.current = [];
+    };
+  }, []);
 
   // This is what effects are for, and the rule's own guidance says so: it reacts to
   // `servers`, which is polled state arriving from outside React, and reports when
@@ -60,16 +71,18 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
     setWatchedPort(undefined);
     try {
       const result = await onAction(action, port);
+      if (!mountedRef.current) return;
       setActionMessage(result.message);
       setActionDetail(formatActionDetail(result));
       scheduleFollowUpRefreshes(action, port);
     } catch (actionError) {
+      if (!mountedRef.current) return;
       setError(actionError instanceof Error ? actionError.message : "Could not manage the Comfy pool.");
       setPendingMessage("");
       setActionMessage("");
       setActionDetail("");
     } finally {
-      setBusyAction(null);
+      if (mountedRef.current) setBusyAction(null);
     }
   }
 
@@ -80,12 +93,14 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
     setActionDetail("");
     try {
       await onRefresh();
+      if (!mountedRef.current) return;
       setPendingMessage("");
       setActionMessage("Status refreshed.");
     } catch (refreshError) {
+      if (!mountedRef.current) return;
       setError(refreshError instanceof Error ? refreshError.message : "Could not refresh the Comfy pool.");
     } finally {
-      setBusyAction(null);
+      if (mountedRef.current) setBusyAction(null);
     }
   }
 
@@ -101,22 +116,25 @@ export function ComfyPoolManager({ servers, canManage, onRefresh, onAction }: Co
     }
 
     delays.forEach((delay, index) => {
-      window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
+        followUpRefreshTimersRef.current = followUpRefreshTimersRef.current.filter((activeTimer) => activeTimer !== timer);
+        if (!mountedRef.current) return;
         void onRefresh()
           .then(() => {
-            if (index === delays.length - 1) {
+            if (mountedRef.current && index === delays.length - 1) {
               setPendingMessage("");
               setWatchedPort(undefined);
             }
           })
           .catch(() => {
-            if (index === delays.length - 1) {
+            if (mountedRef.current && index === delays.length - 1) {
               setPendingMessage("");
               setWatchedPort(undefined);
               setError("Could not refresh pool status. Try the refresh button.");
             }
           });
       }, delay);
+      followUpRefreshTimersRef.current.push(timer);
     });
   }
 

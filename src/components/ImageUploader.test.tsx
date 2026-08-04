@@ -222,6 +222,32 @@ describe("crop requirement", () => {
 });
 
 describe("file selection", () => {
+  it("revokes an in-flight object URL instead of publishing it after unmount", async () => {
+    let resolveSize!: (size: { width: number; height: number }) => void;
+    probeImageSize.mockReturnValueOnce(new Promise((resolve) => (resolveSize = resolve)));
+    const { container, unmount, props } = renderUploader();
+    const input = container.querySelector("input[type=file]") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [pngFile()] } });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(File)));
+    unmount();
+    resolveSize({ width: 1920, height: 1080 });
+
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:generated"));
+    expect(props.onChange).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending paste-message timer on unmount", async () => {
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+    const { container, unmount } = renderUploader({ images: [image()] });
+
+    pasteInto(container, clipboardData([pngFile("extra.png")]));
+    await screen.findByText(/Pasted into Input image/i);
+    unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+  });
+
   it("keeps the uploaded file's name", async () => {
     const next = await uploadInto({}, pngFile("hero-frame.png"));
     expect(next[0]?.name).toBe("hero-frame.png");

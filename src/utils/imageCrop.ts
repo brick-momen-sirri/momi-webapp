@@ -7,8 +7,15 @@ export type CropSettings = {
   outputHeight?: number;
 };
 
-export async function getImageSize(url: string): Promise<{ width: number; height: number }> {
-  const image = await loadImage(url);
+export const IMAGE_LOAD_TIMEOUT_MS = 10_000;
+
+export type ImageLoadOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+};
+
+export async function getImageSize(url: string, options: ImageLoadOptions = {}): Promise<{ width: number; height: number }> {
+  const image = await loadImage(url, options);
   return { width: image.naturalWidth, height: image.naturalHeight };
 }
 
@@ -79,12 +86,57 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
+function loadImage(url: string, options: ImageLoadOptions = {}): Promise<HTMLImageElement> {
+  const timeoutMs = options.timeoutMs ?? IMAGE_LOAD_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new RangeError("Image load timeout must be a positive number of milliseconds."));
+  }
+  if (options.signal?.aborted) {
+    const error =
+      typeof DOMException === "function"
+        ? new DOMException("Image loading was aborted.", "AbortError")
+        : Object.assign(new Error("Image loading was aborted."), { name: "AbortError" });
+    return Promise.reject(error);
+  }
+
   return new Promise((resolve, reject) => {
     const image = new Image();
+    let settled = false;
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      image.onload = null;
+      image.onerror = null;
+    };
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(image);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      image.src = "";
+      reject(error);
+    };
+    const onAbort = () => {
+      const error =
+        typeof DOMException === "function"
+          ? new DOMException("Image loading was aborted.", "AbortError")
+          : Object.assign(new Error("Image loading was aborted."), { name: "AbortError" });
+      fail(error);
+    };
+
     image.crossOrigin = "anonymous";
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Unable to load image."));
+    image.onload = succeed;
+    image.onerror = () => fail(new Error("Unable to load image."));
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      const error = Object.assign(new Error(`Image loading timed out after ${timeoutMs}ms.`), { name: "TimeoutError" });
+      fail(error);
+    }, timeoutMs);
     image.src = url;
   });
 }
