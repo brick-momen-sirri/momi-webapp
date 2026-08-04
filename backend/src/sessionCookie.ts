@@ -3,7 +3,11 @@
 import express from "express";
 
 export function setSessionCookie(res: express.Response, token: string, expiresAt: string) {
-  const maxAgeSeconds = Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+  // Math.max(1, NaN) is NaN, not 1, so the floor below does not protect against an
+  // unparseable expiry on its own -- it would emit `Max-Age=NaN`, which browsers
+  // ignore, silently downgrading the session to last only until the tab closes.
+  const remainingSeconds = (new Date(expiresAt).getTime() - Date.now()) / 1000;
+  const maxAgeSeconds = Number.isFinite(remainingSeconds) ? Math.max(1, Math.floor(remainingSeconds)) : 1;
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
