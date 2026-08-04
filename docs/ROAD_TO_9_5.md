@@ -261,14 +261,20 @@ how to roll back the change.
   floors that do not exclude difficult files.
 - Tests required before changing it: complete existing and new suites plus coverage,
   builds, formatting, diff hygiene, `.only`/skip/debug/secret/environment-file audit.
-- Implementation status: coverage policy and ratchets complete; final gate in
-  progress. `docs/COVERAGE_STRATEGY.md` records global and per-risk-module
+- Implementation status: complete. `docs/COVERAGE_STRATEGY.md` records global and per-risk-module
   measurements, justified entrypoint gaps, exclusions, and the rule that new or
   significantly modified business logic requires corresponding behavior tests.
 - Verification results: frontend coverage is 57.12% statements / 52.84%
   branches / 57.44% functions / 59.17% lines; backend is 78.82% / 74.44% /
   87.59% / 78.82%. CI floors were raised to 53/49/53/55 frontend and
-  74/71/82/74 backend, retaining several points of honest-refactor headroom.
+  74/71/82/74 backend, retaining several points of honest-refactor headroom. The
+  final gate passed formatting, lint, TypeScript, 439 frontend tests, 566 backend
+  tests, both coverage runs, both production builds, compiled-gateway smoke,
+  repository hygiene, and the split-process topology load test. The topology run
+  exercised 100 polling clients and 32 jobs with no duplicate submissions, a
+  10-job global cap, 304 ms enqueue p99, 20 ms maximum read staleness, dispatcher
+  failover, and media-index convergence. It also caught and corrected a stale
+  load-harness payload that did not send the now-required resolution object.
 - Remaining risks: production verification stays incomplete until an authorized
   deployment, authenticated health/media smoke, monitoring window, PM2 reboot
   resurrection, and rollback drill. Low executor/recovery coverage is documented
@@ -303,3 +309,13 @@ how to roll back the change.
   real-browser smoke tests. Fixed direct-index caching and missing-asset SPA
   fallthrough, added graceful shutdown/strict port handling, hardened login-time
   resurrection, and documented an approval-gated frontend-only cutover/rollback.
+- 2026-08-04: established sustainable frontend/backend coverage ratchets and
+  documented risk-module baselines, justified gaps, and the new-business-logic
+  testing rule without excluding awkward entrypoints or executors.
+- 2026-08-04: completed the full final gate, including the 100-client split-role
+  topology test. Updated that harness to submit the validated resolution object,
+  then confirmed zero duplicate provider submissions, bounded global concurrency,
+  dispatcher failover, and cross-worker media/read convergence. The repository
+  remained local-only: no PM2 mutation, deployment, provider spend, credit use,
+  production data change, or cloud change occurred; Vite PID 34928 still owns
+  `0.0.0.0:8190` and the isolated gateway port is closed.

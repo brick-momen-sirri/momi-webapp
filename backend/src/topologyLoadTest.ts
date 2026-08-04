@@ -270,6 +270,9 @@ async function main() {
             projectId,
             modelId: model.id,
             prompt: `topology-job-${String(index + 1).padStart(3, "0")}`,
+            resolution: topologyResolutionFor(
+              String(model.defaultResolution ?? (model.supportedResolutions as string[] | undefined)?.[0] ?? "1080p"),
+            ),
           },
         });
         enqueueLatencies.push(performance.now() - startedAt);
@@ -713,6 +716,22 @@ function percentile(values: number[], requestedPercentile: number) {
   const sorted = [...values].sort((left, right) => left - right);
   const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((requestedPercentile / 100) * sorted.length) - 1));
   return sorted[index];
+}
+
+function topologyResolutionFor(value: string) {
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  const aliases: Record<string, [number, number]> = {
+    auto: [1024, 1024],
+    "1k": [1024, 1024],
+    "2k": [2048, 2048],
+    "720p": [1280, 720],
+    "1080p": [1920, 1080],
+    "4k": [3840, 2160],
+  };
+  const dimensions = aliases[normalized] ?? normalized.split("x").map(Number);
+  const [width, height] = dimensions;
+  assert.ok(Number.isFinite(width) && Number.isFinite(height), `unsupported topology resolution: ${value}`);
+  return { width, height, label: value };
 }
 
 function readBody(request: IncomingMessage) {
