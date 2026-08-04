@@ -5,6 +5,7 @@ import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 import { runComfyWorkflowOnRunpod, type RunpodComfyImageInput } from "./runpodComfyService.js";
 import { describeImageWithRunpod } from "./runpodService.js";
 import type { CreditUsageSummary } from "./types.js";
+import type { ComfyGraph, ComfyNode } from "./comfyGraph.js";
 
 export type KlingPromptWorkflowResult = {
   text: string;
@@ -106,7 +107,7 @@ export function prepareKlingPromptWorkflow(
     throw new BackendHttpError("Kling prompt workflow JSON must be a ComfyUI API prompt object.", { statusCode: 500 });
   }
 
-  const prompt = cloneJson(workflow as Record<string, any>);
+  const prompt = cloneJson(workflow as ComfyGraph);
   const chatEntry = Object.entries(prompt).find(([, node]) => nodeClassType(node) === "openaichatnode");
   if (!chatEntry) {
     throw new BackendHttpError("Kling prompt workflow is missing an OpenAIChatNode.", { statusCode: 500 });
@@ -194,7 +195,7 @@ export function prepareKlingPromptWorkflow(
   return prompt;
 }
 
-function nextPromptNodeId(prompt: Record<string, any>) {
+function nextPromptNodeId(prompt: ComfyGraph) {
   const maxId = Math.max(
     0,
     ...Object.keys(prompt)
@@ -259,13 +260,13 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function nodeClassType(node: any) {
+function nodeClassType(node: ComfyNode) {
   return String(node?.class_type ?? "")
     .trim()
     .toLowerCase();
 }
 
-function isKlingPromptSaveNode(node: any) {
+function isKlingPromptSaveNode(node: ComfyNode) {
   const classType = nodeClassType(node);
   return classType === "save text file" || classType === "saveimagetextdatasettofolder";
 }

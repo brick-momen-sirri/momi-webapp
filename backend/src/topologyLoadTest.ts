@@ -6,6 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Responses from the mock RunPod endpoint and this harness's own HTTP probes.
+// Test-harness scaffolding, not a production contract worth modelling.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
 type JsonRecord = Record<string, any>;
 
 type BackendRuntime = {

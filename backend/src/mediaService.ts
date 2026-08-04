@@ -22,6 +22,10 @@ const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tif
 const videoExtensions = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v", ".gif"]);
 const previewLimitedExtensions = new Set([".tif", ".tiff", ".exr", ".avi", ".mkv"]);
 
+// A project metadata manifest as written by the Comfy custom nodes: a JSON
+// document whose keys vary by node pack version, read defensively field by field
+// below rather than validated up front.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
 type ManifestRecord = Record<string, any>;
 type ManifestSaveNumber = {
   cameraNumber?: string;

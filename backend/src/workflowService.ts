@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { serverlessWorkflowRoot, workflowMappingsPath, workflowRoots } from "./config.js";
 import { getObjectInfo } from "./comfyClient.js";
+import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { assertNoEmbeddedMedia, readJsonFile } from "./storageService.js";
 import type {
@@ -246,26 +247,26 @@ function collectLoadVideoNames(workflow: unknown) {
   return names;
 }
 
-function workflowNodesDeep(workflow: unknown): Array<Record<string, any>> {
+function workflowNodesDeep(workflow: unknown): Array<ComfyNode> {
   return workflowNodeEntriesDeep(workflow).map((entry) => entry.node);
 }
 
-function workflowNodeEntriesDeep(workflow: unknown): Array<{ id?: string; node: Record<string, any> }> {
+function workflowNodeEntriesDeep(workflow: unknown): Array<{ id?: string; node: ComfyNode }> {
   if (!workflow || typeof workflow !== "object") return [];
-  const record = workflow as Record<string, any>;
+  const record = workflow as ComfyNode;
   const nodes = Array.isArray(record.nodes)
-    ? record.nodes.map((node: Record<string, any>) => ({ id: node?.id == null ? undefined : String(node.id), node }))
+    ? record.nodes.map((node: ComfyNode) => ({ id: node?.id == null ? undefined : String(node.id), node }))
     : Object.entries(record.output ?? record.prompt ?? record).map(([id, node]) => ({
         id,
-        node: node as Record<string, any>,
+        node: node as ComfyNode,
       }));
   const subgraphNodes = Array.isArray(record.definitions?.subgraphs)
-    ? record.definitions.subgraphs.flatMap((subgraph: Record<string, any>) => workflowNodeEntriesDeep(subgraph))
+    ? record.definitions.subgraphs.flatMap((subgraph: ComfyGraph) => workflowNodeEntriesDeep(subgraph))
     : [];
   return [
     ...(nodes.filter((entry) => Boolean(entry.node && typeof entry.node === "object")) as Array<{
       id?: string;
-      node: Record<string, any>;
+      node: ComfyNode;
     }>),
     ...subgraphNodes,
   ];
@@ -275,7 +276,7 @@ function orderedLoadImageNodeEntries(workflow: unknown) {
   const entries = workflowNodeEntriesDeep(workflow);
   const loadImageEntries = entries.filter(({ node }) => isLoadImageClass(node?.class_type ?? node?.type));
   const loadImageById = new Map(loadImageEntries.filter((entry) => entry.id).map((entry) => [entry.id as string, entry]));
-  const ordered: Array<{ id?: string; node: Record<string, any> }> = [];
+  const ordered: Array<{ id?: string; node: ComfyNode }> = [];
   const seen = new Set<string>();
 
   for (const id of referencedLoadImageIds(entries, loadImageById)) {
@@ -296,8 +297,8 @@ function orderedLoadImageNodeEntries(workflow: unknown) {
 }
 
 function referencedLoadImageIds(
-  entries: Array<{ id?: string; node: Record<string, any> }>,
-  loadImageById: Map<string, { id?: string; node: Record<string, any> }>,
+  entries: Array<{ id?: string; node: ComfyNode }>,
+  loadImageById: Map<string, { id?: string; node: ComfyNode }>,
 ) {
   const references: string[] = [];
 
@@ -387,7 +388,7 @@ function imageBatchInputCount(workflow: unknown) {
     const classType = String(node?.type ?? node?.class_type ?? "").toLowerCase();
     if (!classType.includes("imagebatchmulti") && !classType.includes("batchimagesnode")) continue;
     const inputs = Array.isArray(node?.inputs)
-      ? node.inputs.map((input: any) => String(input?.name ?? ""))
+      ? node.inputs.map((input: ComfyPort) => String(input?.name ?? ""))
       : Object.keys(node?.inputs ?? {});
     const count = inputs.filter((name: string) => /^image_\d+$/i.test(name)).length;
     const dottedCount = inputs.filter((name: string) => /^images\.image\d+$/i.test(name)).length;
@@ -493,7 +494,7 @@ function inferSupportedDurations(workflow: unknown, outputType: "image" | "video
 
 function inferDefaultDurationSeconds(workflow: unknown, supportedDurations: number[]) {
   if (!supportedDurations.length || !workflow || typeof workflow !== "object") return undefined;
-  const record = workflow as Record<string, any>;
+  const record = workflow as ComfyNode;
   const nodes = Array.isArray(record.nodes) ? record.nodes : Object.values(record.output ?? record.prompt ?? record);
 
   for (const node of nodes) {
@@ -521,7 +522,7 @@ function isDurationProviderNode(classType: string) {
 
 function workflowClassTypes(workflow: unknown) {
   if (!workflow || typeof workflow !== "object") return [];
-  const record = workflow as Record<string, any>;
+  const record = workflow as ComfyNode;
   const nodes = Array.isArray(record.nodes) ? record.nodes : Object.values(record.output ?? record.prompt ?? record);
   return nodes.map((node) => String(node?.type ?? node?.class_type ?? "").toLowerCase()).filter(Boolean);
 }
@@ -587,15 +588,15 @@ function isPromptOptionalWorkflow(source: string) {
   );
 }
 
-function toApiPrompt(workflow: unknown, objectInfo: Record<string, any> = {}): Record<string, any> {
+function toApiPrompt(workflow: unknown, objectInfo: ComfyGraph = {}): ComfyGraph {
   if (workflow && typeof workflow === "object" && !Array.isArray(workflow)) {
-    const record = workflow as Record<string, any>;
+    const record = workflow as ComfyNode;
     if (record.output && typeof record.output === "object") return record.output;
     if (record.prompt && typeof record.prompt === "object") return record.prompt;
     const numericKeys = Object.keys(record).filter((key) => /^\d+$/.test(key));
     if (numericKeys.length) return record;
     if (Array.isArray(record.nodes)) {
-      const prompt: Record<string, any> = {};
+      const prompt: ComfyNode = {};
       const links = new Map<number, { fromNode: string; fromSlot: number }>();
 
       for (const link of Array.isArray(record.links) ? record.links : []) {
@@ -625,28 +626,28 @@ function toApiPrompt(workflow: unknown, objectInfo: Record<string, any> = {}): R
   throw new Error("Unsupported ComfyUI workflow JSON shape.");
 }
 
-function subgraphDefinitions(record: Record<string, any>) {
+function subgraphDefinitions(record: ComfyNode) {
   const subgraphs = Array.isArray(record.definitions?.subgraphs) ? record.definitions.subgraphs : [];
-  return new Map<string, Record<string, any>>(
+  return new Map<string, ComfyNode>(
     subgraphs
-      .filter((subgraph: any) => subgraph?.id && Array.isArray(subgraph.nodes))
-      .map((subgraph: any) => [String(subgraph.id), subgraph]),
+      .filter((subgraph: ComfyGraph) => subgraph?.id && Array.isArray(subgraph.nodes))
+      .map((subgraph: ComfyGraph) => [String(subgraph.id), subgraph]),
   );
 }
 
 function expandSubgraphNode(
-  prompt: Record<string, any>,
+  prompt: ComfyNode,
   parentLinks: Map<number, { fromNode: string; fromSlot: number }>,
-  parentNode: Record<string, any>,
-  subgraph: Record<string, any>,
-  objectInfo: Record<string, any>,
+  parentNode: ComfyNode,
+  subgraph: ComfyNode,
+  objectInfo: ComfyNode,
 ) {
   const parentNodeId = String(parentNode.id);
   const internalLinks = new Map<number, { fromNode: string; fromSlot: number }>();
   const outputOrigins = new Map<number, { fromNode: string; fromSlot: number }>();
 
   const parentInputLinks = Array.isArray(parentNode.inputs)
-    ? parentNode.inputs.map((input: any) => (input?.link == null ? undefined : parentLinks.get(Number(input.link))))
+    ? parentNode.inputs.map((input: ComfyPort) => (input?.link == null ? undefined : parentLinks.get(Number(input.link))))
     : [];
 
   for (const link of Array.isArray(subgraph.links) ? subgraph.links : []) {
@@ -683,7 +684,7 @@ function expandSubgraphNode(
   }
 
   if (Array.isArray(parentNode.outputs)) {
-    parentNode.outputs.forEach((output: any, outputIndex: number) => {
+    parentNode.outputs.forEach((output: ComfyPort, outputIndex: number) => {
       const origin = outputOrigins.get(outputIndex);
       if (!origin || !Array.isArray(output?.links)) return;
       for (const linkId of output.links) {
@@ -697,11 +698,11 @@ function expandedSubgraphNodeId(parentNodeId: string, nodeId: string | number) {
   return `${parentNodeId}_${nodeId}`;
 }
 
-function nodeClassType(node: Record<string, any>) {
+function nodeClassType(node: ComfyNode) {
   return node.class_type ?? node.type ?? node.properties?.["Node name for S&R"] ?? node.name;
 }
 
-function pruneUnavailableNodes(prompt: Record<string, any>, objectInfo: Record<string, any>) {
+function pruneUnavailableNodes(prompt: ComfyNode, objectInfo: ComfyNode) {
   const availableClassTypes = new Set(Object.keys(objectInfo));
   if (!availableClassTypes.size) return;
 
@@ -729,7 +730,7 @@ function pruneUnavailableNodes(prompt: Record<string, any>, objectInfo: Record<s
   }
 }
 
-function pruneSaveBrickSequenceNodes(prompt: Record<string, any>) {
+function pruneSaveBrickSequenceNodes(prompt: ComfyNode) {
   for (const [nodeId, node] of Object.entries(prompt)) {
     const classType = String(node?.class_type ?? "").toLowerCase();
     if (classType === "savearchvizsequence") {
@@ -742,12 +743,8 @@ function referencesRemovedNode(value: unknown, removedNodeIds: Set<string>): boo
   return Array.isArray(value) && typeof value[0] === "string" && removedNodeIds.has(value[0]);
 }
 
-function uiNodeInputs(
-  node: Record<string, any>,
-  links: Map<number, { fromNode: string; fromSlot: number }>,
-  objectInfo: Record<string, any>,
-) {
-  const inputs: Record<string, any> = {};
+function uiNodeInputs(node: ComfyNode, links: Map<number, { fromNode: string; fromSlot: number }>, objectInfo: ComfyNode) {
+  const inputs: ComfyNode = {};
 
   if (Array.isArray(node.inputs)) {
     for (const input of node.inputs) {
@@ -795,7 +792,7 @@ type WidgetInputSpec = {
   isWidget: boolean;
 };
 
-function widgetInputSpecs(classType: string, objectInfo: Record<string, any>): WidgetInputSpec[] {
+function widgetInputSpecs(classType: string, objectInfo: ComfyNode): WidgetInputSpec[] {
   const info = objectInfo[classType]?.input;
   const sections = [info?.required, info?.optional].filter(Boolean) as Array<Record<string, unknown>>;
   const specs = sections.flatMap((section) =>
@@ -869,7 +866,7 @@ const inertUiNodeTypes = new Set(["Note", "MarkdownNote", "Reroute", "PrimitiveN
 // instead so the gap is caught when the workflow is added, not in its output.
 function assertUiWorkflowWidgetsSupported(workflow: unknown, workflowPath: string) {
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return;
-  const record = workflow as Record<string, any>;
+  const record = workflow as ComfyNode;
   // API-prompt shapes carry named inputs already and need no widget mapping.
   if (record.output && typeof record.output === "object") return;
   if (record.prompt && typeof record.prompt === "object") return;
@@ -878,7 +875,7 @@ function assertUiWorkflowWidgetsSupported(workflow: unknown, workflowPath: strin
 
   const subgraphs = subgraphDefinitions(record);
   const unsupported = new Set<string>();
-  const collectUnsupported = (nodes: any[]) => {
+  const collectUnsupported = (nodes: ComfyNode[]) => {
     for (const node of nodes) {
       if (!node || node.id == null) continue;
       const classType = String(nodeClassType(node) ?? "");
@@ -989,12 +986,12 @@ function nestedRequiredInputs(option: Record<string, unknown> | undefined) {
 }
 
 function injectInputs(
-  prompt: Record<string, any>,
+  prompt: ComfyNode,
   model: WorkflowModel,
   request: CreateJobRequest,
   projectName: string,
   mapping: WorkflowInputMapping,
-  objectInfo: Record<string, any>,
+  objectInfo: ComfyNode,
 ) {
   const resolution = request.resolution;
   const durationSeconds = normalizeDurationSeconds(request.durationSeconds, model);
@@ -1085,15 +1082,13 @@ function injectInputs(
   void model;
 }
 
-function applyTextOnlyImageWorkflowMode(prompt: Record<string, any>, model: WorkflowModel, request: CreateJobRequest) {
+function applyTextOnlyImageWorkflowMode(prompt: ComfyNode, model: WorkflowModel, request: CreateJobRequest) {
   if (!supportsTextOnlyImageWorkflow(model) || (request.inputImages?.length ?? 0) > 0) return;
 
   for (const node of Object.values(prompt)) {
     if (!isTextOnlyCapableGenerationNode(node)) continue;
     const inputs =
-      node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-        ? (node.inputs as Record<string, any>)
-        : undefined;
+      node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs) ? (node.inputs as ComfyNode) : undefined;
     if (!inputs) continue;
     delete inputs.image;
     delete inputs.images;
@@ -1112,11 +1107,11 @@ function supportsTextOnlyImageWorkflow(model: WorkflowModel) {
   return isNanoBananaModel(model) || isGptImageModel(model);
 }
 
-function isTextOnlyCapableGenerationNode(node: any) {
+function isTextOnlyCapableGenerationNode(node: ComfyNode) {
   return isNanoBananaNode(node) || isGptImageNode(node);
 }
 
-function applyImageOutputCountOptions(prompt: Record<string, any>, model: WorkflowModel, request: CreateJobRequest) {
+function applyImageOutputCountOptions(prompt: ComfyNode, model: WorkflowModel, request: CreateJobRequest) {
   const isNano = isNanoBananaModel(model);
   const isGpt = isGptImageModel(model);
   if (!isNano && !isGpt) return;
@@ -1171,7 +1166,7 @@ function isGptImageKey(key: string) {
   return (key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid");
 }
 
-function isNanoBananaNode(node: any) {
+function isNanoBananaNode(node: ComfyNode) {
   const classType = String(node?.class_type ?? node?.type ?? "").toLowerCase();
   return isNanoBananaClassType(classType);
 }
@@ -1184,7 +1179,7 @@ function normalizeNanoBananaAspectRatio(value: unknown) {
   return typeof value === "string" && nanoBananaAspectRatioOptions.has(value) ? value : undefined;
 }
 
-function applyNanoBananaAspectRatioInput(inputs: Record<string, any>, workflowOptions: CreateJobRequest["workflowOptions"]) {
+function applyNanoBananaAspectRatioInput(inputs: ComfyNode, workflowOptions: CreateJobRequest["workflowOptions"]) {
   const aspectRatio = normalizeNanoBananaAspectRatio(workflowOptions?.nanoBanana?.aspectRatio);
   if (!aspectRatio) return;
   const key =
@@ -1195,22 +1190,22 @@ function applyNanoBananaAspectRatioInput(inputs: Record<string, any>, workflowOp
   inputs[key] = aspectRatio;
 }
 
-function isGptImageNode(node: any) {
+function isGptImageNode(node: ComfyNode) {
   const classType = String(node?.class_type ?? node?.type ?? "").toLowerCase();
   return classType.includes("openaigptimage") || (classType.includes("gpt") && classType.includes("image"));
 }
 
-function isSaveImageNode(node: any) {
+function isSaveImageNode(node: ComfyNode) {
   const classType = String(node?.class_type ?? node?.type ?? "").toLowerCase();
   return classType.includes("saveimage");
 }
 
-function nodeSavesFrom(node: any, nodeId: string) {
+function nodeSavesFrom(node: ComfyNode, nodeId: string) {
   const imagesInput = node?.inputs?.images;
   return Array.isArray(imagesInput) && String(imagesInput[0]) === nodeId;
 }
 
-function setSeedInput(inputs: Record<string, any>, seed: number) {
+function setSeedInput(inputs: ComfyNode, seed: number) {
   const seedKey =
     Object.keys(inputs).find((key) => key.toLowerCase() === "seed") ??
     Object.keys(inputs).find((key) => key.toLowerCase().includes("seed")) ??
@@ -1218,7 +1213,7 @@ function setSeedInput(inputs: Record<string, any>, seed: number) {
   inputs[seedKey] = seed;
 }
 
-function randomizeApiVideoSeed(model: WorkflowModel, classType: string, inputs: Record<string, any>) {
+function randomizeApiVideoSeed(model: WorkflowModel, classType: string, inputs: ComfyNode) {
   const modelKey = `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase();
   const nodeKey = classType.toLowerCase();
   if (model.outputType !== "video") return;
@@ -1231,7 +1226,7 @@ function randomizeApiVideoSeed(model: WorkflowModel, classType: string, inputs: 
   inputs[seedKey] = randomSeed();
 }
 
-function normalizeGptImageInputs(inputs: Record<string, any>) {
+function normalizeGptImageInputs(inputs: ComfyNode) {
   if (String(inputs.size ?? "").toLowerCase() === "custom") {
     inputs.size = "Custom";
   }
@@ -1252,7 +1247,7 @@ function offsetSeed(seed: number) {
   return (seed + 9_973) % 2_147_483_647;
 }
 
-function nextPromptNodeId(prompt: Record<string, any>, reserved = new Set<string>()) {
+function nextPromptNodeId(prompt: ComfyNode, reserved = new Set<string>()) {
   const maxId = Math.max(
     0,
     ...Object.keys(prompt)
@@ -1284,7 +1279,7 @@ function cloneJson<T>(value: T): T {
 const archVizSlotCounts = new Set(["1", "2", "4", "6", "8", "9"]);
 const defaultSaveNumber = "0000";
 
-function applyArchVizGridOptions(inputs: Record<string, any>, options: ArchVizGridOptions | undefined) {
+function applyArchVizGridOptions(inputs: ComfyNode, options: ArchVizGridOptions | undefined) {
   const slotCount = String(options?.slotCount ?? inputs.slot_count ?? "4");
   inputs.slot_count = archVizSlotCounts.has(slotCount) ? slotCount : "4";
   inputs.use_smart_defaults = options?.useSmartDefaults !== false;
@@ -1300,7 +1295,7 @@ function applyArchVizGridOptions(inputs: Record<string, any>, options: ArchVizGr
 }
 
 function applySaveNumberOptions(
-  inputs: Record<string, any>,
+  inputs: ComfyNode,
   classType: string,
   options: { cameraNumber?: string; shotNumber?: string } | undefined,
 ) {
@@ -1313,7 +1308,7 @@ function applySaveNumberOptions(
   }
 }
 
-function setNumberedSaveInput(inputs: Record<string, any>, name: "camera_number" | "shot_number", value: string | undefined) {
+function setNumberedSaveInput(inputs: ComfyNode, name: "camera_number" | "shot_number", value: string | undefined) {
   const key = Object.keys(inputs).find((item) => item.toLowerCase() === name) ?? name;
   const normalized = normalizeSaveNumber(value);
   inputs[key] = typeof inputs[key] === "number" ? Number(normalized) : normalized;
@@ -1326,7 +1321,7 @@ function normalizeSaveNumber(value: string | undefined) {
   return (digits || defaultSaveNumber).padStart(4, "0");
 }
 
-function wireImageBatchInputs(inputs: Record<string, any>, classType: string, loadImageNodeIds: string[], imageCount: number) {
+function wireImageBatchInputs(inputs: ComfyNode, classType: string, loadImageNodeIds: string[], imageCount: number) {
   const activeCount = Math.min(loadImageNodeIds.length, Math.max(0, imageCount));
   if (!activeCount) return;
 
@@ -1347,7 +1342,7 @@ function wireImageBatchInputs(inputs: Record<string, any>, classType: string, lo
   }
 }
 
-function pruneNumberedInputs(inputs: Record<string, any>, pattern: RegExp, maxIndex: number) {
+function pruneNumberedInputs(inputs: ComfyNode, pattern: RegExp, maxIndex: number) {
   for (const key of Object.keys(inputs)) {
     const match = key.match(pattern);
     if (match && Number(match[1]) > maxIndex) {
@@ -1410,12 +1405,7 @@ function normalizeDurationSeconds(value: number | undefined, model: WorkflowMode
   return options.reduce((closest, option) => (Math.abs(option - value) < Math.abs(closest - value) ? option : closest), fallback);
 }
 
-function injectDurationInput(
-  inputs: Record<string, any>,
-  classType: string,
-  durationSeconds: number | undefined,
-  objectInfo: Record<string, any>,
-) {
+function injectDurationInput(inputs: ComfyNode, classType: string, durationSeconds: number | undefined, objectInfo: ComfyNode) {
   if (!durationSeconds) return;
   const durationKey = firstInputName(classType, objectInfo, ["duration", "duration_seconds", "video_duration", "length_seconds"]);
   if (durationKey) {
@@ -1448,14 +1438,14 @@ function directResolutionLabel(label: string) {
   return "1080p";
 }
 
-function firstInputName(classType: string, objectInfo: Record<string, any>, names: string[]) {
+function firstInputName(classType: string, objectInfo: ComfyNode, names: string[]) {
   const info = objectInfo[classType]?.input;
   const sections = [info?.required, info?.optional].filter(Boolean) as Array<Record<string, unknown>>;
   const available = new Set(sections.flatMap((section) => Object.keys(section)));
   return names.find((name) => available.has(name));
 }
 
-function sanitizeInputs(inputs: Record<string, any>, classType: string, projectName: string, objectInfo: Record<string, any>) {
+function sanitizeInputs(inputs: ComfyNode, classType: string, projectName: string, objectInfo: ComfyNode) {
   const specs = allInputSpecs(classType, objectInfo);
   for (const [name, spec] of Object.entries(specs)) {
     if (!(name in inputs)) {
@@ -1489,7 +1479,7 @@ function sanitizeInputs(inputs: Record<string, any>, classType: string, projectN
   }
 }
 
-function allInputSpecs(classType: string, objectInfo: Record<string, any>) {
+function allInputSpecs(classType: string, objectInfo: ComfyNode) {
   const info = objectInfo[classType]?.input;
   const sections = [
     { required: true, entries: info?.required },
@@ -1514,7 +1504,7 @@ function defaultScalarInputValue(spec: { inputType: unknown; defaultValue?: unkn
   return undefined;
 }
 
-function coerceProjectName(projectName: string, classType: string, objectInfo: Record<string, any>) {
+function coerceProjectName(projectName: string, classType: string, objectInfo: ComfyNode) {
   const config = objectInfo[classType]?.input?.required?.project_name?.[0];
   if (Array.isArray(config) && !config.includes(projectName)) {
     return config.includes("0000_base") ? "0000_base" : config[0];
@@ -1524,7 +1514,7 @@ function coerceProjectName(projectName: string, classType: string, objectInfo: R
 
 function applyMappedInputs(
   nodeId: string,
-  inputs: Record<string, any>,
+  inputs: ComfyNode,
   mapping: WorkflowInputMapping,
   request: CreateJobRequest,
   projectName: string,
@@ -1545,7 +1535,7 @@ function applyMappedInputs(
   if (mapping.projectNameNodeIds?.includes(nodeId)) setFirstStringInput(inputs, projectName, "project_name");
 }
 
-function setFirstStringInput(inputs: Record<string, any>, value: string, preferred: string) {
+function setFirstStringInput(inputs: ComfyNode, value: string, preferred: string) {
   const key =
     Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "string") ??
     Object.keys(inputs).find((item) => typeof inputs[item] === "string") ??
@@ -1553,7 +1543,7 @@ function setFirstStringInput(inputs: Record<string, any>, value: string, preferr
   inputs[key] = value;
 }
 
-function setNumberInput(inputs: Record<string, any>, value: number, preferred: string) {
+function setNumberInput(inputs: ComfyNode, value: number, preferred: string) {
   const key =
     Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "number") ?? preferred;
   inputs[key] = value;

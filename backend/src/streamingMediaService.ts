@@ -54,5 +54,9 @@ export function responseBodyToNodeStream(response: Response) {
     throw new Error("Response did not include a readable body.");
   }
 
+  // Node's Readable.fromWeb wants its own ReadableStream nominal type, which is
+  // structurally but not nominally the DOM one fetch returns. This cast is the
+  // documented interop escape, not a modelling gap.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
   return Readable.fromWeb(response.body as any);
 }

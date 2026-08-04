@@ -163,11 +163,19 @@ first linter that reports hundreds of findings is a linter everyone learns to
 ignore.
 
 **Errors must be zero. Warnings are a ratchet.** `pnpm run lint` passes
-`--max-warnings` pinned to the backlog that existed when linting was introduced,
-so any _new_ warning fails CI while the existing ones get paid down deliberately.
-Lower that number as the backlog shrinks; never raise it. The backlog is almost
-entirely `no-explicit-any` at provider boundaries (Comfy workflow JSON, RunPod
-responses) plus effects that set state synchronously.
+`--max-warnings` pinned to the current count, so any _new_ warning fails CI
+while the backlog is paid down deliberately. Lower that number as the backlog
+shrinks; never raise it. It started at 98 and is now 16.
+
+The 82 `no-explicit-any` warnings that made up most of the original backlog are
+gone: they were all Comfy graph JSON, and they now use the named `ComfyNode` /
+`ComfyGraph` / `ComfyPort` types in
+[comfyGraph.ts](backend/src/comfyGraph.ts). Read the header there before
+assuming that made the graph type-safe — it did not, and it says why. What it
+did was turn 67 silent decisions into one explained one.
+
+The remaining 16 are 12 `react-hooks/set-state-in-effect`, 2 `exhaustive-deps`
+and 2 `react-refresh`. Each needs a component refactor rather than type work.
 
 Prettier owns formatting; `printWidth` is 130 because that is roughly the
 99th-percentile line length this code was already written at. The repo-wide

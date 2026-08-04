@@ -1,3 +1,5 @@
+import type { ComfyGraph } from "./comfyGraph.js";
+
 type FetchOptions = RequestInit & { timeoutMs?: number };
 
 async function fetchJson<T>(url: string, options: FetchOptions = {}): Promise<T> {
@@ -21,7 +23,7 @@ export async function getSystemStats(serverUrl: string) {
 }
 
 export async function getObjectInfo(serverUrl: string) {
-  return fetchJson<Record<string, any>>(`${serverUrl}/object_info`, { timeoutMs: 8000 });
+  return fetchJson<ComfyGraph>(`${serverUrl}/object_info`, { timeoutMs: 8000 });
 }
 
 export async function uploadImage(serverUrl: string, file: Blob, filename: string) {

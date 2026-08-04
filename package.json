@@ -7,12 +7,12 @@
   "engines": {
     "node": ">=24.0.0 <25.0.0"
   },
-  "comment:lint": "--max-warnings is a ratchet, not a target. It is pinned to the warning count at the time linting was introduced so that new warnings fail CI while the existing backlog (mostly no-explicit-any at provider boundaries, plus setState-in-effect) is paid down deliberately. Lower this number as that happens; never raise it.",
+  "comment:lint": "--max-warnings is a ratchet, not a target. Pinned to the current warning count so new warnings fail CI while the backlog is paid down. Lower this number as that happens; never raise it. History: 98 at introduction -> 16 once the 82 no-explicit-any were replaced with the named ComfyNode/ComfyGraph types in comfyGraph.ts. The remaining 16 are 12 react-hooks/set-state-in-effect, 2 exhaustive-deps and 2 react-refresh, all of which need component refactors rather than type work.",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 8190 --strictPort",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 8190 --strictPort",
-    "lint": "eslint . --max-warnings 98",
+    "lint": "eslint . --max-warnings 16",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",

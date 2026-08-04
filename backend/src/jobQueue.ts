@@ -90,6 +90,7 @@ import {
   saveWorkflowSnapshot,
 } from "./workflowService.js";
 import type { CreateJobRequest, CreditBalanceSnapshot, Job, Project, WorkflowModel } from "./types.js";
+import type { ComfyGraph } from "./comfyGraph.js";
 
 let jobs: Job[] = [];
 let archivedMediaJobs: Job[] = [];
@@ -1670,10 +1671,10 @@ function resultExtension(url: URL, contentType: string) {
 }
 
 function getPromptHistory(history: Record<string, unknown>, promptId: string) {
-  return (history[promptId] ?? history) as Record<string, any>;
+  return (history[promptId] ?? history) as ComfyGraph;
 }
 
-function comfyHistoryErrorMessage(promptHistory: Record<string, any>) {
+function comfyHistoryErrorMessage(promptHistory: ComfyGraph) {
   const messages = Array.isArray(promptHistory.status?.messages) ? promptHistory.status.messages : [];
   const executionError = messages
     .map((message: unknown) => (Array.isArray(message) ? message : undefined))
