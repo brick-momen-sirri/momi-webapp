@@ -29,14 +29,14 @@ fork owning job dispatch, plus clustered `momi-api` workers serving HTTP. See
 
 ## Layout
 
-| Path | What's in it |
-| --- | --- |
-| `src/` | React frontend. `App.tsx` holds most app state; `services/backendApi.ts` is the only place that talks to the API. |
-| `backend/src/` | Express backend. `index.ts` registers the routes, `jobQueue.ts` owns the job lifecycle, `workflowService.ts` maps models onto workflow JSON. |
-| `workflow/` | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model. |
-| `backend/config/` | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected. |
-| `backend/docs/` | Runbooks: DR, topology split, load test, singleton audit. |
-| `scripts/` | Windows log-on autostart for the app and the local Credit Portal ComfyUI. |
+| Path              | What's in it                                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`            | React frontend. `App.tsx` holds most app state; `services/backendApi.ts` is the only place that talks to the API.                            |
+| `backend/src/`    | Express backend. `index.ts` registers the routes, `jobQueue.ts` owns the job lifecycle, `workflowService.ts` maps models onto workflow JSON. |
+| `workflow/`       | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model.              |
+| `backend/config/` | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected.                                                              |
+| `backend/docs/`   | Runbooks: DR, topology split, load test, singleton audit.                                                                                    |
+| `scripts/`        | Windows log-on autostart for the app and the local Credit Portal ComfyUI.                                                                    |
 
 ## Prerequisites
 
@@ -100,8 +100,38 @@ land with a matching `*.test.ts`, registered in the `test` script in
 
 The frontend has no tests yet. That is the largest known gap in this repo.
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the backend
-type-check, the backend suite, and the frontend build on every push and PR.
+## Lint and formatting
+
+```bash
+pnpm run lint
+```
+
+```bash
+pnpm run format
+```
+
+ESLint is configured in [eslint.config.js](eslint.config.js), which explains why
+each relaxed rule is relaxed. It is deliberately set at the non-type-aware tier:
+`tsc --noEmit` already covers most of what the type-aware rules would add, and a
+first linter that reports hundreds of findings is a linter everyone learns to
+ignore.
+
+**Errors must be zero. Warnings are a ratchet.** `pnpm run lint` passes
+`--max-warnings` pinned to the backlog that existed when linting was introduced,
+so any _new_ warning fails CI while the existing ones get paid down deliberately.
+Lower that number as the backlog shrinks; never raise it. The backlog is almost
+entirely `no-explicit-any` at provider boundaries (Comfy workflow JSON, RunPod
+responses) plus effects that set state synchronously.
+
+Prettier owns formatting; `printWidth` is 130 because that is roughly the
+99th-percentile line length this code was already written at. The repo-wide
+adoption commit is listed in `.git-blame-ignore-revs` — run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame`
+skips it.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the format check,
+lint, the backend type-check, the backend suite, and the frontend build on every
+push and PR.
 
 ## Deploying
 
@@ -150,7 +180,7 @@ Disaster recovery, including the restore drill, is in
 
 - Keep ad-hoc process logs out of the repo root. Redirect to a path outside the
   working tree, or use `pm2 logs` — pm2 already captures backend output.
-- Backend modules get a comment at the top explaining *why* they exist, not what
+- Backend modules get a comment at the top explaining _why_ they exist, not what
   they do. Match that when adding one.
 - `MISSING_DATA_REPORT.md` and `PROJECT_MEDIA_SCAN_REPORT.md` are point-in-time
   audits from early development, kept for provenance. They are not current

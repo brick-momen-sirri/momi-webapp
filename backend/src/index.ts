@@ -55,8 +55,6 @@ import {
   loginRateLimitLockoutMs,
   loginRateLimitMaxAttempts,
   loginRateLimitWindowMs,
-  opsAccessToken,
-  opsAllowLoopback,
 } from "./config.js";
 import {
   changePassword,
@@ -289,7 +287,8 @@ app.get("/api/runpod-input", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  const identifier = typeof req.body?.email === "string" ? req.body.email : typeof req.body?.username === "string" ? req.body.username : "";
+  const identifier =
+    typeof req.body?.email === "string" ? req.body.email : typeof req.body?.username === "string" ? req.body.username : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   const rateLimitKeys = loginRateLimitKeys(req.ip ?? req.socket.remoteAddress ?? undefined, identifier);
 
@@ -374,10 +373,7 @@ app.get("/api/runtime", (_req, res) => {
 // endpoint (pagination/filtering + heavier payload).
 app.get("/api/snapshot", async (req, res) => {
   const currentUser = getRequestUser(req);
-  const [credits, podStatus] = await Promise.all([
-    getCredits().catch(() => null),
-    getPodStatus().catch(() => null),
-  ]);
+  const [credits, podStatus] = await Promise.all([getCredits().catch(() => null), getPodStatus().catch(() => null)]);
   res.json({
     credits,
     monthlyUsage: monthlyUsageForUser(currentUser),
@@ -428,7 +424,11 @@ app.patch("/api/auth/me/pinned-projects", async (req, res) => {
     const requestedIds: string[] = Array.isArray(req.body?.projectIds)
       ? req.body.projectIds.filter((item: unknown): item is string => typeof item === "string")
       : [];
-    const visibleProjectIds = new Set(getProjects().filter((project) => canViewProject(user, project)).map((project) => project.id));
+    const visibleProjectIds = new Set(
+      getProjects()
+        .filter((project) => canViewProject(user, project))
+        .map((project) => project.id),
+    );
     const projectIds = requestedIds.filter((projectId) => visibleProjectIds.has(projectId));
     const updated = await updatePinnedProjects(user.id, projectIds);
     res.json({ user: updated });
@@ -543,7 +543,9 @@ app.get("/api/comfy/servers", async (_req, res) => {
 app.post("/api/comfy/action", requireAdmin, async (req, res) => {
   try {
     if (!localComfyEnabled) {
-      return res.status(400).json({ error: "Local ComfyUI pool controls are disabled. Set GENERATION_BACKEND=local_comfy for local development." });
+      return res
+        .status(400)
+        .json({ error: "Local ComfyUI pool controls are disabled. Set GENERATION_BACKEND=local_comfy for local development." });
     }
     const action = typeof req.body?.action === "string" ? req.body.action : "";
     const port = Number(req.body?.port);
@@ -647,10 +649,14 @@ app.patch("/api/projects/:projectId", async (req, res) => {
     if (projectCodeChangeRequested(req.body, project)) return res.status(400).json({ error: "Project code cannot be changed." });
     if (projectRenameRequested(req.body, project)) {
       if (user.role !== "admin") return res.status(403).json({ error: "Admin permission required" });
-      const renamed = await renameProject(project.id, {
-        client: typeof req.body?.client === "string" ? req.body.client : undefined,
-        name: typeof req.body?.name === "string" ? req.body.name : undefined,
-      }, user.id);
+      const renamed = await renameProject(
+        project.id,
+        {
+          client: typeof req.body?.client === "string" ? req.body.client : undefined,
+          name: typeof req.body?.name === "string" ? req.body.name : undefined,
+        },
+        user.id,
+      );
       if (!renamed) return res.status(404).json({ error: "Project not found" });
     }
 
@@ -671,10 +677,14 @@ app.post("/api/projects/:projectId/folders", requireAdmin, async (req, res) => {
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-    const folder = await createProjectFolder(project.id, {
-      name: typeof req.body?.name === "string" ? req.body.name : "",
-      parentId: typeof req.body?.parentId === "string" ? req.body.parentId : null,
-    }, user.id);
+    const folder = await createProjectFolder(
+      project.id,
+      {
+        name: typeof req.body?.name === "string" ? req.body.name : "",
+        parentId: typeof req.body?.parentId === "string" ? req.body.parentId : null,
+      },
+      user.id,
+    );
     if (!folder) return res.status(404).json({ error: "Project not found" });
     res.status(201).json({ folder, project: getProject(project.id) });
   } catch (error) {
@@ -687,9 +697,14 @@ app.patch("/api/projects/:projectId/folders/:folderId", requireAdmin, async (req
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-    const folder = await renameProjectFolder(project.id, req.params.folderId, {
-      name: typeof req.body?.name === "string" ? req.body.name : "",
-    }, user.id);
+    const folder = await renameProjectFolder(
+      project.id,
+      req.params.folderId,
+      {
+        name: typeof req.body?.name === "string" ? req.body.name : "",
+      },
+      user.id,
+    );
     if (!folder) return res.status(404).json({ error: "Folder not found" });
     res.json({ folder, project: getProject(project.id) });
   } catch (error) {
@@ -715,12 +730,7 @@ app.patch("/api/projects/:projectId/jobs/:jobId", requireAdmin, async (req, res)
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-    const job = await renameJob(
-      project.id,
-      req.params.jobId,
-      typeof req.body?.title === "string" ? req.body.title : "",
-      user.id,
-    );
+    const job = await renameJob(project.id, req.params.jobId, typeof req.body?.title === "string" ? req.body.title : "", user.id);
     if (!job) return res.status(404).json({ error: "Job not found" });
     res.json({ job });
   } catch (error) {
@@ -733,12 +743,7 @@ app.patch("/api/projects/:projectId/jobs/:jobId/save-number", requireAdmin, asyn
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-    const job = await updateJobSaveNumber(
-      project.id,
-      req.params.jobId,
-      req.body?.saveNumber ?? req.body?.value ?? "",
-      user.id,
-    );
+    const job = await updateJobSaveNumber(project.id, req.params.jobId, req.body?.saveNumber ?? req.body?.value ?? "", user.id);
     if (!job) return res.status(404).json({ error: "Job not found" });
     res.json({ job });
   } catch (error) {
@@ -764,9 +769,8 @@ app.patch("/api/projects/:projectId/jobs/:jobId/folder", async (req, res) => {
     if (requestedFolderId !== null && typeof requestedFolderId !== "string") {
       return res.status(400).json({ error: "Destination folder must be a folder ID or null for the project root." });
     }
-    const destinationFolderId = typeof requestedFolderId === "string" && requestedFolderId.trim()
-      ? requestedFolderId.trim()
-      : null;
+    const destinationFolderId =
+      typeof requestedFolderId === "string" && requestedFolderId.trim() ? requestedFolderId.trim() : null;
     const job = await moveJobResult(project.id, existing.id, destinationFolderId, user.id);
     if (!job) return res.status(404).json({ error: "Job not found" });
     res.json({ job });
@@ -935,7 +939,8 @@ app.get("/api/credits/dashboard", (req, res) => {
     for (const [index, row] of (job.creditUsage?.rows ?? []).entries()) {
       const createdAt = job.completedAt ?? job.createdAt;
       const rowTimestamp = new Date(createdAt).getTime();
-      if (!Number.isFinite(rowTimestamp) || rowTimestamp < range.startAt.getTime() || rowTimestamp >= range.endAt.getTime()) continue;
+      if (!Number.isFinite(rowTimestamp) || rowTimestamp < range.startAt.getTime() || rowTimestamp >= range.endAt.getTime())
+        continue;
       nodeRows.push({
         jobId: job.id,
         projectName: project?.name ?? "Unknown project",
@@ -970,12 +975,8 @@ app.get("/api/credits/dashboard", (req, res) => {
       byModel: sortedGroups(byModel),
       byDay: fillDailyRange(range.startAt, range.endAt, byDay),
       anomalies: creditAnomalies(periodEvents, byDay),
-      recent: periodEvents
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-        .slice(0, 500),
-      nodeRows: nodeRows
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 500),
+      recent: periodEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 500),
+      nodeRows: nodeRows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 500),
     },
   });
 });
@@ -1174,9 +1175,10 @@ app.get("/api/jobs", async (req, res) => {
 // project root and that the caller may view the owning project. Both /api/media
 // and its thumbnail variant go through this, so the two can never drift apart
 // into an access-control gap.
-function authorizeMediaRead(req: express.Request, rawPath: string):
-  | { ok: true; resolvedPath: string }
-  | { ok: false; status: number; error: string } {
+function authorizeMediaRead(
+  req: express.Request,
+  rawPath: string,
+): { ok: true; resolvedPath: string } | { ok: false; status: number; error: string } {
   const resolvedPath = path.resolve(rawPath);
   if (!isAllowedMediaPath(resolvedPath)) {
     return { ok: false, status: 403, error: "Media path is outside allowed project roots" };
@@ -1223,7 +1225,10 @@ app.get("/api/media/thumbnail", async (req, res) => {
 
   const requestedWidth = Number(req.query.w);
   try {
-    const rendition = await getOrCreateThumbnail(access.resolvedPath, Number.isFinite(requestedWidth) ? requestedWidth : undefined);
+    const rendition = await getOrCreateThumbnail(
+      access.resolvedPath,
+      Number.isFinite(requestedWidth) ? requestedWidth : undefined,
+    );
     if (rendition.kind === "rendition") {
       res.setHeader("ETag", `"${rendition.cacheKey}"`);
       if (req.headers["if-none-match"] === `"${rendition.cacheKey}"`) {
@@ -1456,8 +1461,10 @@ function isSeedanceModel(model: { id: string; name: string; category: string; wo
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
 
 function isKlingVideoModel(model: { id: string; name: string; category: string; workflowPath: string; outputType: string }) {
-  return model.outputType === "video"
-    && `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("kling");
+  return (
+    model.outputType === "video" &&
+    `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase().includes("kling")
+  );
 }
 
 function is4KResolution(value: unknown) {
@@ -1473,7 +1480,8 @@ app.post("/api/jobs/:jobId/cancel", async (req, res) => {
   const user = getRequestUser(req);
   const existing = getJob(req.params.jobId);
   if (!existing || !canAccessJob(user, existing)) return res.status(404).json({ error: "Job not found" });
-  if (!canManageJob(user, existing)) return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
+  if (!canManageJob(user, existing))
+    return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
   const job = await cancelJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
   res.json({ job });
@@ -1484,7 +1492,8 @@ app.post("/api/jobs/:jobId/archive", async (req, res) => {
     const user = getRequestUser(req);
     const existing = await getJobFromAnySource(req.params.jobId);
     if (!existing || !canAccessJob(user, existing)) return res.status(404).json({ error: "Job not found" });
-    if (!canManageJob(user, existing)) return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
+    if (!canManageJob(user, existing))
+      return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
     const job = await archiveJob(req.params.jobId, user.id);
     if (!job) return res.status(404).json({ error: "Job not found" });
     res.json({ job });
@@ -1498,7 +1507,8 @@ app.post("/api/jobs/:jobId/restore", async (req, res) => {
     const user = getRequestUser(req);
     const existing = await getJobFromAnySource(req.params.jobId, { archived: true });
     if (!existing || !canAccessJob(user, existing)) return res.status(404).json({ error: "Archived job not found" });
-    if (!canManageJob(user, existing)) return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
+    if (!canManageJob(user, existing))
+      return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
     const job = await restoreArchivedJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Archived job not found" });
     res.json({ job });
@@ -1512,7 +1522,8 @@ app.delete("/api/jobs/:jobId/permanent", async (req, res) => {
     const user = getRequestUser(req);
     const existing = await getJobFromAnySource(req.params.jobId, { archived: true });
     if (!existing || !canAccessJob(user, existing)) return res.status(404).json({ error: "Archived job not found" });
-    if (!canManageJob(user, existing)) return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
+    if (!canManageJob(user, existing))
+      return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
     const job = await permanentlyDeleteArchivedJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Archived job not found" });
     res.json({ job });
@@ -1628,7 +1639,9 @@ async function boot() {
         webhookFormat: alertWebhookFormat,
       });
     } else {
-      console.warn(`SQLITE_BACKUP_ENABLED is set but no target uses the sqlite driver (JOB_STORE_DRIVER=${jobStoreDriver}, APP_STATE_DRIVER=${appStateDriver}); no backups will run.`);
+      console.warn(
+        `SQLITE_BACKUP_ENABLED is set but no target uses the sqlite driver (JOB_STORE_DRIVER=${jobStoreDriver}, APP_STATE_DRIVER=${appStateDriver}); no backups will run.`,
+      );
     }
   }
   const server = app.listen(PORT, HOST, () => {
@@ -2027,21 +2040,14 @@ function sortedGroups(map: Map<string, CreditDashboardGroup>) {
 }
 
 function dayKey(date: Date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }
 
 function stringField(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
-function findCreditTrackerProjectStats(
-  project: Project,
-  statsByProjectName: Map<string, CreditTrackerProjectStats>,
-) {
+function findCreditTrackerProjectStats(project: Project, statsByProjectName: Map<string, CreditTrackerProjectStats>) {
   if (!statsByProjectName.size) return undefined;
 
   const normalized = new Map(
@@ -2080,15 +2086,15 @@ function projectRenameRequested(body: unknown, project: Project) {
   const requestedName = typeof input.name === "string" ? input.name.trim() : undefined;
   const requestedClient = typeof input.client === "string" ? input.client.trim() : undefined;
   return Boolean(
-    requestedName && requestedName !== project.name
-    || requestedClient && requestedClient !== (project.client ?? ""),
+    (requestedName && requestedName !== project.name) || (requestedClient && requestedClient !== (project.client ?? "")),
   );
 }
 
 function projectCodeChangeRequested(body: unknown, project: Project) {
   if (!body || typeof body !== "object") return false;
   const input = body as Record<string, unknown>;
-  const requestedCode = typeof input.code === "string" ? input.code.trim() : typeof input.shortName === "string" ? input.shortName.trim() : undefined;
+  const requestedCode =
+    typeof input.code === "string" ? input.code.trim() : typeof input.shortName === "string" ? input.shortName.trim() : undefined;
   return Boolean(requestedCode && requestedCode !== (project.code ?? project.shortName));
 }
 
@@ -2129,11 +2135,13 @@ function isDemoAccount(user: User) {
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
 
-  return email === "demo@brickvisual.com"
-    || email === "momi.demo@brickvisual.com"
-    || username === "demo"
-    || username === "momi-demo"
-    || configuredDemoEmails.includes(email);
+  return (
+    email === "demo@brickvisual.com" ||
+    email === "momi.demo@brickvisual.com" ||
+    username === "demo" ||
+    username === "momi-demo" ||
+    configuredDemoEmails.includes(email)
+  );
 }
 
 function canManageProject(user: User, project: Project) {
@@ -2184,9 +2192,11 @@ function sendUpstreamBody(upstream: Response, res: express.Response) {
     return;
   }
 
-  Readable.from(upstream.body as unknown as AsyncIterable<Uint8Array>).on("error", (error) => {
-    res.destroy(error);
-  }).pipe(res);
+  Readable.from(upstream.body as unknown as AsyncIterable<Uint8Array>)
+    .on("error", (error) => {
+      res.destroy(error);
+    })
+    .pipe(res);
 }
 
 async function streamLocalFile(
@@ -2240,7 +2250,10 @@ async function streamLocalFile(
   stream.pipe(res);
 }
 
-function parseByteRange(rangeHeader: string | undefined, fileSize: number): { start: number; end: number } | "unsatisfiable" | undefined {
+function parseByteRange(
+  rangeHeader: string | undefined,
+  fileSize: number,
+): { start: number; end: number } | "unsatisfiable" | undefined {
   if (!rangeHeader) return undefined;
   const match = rangeHeader.match(/^bytes=(\d*)-(\d*)(?:,.*)?$/);
   if (!match) return undefined;
@@ -2309,7 +2322,8 @@ function isAllowedUploadContentType(kind: "image" | "video", contentType: string
 function uploadedMediaFileName(rawName: string, kind: "image" | "video", contentType: string) {
   const parsed = path.parse(rawName || `${kind}-upload`);
   const baseName = uploadedMediaBaseName(parsed.name, `${kind}-upload`);
-  const extension = cleanMediaExtension(parsed.ext) || extensionFromContentType(contentType) || (kind === "image" ? ".png" : ".mp4");
+  const extension =
+    cleanMediaExtension(parsed.ext) || extensionFromContentType(contentType) || (kind === "image" ? ".png" : ".mp4");
   return `${baseName}${extension}`;
 }
 
@@ -2358,7 +2372,13 @@ function mediaFilePathFromUrl(url: URL) {
 
 function isAllowedMediaPath(filePath: string, options: { allowTemp?: boolean } = {}) {
   const resolvedPath = path.resolve(filePath).toLowerCase();
-  const roots = [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")];
+  const roots = [
+    brickProjectsRoot,
+    localProjectsRoot,
+    uploadedMediaRoot,
+    path.join(comfyRoot, "output"),
+    path.join(comfyRoot, "input"),
+  ];
   if (options.allowTemp) {
     roots.push(path.join(comfyRoot, "temp"));
     roots.push("C:\\Comfy_pool\\instances");
@@ -2380,7 +2400,9 @@ function extensionFromContentType(contentType: string) {
 }
 
 function normalizeJobSaveNumber(value?: number | string | null) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return (digits || "0000").padStart(4, "0");
 }
 
@@ -2393,9 +2415,7 @@ function getJobSaveSearchValue(job: Job) {
   if (job.source === "existing_project_media") return "";
 
   const save = job.workflowOptions?.save;
-  const value = isVideoSaveJob(job)
-    ? save?.shotNumber ?? save?.cameraNumber
-    : save?.cameraNumber ?? save?.shotNumber;
+  const value = isVideoSaveJob(job) ? (save?.shotNumber ?? save?.cameraNumber) : (save?.cameraNumber ?? save?.shotNumber);
 
   return normalizeJobSaveNumber(value);
 }
@@ -2440,7 +2460,10 @@ function filterJobs(
         project?.folderName,
         saveLabel,
         saveNumber,
-      ].filter(Boolean).join(" ").toLowerCase();
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
       if (!searchable.includes(query)) return false;
     }

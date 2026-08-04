@@ -1,0 +1,9 @@
+# Commits that only moved whitespace around. `git blame` skips these when told to,
+# so a reformat does not hide who last actually changed a line.
+#
+# Enable it once, locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Add a commit here ONLY if it is purely mechanical formatting.
+
+# Repo-wide Prettier adoption.

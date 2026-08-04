@@ -1,0 +1,13 @@
+node_modules/
+dist/
+backend/dist/
+backend/data/
+pnpm-lock.yaml
+
+# ComfyUI workflow exports. Machine-generated, diffed by hand during workflow
+# debugging, and reformatting them would make those diffs unreadable.
+workflow/
+
+# Point-in-time audit reports, kept for provenance rather than maintained.
+MISSING_DATA_REPORT.md
+PROJECT_MEDIA_SCAN_REPORT.md

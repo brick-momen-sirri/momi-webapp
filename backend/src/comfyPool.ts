@@ -65,14 +65,7 @@ export function releaseServer(url?: string) {
   cache = cache.map((server) => (server.url === url ? { ...server, status: "idle" } : server));
 }
 
-export type ComfyPoolAction =
-  | "start"
-  | "stop"
-  | "restart"
-  | "start-safe"
-  | "start-all"
-  | "stop-all"
-  | "open-manager";
+export type ComfyPoolAction = "start" | "stop" | "restart" | "start-safe" | "start-all" | "stop-all" | "open-manager";
 
 type RunComfyPoolActionInput = {
   action: ComfyPoolAction;
@@ -97,7 +90,9 @@ export async function runComfyPoolAction({ action, port }: RunComfyPoolActionInp
         `Stop finished for ${port}.`,
         await runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000),
       );
-    case "restart":
+    // Braced so these two consts are scoped to this case rather than leaking
+    // into the sibling cases in the same switch block.
+    case "restart": {
       requireAllowedPort(port);
       const stopResult = await runCheckedPoolScript("Stop-ComfyPool.ps1", ["-Port", String(port)], 60000);
       const startResult = await runCheckedPoolScript("Start-ComfyPool.ps1", ["-Port", String(port)], 60000);
@@ -106,6 +101,7 @@ export async function runComfyPoolAction({ action, port }: RunComfyPoolActionInp
         output: [stopResult.output, startResult.output].filter(Boolean).join("\n"),
         error: [stopResult.error, startResult.error].filter(Boolean).join("\n"),
       });
+    }
     case "start-safe":
       await launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "15", "-MaxInstances", "4"]);
       return actionResult(action, undefined, "Start 4 launched in the background.");
@@ -113,12 +109,7 @@ export async function runComfyPoolAction({ action, port }: RunComfyPoolActionInp
       await launchPoolScript("Start-ComfyPool.ps1", ["-StartDelaySeconds", "20"]);
       return actionResult(action, undefined, "Start all launched in the background. It can take several minutes.");
     case "stop-all":
-      return actionResult(
-        action,
-        undefined,
-        "Stop all finished.",
-        await runCheckedPoolScript("Stop-ComfyPool.ps1", [], 120000),
-      );
+      return actionResult(action, undefined, "Stop all finished.", await runCheckedPoolScript("Stop-ComfyPool.ps1", [], 120000));
     case "open-manager":
       await openDesktopManager();
       return actionResult(action, undefined, "Desktop manager opened.");
@@ -133,7 +124,12 @@ type PoolScriptResult = {
   error: string;
 };
 
-function actionResult(action: ComfyPoolAction, port?: number, message = "Comfy pool command finished.", result?: PoolScriptResult) {
+function actionResult(
+  action: ComfyPoolAction,
+  port?: number,
+  message = "Comfy pool command finished.",
+  result?: PoolScriptResult,
+) {
   return {
     ok: true,
     action,
@@ -150,16 +146,12 @@ async function launchPoolScript(scriptName: string, args: string[]) {
   await assertInsidePoolRoot(scriptPath);
   await assertFileExists(scriptPath);
 
-  const child = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args],
-    {
-      cwd: comfyPoolRoot,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    },
-  );
+  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args], {
+    cwd: comfyPoolRoot,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
   child.unref();
 }
 
@@ -178,14 +170,10 @@ async function runPoolScript(scriptName: string, args: string[], timeoutMs: numb
   await assertFileExists(scriptPath);
 
   return new Promise<PoolScriptResult>((resolve, reject) => {
-    const child = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args],
-      {
-        cwd: comfyPoolRoot,
-        windowsHide: true,
-      },
-    );
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args], {
+      cwd: comfyPoolRoot,
+      windowsHide: true,
+    });
 
     let output = "";
     let error = "";

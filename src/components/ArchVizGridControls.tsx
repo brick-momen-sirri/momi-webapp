@@ -83,11 +83,6 @@ export function defaultArchVizGridOptions(): ArchVizGridOptions {
 
 export function ArchVizGridControls({ value, onChange }: ArchVizGridControlsProps) {
   const activeCount = Number(value.slotCount);
-  const selectedSlot = slotOptions.find((option) => option.value === value.slotCount) ?? slotOptions[2];
-
-  function patch(updates: Partial<ArchVizGridOptions>) {
-    onChange({ ...value, ...updates });
-  }
 
   function handleSlotCount(nextSlotCount: ArchVizGridOptions["slotCount"]) {
     const cameraSlots = value.useSmartDefaults
@@ -147,9 +142,7 @@ export function ArchVizGridControls({ value, onChange }: ArchVizGridControlsProp
         </label>
 
         <div className="rounded-md border border-line bg-mist/40 p-2">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
-            Camera positions
-          </p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Camera positions</p>
           <div className="grid gap-2">
             {Array.from({ length: activeCount }, (_, index) => (
               <label key={index} className="grid gap-1">
@@ -170,9 +163,7 @@ export function ArchVizGridControls({ value, onChange }: ArchVizGridControlsProp
             ))}
           </div>
           {value.useSmartDefaults ? (
-            <p className="mt-2 text-xs leading-5 text-stone-500">
-              Disable smart defaults to customize each camera slot.
-            </p>
+            <p className="mt-2 text-xs leading-5 text-stone-500">Disable smart defaults to customize each camera slot.</p>
           ) : null}
         </div>
       </div>

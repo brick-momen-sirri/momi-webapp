@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appStateDriver, appStateSqlitePath, brickProjectsRoot, localProjectsRoot, projectsStorePath } from "./config.js";
+import { appStateDriver, appStateSqlitePath, brickProjectsRoot, projectsStorePath } from "./config.js";
 import { invalidateSharedMediaIndex } from "./mediaIndexCoordinator.js";
 import { projectFolderName } from "./projectFolderName.js";
 import {
@@ -117,9 +117,12 @@ export async function discoverBrickProjects() {
         const name = parts.length >= 3 ? parts.slice(2).join(" ") : entry.name;
         const createdAt = now();
         return {
-          id: entry.name === PLAYGROUND_FOLDER_NAME ? PLAYGROUND_PROJECT_ID : metadata?.projectId ?? `prj_${safeSegment(entry.name).toLowerCase()}`,
-          name: entry.name === PLAYGROUND_FOLDER_NAME ? "Playground" : metadata?.name ?? name,
-          shortName: entry.name === PLAYGROUND_FOLDER_NAME ? "PLY" : metadata?.code ?? shortName,
+          id:
+            entry.name === PLAYGROUND_FOLDER_NAME
+              ? PLAYGROUND_PROJECT_ID
+              : (metadata?.projectId ?? `prj_${safeSegment(entry.name).toLowerCase()}`),
+          name: entry.name === PLAYGROUND_FOLDER_NAME ? "Playground" : (metadata?.name ?? name),
+          shortName: entry.name === PLAYGROUND_FOLDER_NAME ? "PLY" : (metadata?.code ?? shortName),
           client: metadata?.client,
           displayName: metadata?.displayName,
           diskName: metadata?.diskName ?? entry.name,
@@ -151,7 +154,11 @@ export function getProject(id: string) {
 export async function createProject(input: Partial<Project>) {
   const createdAt = now();
   const shortName = (input.shortName || input.code || safeSegment(input.name || "Project").slice(0, 8)).trim().toUpperCase();
-  const parsed = parseProjectDiskName(input.folderName || projectFolderName(input.folderPath), input.name || "Project", shortName);
+  const parsed = parseProjectDiskName(
+    input.folderName || projectFolderName(input.folderPath),
+    input.name || "Project",
+    shortName,
+  );
   const client = validateDisplayName(input.client || parsed.client || "Client", "Client");
   const projectName = validateDisplayName(input.name || parsed.name || "New Project", "Project name");
   const requestedFolderName =
@@ -175,7 +182,9 @@ export async function createProject(input: Partial<Project>) {
     folderName: folderName || projectFolderName(folderPath),
     folderPath,
     ownerId: input.ownerId || "usr_momen",
-    members: input.members || [{ userId: input.ownerId || "usr_momen", role: "owner", addedAt: createdAt, addedBy: input.ownerId || "usr_momen" }],
+    members: input.members || [
+      { userId: input.ownerId || "usr_momen", role: "owner", addedAt: createdAt, addedBy: input.ownerId || "usr_momen" },
+    ],
     groupMembers: input.groupMembers || [],
     jobCount: 0,
     createdAt,
@@ -292,10 +301,13 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
   }
   if (sqliteProjectStore) {
     return sqliteProjectStore.applyToProject(projectId, (project) => {
-      project.members = normalizeMembers([
-        ...project.members.filter((item) => item.userId !== member.userId),
-        { ...member, addedAt: member.addedAt || now(), addedBy: member.addedBy || project.ownerId },
-      ], project.ownerId);
+      project.members = normalizeMembers(
+        [
+          ...project.members.filter((item) => item.userId !== member.userId),
+          { ...member, addedAt: member.addedAt || now(), addedBy: member.addedBy || project.ownerId },
+        ],
+        project.ownerId,
+      );
       project.updatedAt = now();
     });
   }
@@ -490,16 +502,6 @@ function validateBrickProjectFolderName(folderName: string) {
     throw new Error(PROJECT_FOLDER_RULE_MESSAGE);
   }
   return folderName;
-}
-
-function buildProjectFolderName(shortName: string, name: string) {
-  const safeName =
-    name
-      .trim()
-      .replace(/[^A-Za-z0-9]+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_+|_+$/g, "") || "Client_Project";
-  return `${shortName}_${safeName}`;
 }
 
 async function ensureProjectFolder(projectRoot: string) {

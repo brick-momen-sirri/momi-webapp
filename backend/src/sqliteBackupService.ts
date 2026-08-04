@@ -108,24 +108,41 @@ export async function backupOneDatabase(target: BackupTarget, stagingDir: string
 
     if (integrity !== "ok") {
       await fs.rm(tmpPath, { force: true });
-      return { name: target.name, ok: false, integrity, error: `integrity_check returned "${integrity}"`, durationMs: Date.now() - startedAt };
+      return {
+        name: target.name,
+        ok: false,
+        integrity,
+        error: `integrity_check returned "${integrity}"`,
+        durationMs: Date.now() - startedAt,
+      };
     }
 
     await fs.rm(destPath, { force: true });
     await fs.rename(tmpPath, destPath);
     const stat = await fs.stat(destPath);
-    return { name: target.name, ok: true, snapshotPath: destPath, bytes: stat.size, integrity, pageCount, durationMs: Date.now() - startedAt };
+    return {
+      name: target.name,
+      ok: true,
+      snapshotPath: destPath,
+      bytes: stat.size,
+      integrity,
+      pageCount,
+      durationMs: Date.now() - startedAt,
+    };
   } catch (error) {
     await removeSqliteArtifacts(tmpPath).catch(() => undefined);
-    return { name: target.name, ok: false, error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt };
+    return {
+      name: target.name,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt,
+    };
   }
 }
 
 export async function rotateBackups(stagingDir: string, name: string, keep: number): Promise<string[]> {
   const entries = await fs.readdir(stagingDir).catch(() => [] as string[]);
-  const mine = entries
-    .filter((file) => file.startsWith(`${name}-`) && file.endsWith(".sqlite"))
-    .sort(); // label is an ISO-ish timestamp, so lexical order == chronological
+  const mine = entries.filter((file) => file.startsWith(`${name}-`) && file.endsWith(".sqlite")).sort(); // label is an ISO-ish timestamp, so lexical order == chronological
   const remove = mine.slice(0, Math.max(0, mine.length - keep));
   for (const file of remove) {
     await fs.rm(path.join(stagingDir, file), { force: true }).catch(() => undefined);
@@ -181,7 +198,11 @@ export function runAzcopy(azcopyPath: string, args: string[], timeoutMs = AZCOPY
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      code === 0 ? resolve() : reject(new Error(`azcopy exited with code ${code}`));
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`azcopy exited with code ${code}`));
+      }
     });
   });
 }
@@ -235,7 +256,8 @@ export async function runBackupCycle(opts: {
     } catch (error) {
       // The error-handling path itself must never throw, even if `target` is
       // the very thing that's malformed.
-      const name = target && typeof target === "object" && "name" in target ? String((target as { name: unknown }).name) : "unknown";
+      const name =
+        target && typeof target === "object" && "name" in target ? String((target as { name: unknown }).name) : "unknown";
       result = { name, ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     results.push(result);
@@ -288,7 +310,16 @@ export async function runBackupCycle(opts: {
   );
 
   if (!ok) {
-    raiseAlert("backup_failed", `backup cycle ${at} had failures: ${results.filter((r) => !r.ok).map((r) => `${r.name}: ${r.error}`).join("; ") || "upload did not complete"}`, opts);
+    raiseAlert(
+      "backup_failed",
+      `backup cycle ${at} had failures: ${
+        results
+          .filter((r) => !r.ok)
+          .map((r) => `${r.name}: ${r.error}`)
+          .join("; ") || "upload did not complete"
+      }`,
+      opts,
+    );
   } else {
     console.info("[backup]", { at, uploaded, dbs: results.map((r) => `${r.name}:${r.bytes ?? 0}b`).join(",") });
   }

@@ -1,24 +1,13 @@
-import {
-  Check,
-  Folder,
-  FolderPlus,
-  Pencil,
-  Search,
-  UserMinus,
-  UserPlus,
-  UsersRound,
-  X,
-} from "lucide-react";
+import { FolderPlus, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Project, ProjectMember, ProjectRole, Team, User } from "../types";
+import type { Project, ProjectMember, ProjectRole, User } from "../types";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { ProjectList } from "./ProjectList";
 
 type RightProjectPanelProps = {
   projects: Project[];
   users: User[];
-  teams: Team[];
   ownerId: string;
   currentUserRole?: "admin" | "user";
   selectedProjectId: string;
@@ -37,7 +26,6 @@ type RightProjectPanelProps = {
 export function RightProjectPanel({
   projects,
   users,
-  teams,
   ownerId,
   currentUserRole = "user",
   selectedProjectId,
@@ -145,13 +133,8 @@ export function RightProjectPanel({
             users={users}
             currentUserId={ownerId}
             currentUserRole={currentUserRole}
-            selectedFolderId={selectedFolderId}
-            onSelectFolder={onSelectFolder}
             onOpenSettings={() => setSettingsProjectId(selectedProject.id)}
             onUpdateProject={onUpdateProject}
-            onCreateProjectFolder={onCreateProjectFolder}
-            onRenameProjectFolder={onRenameProjectFolder}
-            onDeleteProjectFolder={onDeleteProjectFolder}
           />
         ) : (
           <div className="py-5 text-center">
@@ -164,12 +147,7 @@ export function RightProjectPanel({
       </section>
 
       {modalOpen ? (
-        <CreateProjectModal
-          users={users}
-          ownerId={ownerId}
-          onCreate={createProject}
-          onClose={() => setModalOpen(false)}
-        />
+        <CreateProjectModal users={users} ownerId={ownerId} onCreate={createProject} onClose={() => setModalOpen(false)} />
       ) : null}
       {settingsProject ? (
         <ManageMembersModal
@@ -185,120 +163,28 @@ export function RightProjectPanel({
   );
 }
 
-function ProjectFolderPicker({
-  project,
-  selectedFolderId,
-  isAdmin,
-  onSelectFolder,
-  onCreateProjectFolder,
-  onRenameProjectFolder,
-}: {
-  project: Project;
-  selectedFolderId: "all" | "root" | string;
-  isAdmin: boolean;
-  onSelectFolder: (folderId: "all" | "root" | string) => void;
-  onCreateProjectFolder: (projectId: string, name: string) => void;
-  onRenameProjectFolder: (projectId: string, folderId: string, name: string) => void;
-}) {
-  const activeFolders = (project.folders ?? []).filter((folder) => !folder.archived);
-
-  function createFolder() {
-    const name = window.prompt("New folder name");
-    if (!name?.trim()) return;
-    onCreateProjectFolder(project.id, name.trim());
-  }
-
-  function renameFolder(folderId: string, currentName: string) {
-    const name = window.prompt("Folder name", currentName);
-    if (!name?.trim() || name.trim() === currentName) return;
-    onRenameProjectFolder(project.id, folderId, name.trim());
-  }
-
-  return (
-    <div className="mt-3 rounded-md border border-line bg-mist/50 p-2">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
-          <Folder className="h-3.5 w-3.5" />
-          Folders
-        </span>
-        {isAdmin ? (
-          <button
-            type="button"
-            onClick={createFolder}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-ink px-2 text-xs font-bold text-white transition hover:bg-stone-700"
-          >
-            <FolderPlus className="h-3.5 w-3.5" />
-            New folder
-          </button>
-        ) : null}
-      </div>
-      <div className="space-y-1.5">
-        <FolderRow
-          label="All results"
-          selected={selectedFolderId === "all"}
-          onSelect={() => onSelectFolder("all")}
-        />
-        <FolderRow
-          label="Root"
-          selected={selectedFolderId === "root"}
-          onSelect={() => onSelectFolder("root")}
-        />
-        {activeFolders.map((folder) => (
-          <FolderRow
-            key={folder.folderId}
-            label={folder.name}
-            selected={selectedFolderId === folder.folderId}
-            onSelect={() => onSelectFolder(folder.folderId)}
-            onRename={isAdmin ? () => renameFolder(folder.folderId, folder.name) : undefined}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
+// Folder selection and folder CRUD live in ProjectList; this panel only shows
+// the selected project's details, so it takes no folder props.
 function ProjectDetails({
   project,
   users,
   currentUserId,
   currentUserRole,
-  selectedFolderId,
-  onSelectFolder,
   onOpenSettings,
   onUpdateProject,
-  onCreateProjectFolder,
-  onRenameProjectFolder,
 }: {
   project: Project;
   users: User[];
   currentUserId: string;
   currentUserRole: "admin" | "user";
-  selectedFolderId: "all" | "root" | string;
-  onSelectFolder: (folderId: "all" | "root" | string) => void;
   onOpenSettings: () => void;
   onUpdateProject: (project: Project) => void;
-  onCreateProjectFolder: (projectId: string, name: string, parentId?: string | null) => void;
-  onRenameProjectFolder: (projectId: string, folderId: string, name: string) => void;
-  onDeleteProjectFolder: (projectId: string, folderId: string) => void;
 }) {
   const currentRole = getProjectRole(project, currentUserId);
   const isAdmin = currentUserRole === "admin";
   const canManage = isAdmin || currentRole === "owner";
-  const activeFolders = (project.folders ?? []).filter((folder) => !folder.archived);
   const folderName = projectFolderName(project);
   const memberCount = project.members.length + (project.groupMembers?.length ?? 0);
-
-  function createFolder() {
-    const name = window.prompt("New folder name");
-    if (!name?.trim()) return;
-    onCreateProjectFolder(project.id, name.trim());
-  }
-
-  function renameFolder(folderId: string, currentName: string) {
-    const name = window.prompt("Folder name", currentName);
-    if (!name?.trim() || name.trim() === currentName) return;
-    onRenameProjectFolder(project.id, folderId, name.trim());
-  }
 
   function renameProject() {
     const client = window.prompt("Client", project.client ?? "");
@@ -492,10 +378,7 @@ function ManageMembersModal({
       return;
     }
 
-    save(
-      { ...project, members: project.members.filter((item) => item.userId !== member.userId) },
-      "Member removed.",
-    );
+    save({ ...project, members: project.members.filter((item) => item.userId !== member.userId) }, "Member removed.");
   }
 
   function updateRole(member: ProjectMember, role: ProjectRole) {
@@ -512,9 +395,7 @@ function ManageMembersModal({
     save(
       {
         ...project,
-        members: project.members.map((item) =>
-          item.userId === member.userId ? { ...item, role } : item,
-        ),
+        members: project.members.map((item) => (item.userId === member.userId ? { ...item, role } : item)),
       },
       "Member role updated.",
     );
@@ -607,7 +488,10 @@ function ManageMembersModal({
                 const user = users.find((item) => item.id === member.userId);
                 const removable = canRemoveMember(project, currentRole, member, isAdmin);
                 return (
-                  <div key={member.userId} className="flex flex-col gap-2 rounded-md border border-line bg-white px-3 py-2 sm:flex-row sm:items-center">
+                  <div
+                    key={member.userId}
+                    className="flex flex-col gap-2 rounded-md border border-line bg-white px-3 py-2 sm:flex-row sm:items-center"
+                  >
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <UserAvatar user={user} />
                       <div className="min-w-0">
@@ -740,48 +624,17 @@ function normalizeProjectMemberCount(project: Project): Project {
   };
 }
 
-function FolderRow({
-  label,
-  selected,
-  onSelect,
-  onRename,
-}: {
-  label: string;
-  selected: boolean;
-  onSelect: () => void;
-  onRename?: () => void;
-}) {
-  return (
-    <div className={`flex items-center gap-1 rounded-md border px-2 py-1.5 ${selected ? "border-ink bg-ink text-white" : "border-line bg-white text-ink"}`}>
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-      >
-        {selected ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-stone-400" />}
-        <span className="truncate text-xs font-semibold">{label}</span>
-      </button>
-      {onRename ? (
-        <button
-          type="button"
-          onClick={onRename}
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${selected ? "text-white/80 hover:bg-white/10" : "text-stone-500 hover:bg-stone-50 hover:text-ink"}`}
-          title="Rename folder"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 function UserAvatar({ user }: { user?: User }) {
   return (
     <span
       className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-white"
       style={{ backgroundColor: user?.avatarColor ?? "#d6d0c4" }}
     >
-      {user?.profileImageUrl ? <img src={user.profileImageUrl} alt="" className="h-full w-full object-cover" /> : user?.avatar ?? "US"}
+      {user?.profileImageUrl ? (
+        <img src={user.profileImageUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        (user?.avatar ?? "US")
+      )}
     </span>
   );
 }

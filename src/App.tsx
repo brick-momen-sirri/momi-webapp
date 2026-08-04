@@ -13,7 +13,7 @@ import { LeftSettingsPanel } from "./components/LeftSettingsPanel";
 import { PodStatusIndicator } from "./components/PodStatusIndicator";
 import { RightProjectPanel } from "./components/RightProjectPanel";
 import type { ThemeMode } from "./components/ThemeToggle";
-import { initialJobs, initialProjects, modelTypes, teams, users } from "./data/mockData";
+import { initialJobs, initialProjects, modelTypes, users } from "./data/mockData";
 import {
   type AuthResult,
   type AuthUser,
@@ -111,7 +111,9 @@ function App() {
   const [showArchivedJobs, setShowArchivedJobs] = useState(false);
   const [models, setModels] = useState(modelTypes);
   const [backendCreditsRemaining, setBackendCreditsRemaining] = useState<number | null>(null);
-  const [monthlyUsageByUser, setMonthlyUsageByUser] = useState<Record<string, { creditsSpent: number; jobsCompleted: number }>>({});
+  const [monthlyUsageByUser, setMonthlyUsageByUser] = useState<Record<string, { creditsSpent: number; jobsCompleted: number }>>(
+    {},
+  );
   const [backendRuntime, setBackendRuntime] = useState<BackendRuntime | undefined>();
   const [comfyServers, setComfyServers] = useState<ComfyServer[]>([]);
   const [podStatus, setPodStatus] = useState<PodStatusResponse | undefined>();
@@ -119,7 +121,9 @@ function App() {
   const [loadedWorkspaceAccountId, setLoadedWorkspaceAccountId] = useState<string | null>(null);
   const [selectedModelId, setSelectedModelId] = useState(initialSettings.selectedModelId ?? "google_veo");
   const [selectedResolution, setSelectedResolution] = useState(initialSettings.selectedResolution ?? "1080p");
-  const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(normalizeNanoBananaAspectRatio(initialSettings.selectedNanoBananaAspectRatio));
+  const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(
+    normalizeNanoBananaAspectRatio(initialSettings.selectedNanoBananaAspectRatio),
+  );
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [selectedProjectId, setSelectedProjectId] = useState(initialSettings.selectedProjectId ?? ALL_PROJECTS_ID);
   const [selectedFolderId, setSelectedFolderId] = useState<"all" | "root" | string>("all");
@@ -127,8 +131,12 @@ function App() {
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
   const [saveNumber, setSaveNumber] = useState(normalizeSaveNumber(initialSettings.saveNumber));
-  const [imageOutputCount, setImageOutputCount] = useState<1 | 2>(initialSettings.imageOutputCount ?? initialSettings.nanoBananaOutputCount ?? 1);
-  const [enableImageToVideo16By9Cropping, setEnableImageToVideo16By9Cropping] = useState(initialSettings.imageToVideo16By9Cropping ?? true);
+  const [imageOutputCount, setImageOutputCount] = useState<1 | 2>(
+    initialSettings.imageOutputCount ?? initialSettings.nanoBananaOutputCount ?? 1,
+  );
+  const [enableImageToVideo16By9Cropping, setEnableImageToVideo16By9Cropping] = useState(
+    initialSettings.imageToVideo16By9Cropping ?? true,
+  );
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [video, setVideo] = useState<UploadedVideo | undefined>();
   const [favoriteJobIds, setFavoriteJobIds] = useState(readFavoriteJobIds);
@@ -190,11 +198,10 @@ function App() {
   const allowSeedance4K = account?.role === "admin";
   const creditsRemaining = backendCreditsRemaining ?? 0;
   const currentMonthUsage = account
-    ? monthlyUsageByUser[account.id] ?? getMonthlyUsageForUser(jobs, account.id)
+    ? (monthlyUsageByUser[account.id] ?? getMonthlyUsageForUser(jobs, account.id))
     : { creditsSpent: 0, jobsCompleted: 0 };
-  const creditDashboardMonthUsage = account?.role === "admin"
-    ? getWorkspaceMonthlyUsage(monthlyUsageByUser, jobs)
-    : currentMonthUsage;
+  const creditDashboardMonthUsage =
+    account?.role === "admin" ? getWorkspaceMonthlyUsage(monthlyUsageByUser, jobs) : currentMonthUsage;
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
@@ -207,7 +214,9 @@ function App() {
     selectedProject,
     hasMissingImages: uploadedImages.length < minimumRequiredImages,
     hasMissingVideo: Boolean(selectedModel.requiresVideo && !video),
-    hasCropIssues: Boolean(selectedModel.requiresLandscape && use16By9Cropping && uploadedImages.some((image) => image.cropRequired)),
+    hasCropIssues: Boolean(
+      selectedModel.requiresLandscape && use16By9Cropping && uploadedImages.some((image) => image.cropRequired),
+    ),
     hasMissingPrompt: selectedModel.requiresPrompt !== false && !prompt.trim(),
     promptOverflowCharacters: klingPromptOverflowCharacters(selectedModel, prompt),
     requiredImages: minimumRequiredImages,
@@ -220,7 +229,9 @@ function App() {
   }, [selectedProjectId]);
 
   useEffect(() => {
-    const folderIds = new Set((selectedProject?.folders ?? []).filter((folder) => !folder.archived).map((folder) => folder.folderId));
+    const folderIds = new Set(
+      (selectedProject?.folders ?? []).filter((folder) => !folder.archived).map((folder) => folder.folderId),
+    );
     if (targetFolderId && !folderIds.has(targetFolderId)) {
       setTargetFolderId("");
     }
@@ -253,7 +264,18 @@ function App() {
       imageOutputCount,
       imageToVideo16By9Cropping: enableImageToVideo16By9Cropping,
     });
-  }, [enableImageToVideo16By9Cropping, imageOutputCount, prompt, saveNumber, selectedDurationSeconds, selectedModelId, selectedNanoBananaAspectRatio, selectedProjectId, selectedResolution, targetFolderId]);
+  }, [
+    enableImageToVideo16By9Cropping,
+    imageOutputCount,
+    prompt,
+    saveNumber,
+    selectedDurationSeconds,
+    selectedModelId,
+    selectedNanoBananaAspectRatio,
+    selectedProjectId,
+    selectedResolution,
+    targetFolderId,
+  ]);
 
   useEffect(() => {
     writeFavoriteJobIds(favoriteJobIds);
@@ -271,15 +293,17 @@ function App() {
     async function loadBackendData() {
       let shouldMarkWorkspaceLoaded = true;
       try {
-        const [backendModels, backendProjects, backendJobsPage, credits, monthlyUsage, backendUsers, runtime] = await Promise.all([
-          fetchBackendModels(),
-          fetchBackendProjects(),
-          fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs)),
-          fetchBackendCredits(),
-          fetchBackendMonthlyUsage(),
-          fetchBackendUsers(),
-          fetchBackendRuntime(),
-        ]);
+        const [backendModels, backendProjects, backendJobsPage, credits, monthlyUsage, backendUsers, runtime] = await Promise.all(
+          [
+            fetchBackendModels(),
+            fetchBackendProjects(),
+            fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs)),
+            fetchBackendCredits(),
+            fetchBackendMonthlyUsage(),
+            fetchBackendUsers(),
+            fetchBackendRuntime(),
+          ],
+        );
         const servers = runtime.localComfyEnabled ? await fetchComfyServers() : [];
         if (!mounted) return;
         setBackendAvailable(true);
@@ -299,7 +323,9 @@ function App() {
         setMonthlyUsageByUser(mapMonthlyUsageByUser(monthlyUsage.users));
         setComfyServers(servers);
         setWorkspaceAccounts(backendUsers);
-        void fetchPodStatus().then(setPodStatus).catch(() => undefined);
+        void fetchPodStatus()
+          .then(setPodStatus)
+          .catch(() => undefined);
       } catch (error) {
         if (!mounted) return;
         if (error instanceof Error && error.message.includes("Authentication required")) {
@@ -322,31 +348,44 @@ function App() {
     const interval = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       tick += 1;
-      void fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs)).then((page) => {
-        setBackendAvailable(true);
-        applyBackendJobsPage(page);
-      }).catch(() => setBackendAvailable(false));
+      void fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs))
+        .then((page) => {
+          setBackendAvailable(true);
+          applyBackendJobsPage(page);
+        })
+        .catch(() => setBackendAvailable(false));
       // One round-trip for the small, frequently-identical values instead of
       // four separate fetches per tick.
-      void fetchBackendSnapshot().then((snapshot) => {
-        if (snapshot.credits && typeof snapshot.credits.creditsLeft === "number") {
-          setBackendCreditsRemaining(Math.floor(snapshot.credits.creditsLeft));
-        }
-        setMonthlyUsageByUser(mapMonthlyUsageByUser(snapshot.monthlyUsage.users));
-        setBackendRuntime(snapshot.runtime);
-        if (!snapshot.runtime.localComfyEnabled) setComfyServers([]);
-        if (snapshot.runtime.localComfyEnabled) void fetchComfyServers().then(setComfyServers).catch(() => undefined);
-        if (snapshot.podStatus) setPodStatus(snapshot.podStatus);
-      }).catch(() => undefined);
+      void fetchBackendSnapshot()
+        .then((snapshot) => {
+          if (snapshot.credits && typeof snapshot.credits.creditsLeft === "number") {
+            setBackendCreditsRemaining(Math.floor(snapshot.credits.creditsLeft));
+          }
+          setMonthlyUsageByUser(mapMonthlyUsageByUser(snapshot.monthlyUsage.users));
+          setBackendRuntime(snapshot.runtime);
+          if (!snapshot.runtime.localComfyEnabled) setComfyServers([]);
+          if (snapshot.runtime.localComfyEnabled)
+            void fetchComfyServers()
+              .then(setComfyServers)
+              .catch(() => undefined);
+          if (snapshot.podStatus) setPodStatus(snapshot.podStatus);
+        })
+        .catch(() => undefined);
       // Users and projects change rarely; refresh them every few ticks.
       if (tick % 3 === 0) {
-        void fetchBackendUsers().then(setWorkspaceAccounts).catch(() => undefined);
-        void fetchBackendProjects().then((backendProjects) => {
-          setProjects(backendProjects);
-          setSelectedProjectId((current) =>
-            current === ALL_PROJECTS_ID || backendProjects.some((project) => project.id === current) ? current : ALL_PROJECTS_ID,
-          );
-        }).catch(() => undefined);
+        void fetchBackendUsers()
+          .then(setWorkspaceAccounts)
+          .catch(() => undefined);
+        void fetchBackendProjects()
+          .then((backendProjects) => {
+            setProjects(backendProjects);
+            setSelectedProjectId((current) =>
+              current === ALL_PROJECTS_ID || backendProjects.some((project) => project.id === current)
+                ? current
+                : ALL_PROJECTS_ID,
+            );
+          })
+          .catch(() => undefined);
       }
     }, 12000);
 
@@ -373,7 +412,7 @@ function App() {
   }
 
   function applyBackendJobsPage(page: BackendJobsPage, reset = false) {
-    setJobs((current) => reset ? page.jobs : mergeJobs(page.jobs, current));
+    setJobs((current) => (reset ? page.jobs : mergeJobs(page.jobs, current)));
     setBackendJobsTotal(page.total);
     setBackendJobsOffset((current) => {
       const pageEnd = page.offset + page.jobs.length;
@@ -414,7 +453,9 @@ function App() {
     showToast("Signed out.");
   }
 
-  async function handleUpdateProfile(updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string }): Promise<AuthResult> {
+  async function handleUpdateProfile(
+    updates: Pick<AuthUser, "name" | "avatarColor"> & { profileImageUrl?: string },
+  ): Promise<AuthResult> {
     if (!account) return { ok: false, error: "Sign in first." };
     const result = await updateBackendProfile(updates);
     if (result.ok) {
@@ -449,7 +490,11 @@ function App() {
     showToast(result.error, "error");
   }
 
-  async function handleChangePassword(currentPassword: string, newPassword: string, confirmPassword: string): Promise<AuthResult> {
+  async function handleChangePassword(
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ): Promise<AuthResult> {
     if (!account) return { ok: false, error: "Sign in first." };
     const result = await changeBackendPassword(currentPassword, newPassword, confirmPassword);
     if (result.ok) {
@@ -541,19 +586,22 @@ function App() {
           images
             .slice(0, requiredImages)
             .filter(Boolean)
-            .map((image) => uploadJobMediaUrl(jobImageUrl(image, use16By9Cropping), {
-              projectId: selectedProjectId,
-              kind: "image",
-              name: image.name,
-            })),
+            .map((image) =>
+              uploadJobMediaUrl(jobImageUrl(image, use16By9Cropping), {
+                projectId: selectedProjectId,
+                kind: "image",
+                name: image.name,
+              }),
+            ),
         );
-        const inputVideo = selectedModel.requiresVideo && video
-          ? await uploadJobMediaUrl(video.url, {
-            projectId: selectedProjectId,
-            kind: "video",
-            name: video.name,
-          })
-          : undefined;
+        const inputVideo =
+          selectedModel.requiresVideo && video
+            ? await uploadJobMediaUrl(video.url, {
+                projectId: selectedProjectId,
+                kind: "video",
+                name: video.name,
+              })
+            : undefined;
         const backendJob = await createBackendJob({
           projectId: selectedProjectId,
           targetFolderId: targetFolderId || null,
@@ -565,13 +613,23 @@ function App() {
           startFrame: selectedModel.requiresTwoImages ? inputImages[0] : undefined,
           endFrame: selectedModel.requiresTwoImages ? inputImages[1] : undefined,
           inputVideo,
-          workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount, selectedNanoBananaAspectRatio),
+          workflowOptions: workflowOptionsForJob(
+            selectedModel,
+            archVizGridOptions,
+            saveNumber,
+            imageOutputCount,
+            selectedNanoBananaAspectRatio,
+          ),
         });
         setJobs((current) => mergeJobs([backendJob], current));
         setProjects((current) => incrementProjectJobCount(current, selectedProjectId));
         setBackendJobsTotal((current) => current + 1);
         setBackendJobsOffset((current) => current + 1);
-        showToast(backendRuntime?.generationBackend === "local_comfy" ? "Job sent to the local ComfyUI backend." : "Job sent to RunPod serverless.");
+        showToast(
+          backendRuntime?.generationBackend === "local_comfy"
+            ? "Job sent to the local ComfyUI backend."
+            : "Job sent to RunPod serverless.",
+        );
         return;
       }
 
@@ -596,7 +654,10 @@ function App() {
       showToast("Local preview job created.");
     } catch (error) {
       setBackendAvailable(false);
-      showToast(error instanceof Error ? `Backend unavailable: ${error.message}` : "Backend unavailable. Could not send job.", "error");
+      showToast(
+        error instanceof Error ? `Backend unavailable: ${error.message}` : "Backend unavailable. Could not send job.",
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -650,9 +711,11 @@ function App() {
         updatedBy: account?.id,
         archived: false,
       };
-      setProjects((current) => current.map((project) => (
-        project.id === projectId ? { ...project, folders: [...(project.folders ?? []), folder] } : project
-      )));
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === projectId ? { ...project, folders: [...(project.folders ?? []), folder] } : project,
+        ),
+      );
       setSelectedFolderId(folderId);
       setTargetFolderId(folderId);
       showToast("Folder created.");
@@ -672,18 +735,26 @@ function App() {
         return;
       }
 
-      setProjects((current) => current.map((project) => (
-        project.id === projectId
-          ? {
-              ...project,
-              folders: (project.folders ?? []).map((folder) => (
-                folder.folderId === folderId
-                  ? { ...folder, name: name.trim(), slug: slugify(name), diskName: `${folder.folderId}_${slugify(name)}`, updatedAt: new Date().toISOString() }
-                  : folder
-              )),
-            }
-          : project
-      )));
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                folders: (project.folders ?? []).map((folder) =>
+                  folder.folderId === folderId
+                    ? {
+                        ...folder,
+                        name: name.trim(),
+                        slug: slugify(name),
+                        diskName: `${folder.folderId}_${slugify(name)}`,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : folder,
+                ),
+              }
+            : project,
+        ),
+      );
       showToast("Folder renamed.");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not rename folder.", "error");
@@ -711,11 +782,18 @@ function App() {
           setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
         }
       } else {
-        setProjects((current) => current.map((item) => (
-          item.id === projectId
-            ? { ...item, folders: (item.folders ?? []).map((entry) => entry.folderId === folderId ? { ...entry, archived: true } : entry) }
-            : item
-        )));
+        setProjects((current) =>
+          current.map((item) =>
+            item.id === projectId
+              ? {
+                  ...item,
+                  folders: (item.folders ?? []).map((entry) =>
+                    entry.folderId === folderId ? { ...entry, archived: true } : entry,
+                  ),
+                }
+              : item,
+          ),
+        );
       }
       if (selectedFolderId === folderId) {
         setSelectedFolderId("all");
@@ -736,7 +814,9 @@ function App() {
     if (!backendAvailable || isLoadingMoreJobs) return;
     setIsLoadingMoreJobs(true);
     try {
-      const page = await fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, backendJobsOffset, showArchivedJobs));
+      const page = await fetchBackendJobs(
+        jobPageParams(selectedProjectId, selectedFolderId, backendJobsOffset, showArchivedJobs),
+      );
       applyBackendJobsPage(page);
       showToast(page.jobs.length ? `Loaded ${page.jobs.length} more jobs.` : "No more jobs to load.");
     } catch {
@@ -887,21 +967,19 @@ function App() {
       folderName: destinationFolder?.name ?? "Root",
     };
     const leavesSelectedFolder = selectedFolderId !== "all" && matchesFolder(job, selectedFolderId);
-    setJobs((current) => current.map((item) => item.id === job.id ? optimisticJob : item));
+    setJobs((current) => current.map((item) => (item.id === job.id ? optimisticJob : item)));
     if (backendAvailable && leavesSelectedFolder) {
       setBackendJobsTotal((current) => Math.max(0, current - 1));
       setBackendJobsOffset((current) => Math.max(0, current - 1));
     }
 
     try {
-      const updated = backendAvailable
-        ? await moveBackendJobResult(job.projectId, job.id, destinationFolderId)
-        : optimisticJob;
-      setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
+      const updated = backendAvailable ? await moveBackendJobResult(job.projectId, job.id, destinationFolderId) : optimisticJob;
+      setJobs((current) => current.map((item) => (item.id === job.id ? updated : item)));
       showToast(`Moved to ${destinationFolder?.name ?? "project root"}.`);
       return true;
     } catch (error) {
-      setJobs((current) => current.map((item) => item.id === job.id ? job : item));
+      setJobs((current) => current.map((item) => (item.id === job.id ? job : item)));
       if (backendAvailable && leavesSelectedFolder) {
         setBackendJobsTotal((current) => current + 1);
         setBackendJobsOffset((current) => current + 1);
@@ -996,11 +1074,16 @@ function App() {
       const updated = backendAvailable
         ? await updateBackendJobSaveNumber(job.projectId, job.id, nextSaveNumber)
         : { ...job, workflowOptions: fallbackWorkflowOptions };
-      setJobs((current) => current.map((item) => (
-        item.id === job.id
-          ? { ...item, workflowOptions: updated.workflowOptions ?? workflowOptionsWithSaveNumber(item.workflowOptions, nextSaveNumber) }
-          : item
-      )));
+      setJobs((current) =>
+        current.map((item) =>
+          item.id === job.id
+            ? {
+                ...item,
+                workflowOptions: updated.workflowOptions ?? workflowOptionsWithSaveNumber(item.workflowOptions, nextSaveNumber),
+              }
+            : item,
+        ),
+      );
       showToast("Shot/camera updated.");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not update shot/camera.", "error");
@@ -1020,7 +1103,13 @@ function App() {
   }
 
   if (loadedWorkspaceAccountId !== account.id) {
-    return <WorkspaceLoadingScreen title="Loading your workspace" message="Fetching projects, jobs, models, and credit usage..." accountName={account.name} />;
+    return (
+      <WorkspaceLoadingScreen
+        title="Loading your workspace"
+        message="Fetching projects, jobs, models, and credit usage..."
+        accountName={account.name}
+      />
+    );
   }
 
   return (
@@ -1127,7 +1216,6 @@ function App() {
             <RightProjectPanel
               projects={projects}
               users={workspaceUsers}
-              teams={teams}
               ownerId={account.id}
               currentUserRole={account.role}
               selectedProjectId={selectedProjectId}
@@ -1175,15 +1263,7 @@ function App() {
   );
 }
 
-function WorkspaceLoadingScreen({
-  title,
-  message,
-  accountName,
-}: {
-  title: string;
-  message: string;
-  accountName?: string;
-}) {
+function WorkspaceLoadingScreen({ title, message, accountName }: { title: string; message: string; accountName?: string }) {
   return (
     <div className="grain flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-white p-5 text-center shadow-2xl">
@@ -1242,13 +1322,13 @@ function getDisabledReason({
 
 function canReuseJobSettings(job: Job, models: ModelType[]) {
   return Boolean(
-    findReusableModel(job, models)
-      || hasPromptMetadata(job)
-      || hasKnownResolution(job)
-      || (typeof job.durationSeconds === "number" && Number.isFinite(job.durationSeconds) && job.durationSeconds > 0)
-      || hasReusableWorkflowOptions(job.workflowOptions)
-      || (hasInputImageMetadata(job) && job.inputImages.length > 0)
-      || hasInputVideoMetadata(job),
+    findReusableModel(job, models) ||
+    hasPromptMetadata(job) ||
+    hasKnownResolution(job) ||
+    (typeof job.durationSeconds === "number" && Number.isFinite(job.durationSeconds) && job.durationSeconds > 0) ||
+    hasReusableWorkflowOptions(job.workflowOptions) ||
+    (hasInputImageMetadata(job) && job.inputImages.length > 0) ||
+    hasInputVideoMetadata(job),
   );
 }
 
@@ -1261,7 +1341,9 @@ function findReusableModel(job: Job, models: ModelType[]) {
 
   const jobWorkflowPath = job.workflowPath;
   if (jobWorkflowPath) {
-    const workflowMatch = models.find((model) => Boolean(model.workflowPath && sameWorkflowPath(model.workflowPath, jobWorkflowPath)));
+    const workflowMatch = models.find((model) =>
+      Boolean(model.workflowPath && sameWorkflowPath(model.workflowPath, jobWorkflowPath)),
+    );
     if (workflowMatch) return workflowMatch;
   }
 
@@ -1273,10 +1355,12 @@ function findReusableModel(job: Job, models: ModelType[]) {
   return models.find((model) => {
     const label = normalizeModelText(model.label);
     const id = normalizeModelText(model.id);
-    return label === jobModelName
-      || id === jobModelName
-      || (label.length > 4 && jobModelName.includes(label))
-      || (jobModelName.length > 4 && label.includes(jobModelName));
+    return (
+      label === jobModelName ||
+      id === jobModelName ||
+      (label.length > 4 && jobModelName.includes(label)) ||
+      (jobModelName.length > 4 && label.includes(jobModelName))
+    );
   });
 }
 
@@ -1339,13 +1423,18 @@ function jobMissingMetadata(job: Job, field: string) {
   return Boolean(
     job.missingMetadata?.some((item) => {
       const normalizedItem = normalizeMetadataField(item);
-      return normalizedItem === normalizedField || normalizedItem.includes(normalizedField) || normalizedField.includes(normalizedItem);
+      return (
+        normalizedItem === normalizedField || normalizedItem.includes(normalizedField) || normalizedField.includes(normalizedItem)
+      );
     }),
   );
 }
 
 function normalizeMetadataField(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function normalizeReusableArchVizGridOptions(value: unknown): ArchVizGridOptions | undefined {
@@ -1360,7 +1449,9 @@ function normalizeReusableArchVizGridOptions(value: unknown): ArchVizGridOptions
     useSmartDefaults: typeof input.useSmartDefaults === "boolean" ? input.useSmartDefaults : defaults.useSmartDefaults,
     cameraSlots: Array.from({ length: 9 }, (_, index) => {
       const value = sourceSlots[index];
-      return typeof value === "string" && value.trim() ? value : defaults.cameraSlots[index] ?? "Professional regular archviz view";
+      return typeof value === "string" && value.trim()
+        ? value
+        : (defaults.cameraSlots[index] ?? "Professional regular archviz view");
     }),
   };
 }
@@ -1372,7 +1463,7 @@ function isArchVizSlotCount(value: unknown): value is ArchVizGridOptions["slotCo
 function reusableSaveNumber(job: Job) {
   const save = job.workflowOptions?.save;
   if (!save) return undefined;
-  const value = isVideoLikeJob(job) ? save.shotNumber ?? save.cameraNumber : save.cameraNumber ?? save.shotNumber;
+  const value = isVideoLikeJob(job) ? (save.shotNumber ?? save.cameraNumber) : (save.cameraNumber ?? save.shotNumber);
   return value == null || String(value).trim() === "" ? undefined : value;
 }
 
@@ -1484,7 +1575,12 @@ function mediaNameFromUrl(url: string, fallbackBase: string, type: string | unde
 }
 
 function sanitizeMediaName(name: string, fallback: string) {
-  return name.replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_").replace(/\s+/g, " ").trim() || fallback;
+  return (
+    name
+      .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim() || fallback
+  );
 }
 
 function extensionForMediaType(type: string | undefined, expectedType: "image" | "video") {
@@ -1626,19 +1722,25 @@ function parseResolution(value: string) {
   };
 }
 
-function normalizeDurationSeconds(value: number | undefined, model: Pick<ModelType, "category" | "supportedDurations" | "defaultDurationSeconds">) {
-  const options = model.category === "video" ? model.supportedDurations ?? [] : [];
+function normalizeDurationSeconds(
+  value: number | undefined,
+  model: Pick<ModelType, "category" | "supportedDurations" | "defaultDurationSeconds">,
+) {
+  const options = model.category === "video" ? (model.supportedDurations ?? []) : [];
   if (!options.length) return model.defaultDurationSeconds ?? 8;
-  const fallback = model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
+  const fallback =
+    model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   if (options.includes(value)) return value;
   return options.reduce((closest, option) => (Math.abs(option - value) < Math.abs(closest - value) ? option : closest), fallback);
 }
 
 function defaultDurationSecondsForModel(model: Pick<ModelType, "category" | "supportedDurations" | "defaultDurationSeconds">) {
-  const options = model.category === "video" ? model.supportedDurations ?? [] : [];
+  const options = model.category === "video" ? (model.supportedDurations ?? []) : [];
   if (!options.length) return model.defaultDurationSeconds ?? 8;
-  return model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
+  return model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds)
+    ? model.defaultDurationSeconds
+    : options[0];
 }
 
 const gptImageResolutionValues = [
@@ -1703,7 +1805,12 @@ function imageSlotCountForModel(model: Pick<ModelType, "requiresImage" | "requir
   return model.requiresImage ? 1 : 0;
 }
 
-function minimumImageCountForModel(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath" | "requiresImage" | "requiresTwoImages" | "imageSlotCount">) {
+function minimumImageCountForModel(
+  model: Pick<
+    ModelType,
+    "id" | "label" | "backendCategory" | "workflowPath" | "requiresImage" | "requiresTwoImages" | "imageSlotCount"
+  >,
+) {
   if (supportsTextOnlyImageWorkflow(model)) return 0;
   if (model.requiresTwoImages) return 2;
   if (model.requiresImage || (model.imageSlotCount ?? 0) > 0) return 1;
@@ -1712,8 +1819,10 @@ function minimumImageCountForModel(model: Pick<ModelType, "id" | "label" | "back
 
 function supportsTextOnlyImageWorkflow(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">) {
   const key = `${model.id} ${model.label ?? ""} ${model.backendCategory ?? ""} ${model.workflowPath ?? ""}`.toLowerCase();
-  return (key.includes("nano") && key.includes("banana"))
-    || (((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid")));
+  return (
+    (key.includes("nano") && key.includes("banana")) ||
+    ((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid"))
+  );
 }
 
 function isArchVizGridModel(model: Pick<ModelType, "id" | "label" | "workflowPath">) {
@@ -1725,12 +1834,14 @@ function isImageToVideoModel(model: Pick<ModelType, "id" | "label" | "category" 
   if (model.backendCategory) return model.backendCategory === "image_to_video";
   if (model.category !== "video") return false;
   const key = `${model.id} ${model.label ?? ""} ${model.workflowPath ?? ""}`.toLowerCase().replaceAll("\\", "/");
-  return key.includes("/i2v/")
-    || key.includes("image_to_video")
-    || key.includes("image-to-video")
-    || key.includes("image to video")
-    || model.id === "video_generation"
-    || model.id === "google_veo";
+  return (
+    key.includes("/i2v/") ||
+    key.includes("image_to_video") ||
+    key.includes("image-to-video") ||
+    key.includes("image to video") ||
+    model.id === "video_generation" ||
+    model.id === "google_veo"
+  );
 }
 
 function workflowOptionsForJob(
@@ -1743,7 +1854,9 @@ function workflowOptionsForJob(
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
     ...(isArchVizGridModel(model) ? { archVizGrid } : {}),
-    ...(isNanoBananaModel(model) ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } } : {}),
+    ...(isNanoBananaModel(model)
+      ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } }
+      : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
     save: {
       cameraNumber: normalizedSaveNumber,
@@ -1769,10 +1882,9 @@ function supportsImageOutputCount(model: Pick<ModelType, "id" | "label" | "backe
 function isDemoAccount(user: Pick<AuthUser, "email" | "username">) {
   const email = user.email.toLowerCase();
   const username = (user.username ?? "").toLowerCase();
-  return email === "demo@brickvisual.com"
-    || email === "momi.demo@brickvisual.com"
-    || username === "demo"
-    || username === "momi-demo";
+  return (
+    email === "demo@brickvisual.com" || email === "momi.demo@brickvisual.com" || username === "demo" || username === "momi-demo"
+  );
 }
 
 function createLocalJob({
@@ -1806,8 +1918,12 @@ function createLocalJob({
   use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
-  const inputImages = images.slice(0, requiredImages).filter(Boolean).map((image) => jobImageUrl(image, use16By9Cropping));
-  const resultUrl = inputImages[0] ?? "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1180&q=90";
+  const inputImages = images
+    .slice(0, requiredImages)
+    .filter(Boolean)
+    .map((image) => jobImageUrl(image, use16By9Cropping));
+  const resultUrl =
+    inputImages[0] ?? "https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1180&q=90";
   return {
     id: createClientId("job_").slice(0, 28),
     projectId: selectedProjectId,
@@ -1828,7 +1944,13 @@ function createLocalJob({
     prompt: prompt.trim(),
     resolution: selectedResolution,
     durationSeconds: selectedModel.category === "video" ? selectedDurationSeconds : undefined,
-    workflowOptions: workflowOptionsForJob(selectedModel, archVizGridOptions, saveNumber, imageOutputCount, selectedNanoBananaAspectRatio),
+    workflowOptions: workflowOptionsForJob(
+      selectedModel,
+      archVizGridOptions,
+      saveNumber,
+      imageOutputCount,
+      selectedNanoBananaAspectRatio,
+    ),
     status: "queued",
     inputImages,
     inputVideo: video?.url,
@@ -1844,16 +1966,20 @@ function createLocalJob({
 }
 
 function jobImageUrl(image: UploadedImage, use16By9Cropping: boolean) {
-  return use16By9Cropping ? image.croppedUrl ?? image.url : image.url;
+  return use16By9Cropping ? (image.croppedUrl ?? image.url) : image.url;
 }
 
 function normalizeSaveNumber(value: unknown) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return (digits || "0000").padStart(4, "0");
 }
 
 function normalizeRequiredSaveNumber(value: unknown) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return digits ? digits.padStart(4, "0") : "";
 }
 
@@ -1868,10 +1994,7 @@ function workflowOptionsWithSaveNumber(options: WorkflowOptions | undefined, sav
   };
 }
 
-async function uploadJobMediaUrl(
-  url: string,
-  options: { projectId: string; kind: "image" | "video"; name?: string },
-) {
+async function uploadJobMediaUrl(url: string, options: { projectId: string; kind: "image" | "video"; name?: string }) {
   if (!url.startsWith("blob:") && !url.startsWith("data:")) return url;
 
   const response = await fetch(url);
@@ -1903,7 +2026,8 @@ function readPersistedGenerationSettings(): PersistedGenerationSettings {
       imageOutputCount: parsed.imageOutputCount === 2 || parsed.nanoBananaOutputCount === 2 ? 2 : 1,
       nanoBananaOutputCount: parsed.nanoBananaOutputCount === 2 ? 2 : undefined,
       selectedNanoBananaAspectRatio: normalizeNanoBananaAspectRatio(parsed.selectedNanoBananaAspectRatio),
-      imageToVideo16By9Cropping: typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
+      imageToVideo16By9Cropping:
+        typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };
   } catch {
     return {};
@@ -1972,12 +2096,14 @@ function hasTwoImageDownloadChoices(job: Job) {
 }
 
 function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "folder";
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "folder"
+  );
 }
 
 async function fetchResultBlob(job: Job, resultIndex = 0) {
@@ -2037,7 +2163,8 @@ async function convertImageBlobForDownload(blob: Blob, format: ImageDownloadForm
 }
 
 async function clipboardCompatibleImageBlob(blob: Blob) {
-  const clipboardTypeSupported = typeof ClipboardItem.supports === "function" ? ClipboardItem.supports(blob.type) : blob.type === "image/png";
+  const clipboardTypeSupported =
+    typeof ClipboardItem.supports === "function" ? ClipboardItem.supports(blob.type) : blob.type === "image/png";
   if (clipboardTypeSupported) return blob;
   return convertImageBlobToPng(blob);
 }
@@ -2071,14 +2198,18 @@ function convertImageBlob(
         context.fillRect(0, 0, canvas.width, canvas.height);
       }
       context.drawImage(image, 0, 0);
-      canvas.toBlob((convertedBlob) => {
-        URL.revokeObjectURL(url);
-        if (!convertedBlob) {
-          reject(new Error(errorMessage));
-          return;
-        }
-        resolve(convertedBlob);
-      }, mimeType, quality);
+      canvas.toBlob(
+        (convertedBlob) => {
+          URL.revokeObjectURL(url);
+          if (!convertedBlob) {
+            reject(new Error(errorMessage));
+            return;
+          }
+          resolve(convertedBlob);
+        },
+        mimeType,
+        quality,
+      );
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);

@@ -4,7 +4,14 @@ import { serverlessWorkflowRoot, workflowMappingsPath, workflowRoots } from "./c
 import { getObjectInfo } from "./comfyClient.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { assertNoEmbeddedMedia, readJsonFile } from "./storageService.js";
-import type { ArchVizGridOptions, CreateJobRequest, ModelCategory, WorkflowInputMapping, WorkflowModel, WorkflowRequiredInput } from "./types.js";
+import type {
+  ArchVizGridOptions,
+  CreateJobRequest,
+  ModelCategory,
+  WorkflowInputMapping,
+  WorkflowModel,
+  WorkflowRequiredInput,
+} from "./types.js";
 
 let modelsCache: WorkflowModel[] = [];
 let mappingsCache: Record<string, WorkflowInputMapping> = {};
@@ -37,7 +44,12 @@ export function getWorkflowModel(id: string) {
   return modelsCache.find((model) => model.id === id);
 }
 
-export async function loadWorkflowPrompt(model: WorkflowModel, request: CreateJobRequest, projectName: string, serverUrl: string) {
+export async function loadWorkflowPrompt(
+  model: WorkflowModel,
+  request: CreateJobRequest,
+  projectName: string,
+  serverUrl: string,
+) {
   const workflow = JSON.parse(await fs.readFile(model.workflowPath, "utf8"));
   const objectInfo = await getObjectInfo(serverUrl).catch(() => ({}));
   const prompt = toApiPrompt(workflow, objectInfo);
@@ -189,14 +201,6 @@ function parseWorkflowJson(jsonText: string) {
   }
 }
 
-function isApiPromptLike(workflow: unknown) {
-  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return false;
-  const record = workflow as Record<string, any>;
-  if (record.output && typeof record.output === "object") return true;
-  if (record.prompt && typeof record.prompt === "object") return true;
-  return Object.keys(record).some((key) => /^\d+$/.test(key));
-}
-
 function collectLoadImageNames(workflow: unknown) {
   const names: string[] = [];
 
@@ -252,14 +256,17 @@ function workflowNodeEntriesDeep(workflow: unknown): Array<{ id?: string; node: 
   const nodes = Array.isArray(record.nodes)
     ? record.nodes.map((node: Record<string, any>) => ({ id: node?.id == null ? undefined : String(node.id), node }))
     : Object.entries(record.output ?? record.prompt ?? record).map(([id, node]) => ({
-      id,
-      node: node as Record<string, any>,
-    }));
+        id,
+        node: node as Record<string, any>,
+      }));
   const subgraphNodes = Array.isArray(record.definitions?.subgraphs)
     ? record.definitions.subgraphs.flatMap((subgraph: Record<string, any>) => workflowNodeEntriesDeep(subgraph))
     : [];
   return [
-    ...(nodes.filter((entry) => Boolean(entry.node && typeof entry.node === "object")) as Array<{ id?: string; node: Record<string, any> }>),
+    ...(nodes.filter((entry) => Boolean(entry.node && typeof entry.node === "object")) as Array<{
+      id?: string;
+      node: Record<string, any>;
+    }>),
     ...subgraphNodes,
   ];
 }
@@ -295,9 +302,10 @@ function referencedLoadImageIds(
   const references: string[] = [];
 
   for (const { node } of entries) {
-    const inputs = node?.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-      ? node.inputs as Record<string, unknown>
-      : {};
+    const inputs =
+      node?.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
+        ? (node.inputs as Record<string, unknown>)
+        : {};
     const orderedInputs = Object.entries(inputs)
       .map(([key, value], index) => ({ key, value, index, priority: imageReferencePriority(key) }))
       .filter((entry) => entry.priority != null)
@@ -392,12 +400,13 @@ function imageBatchInputCount(workflow: unknown) {
 function referenceImageInputCount(workflow: unknown) {
   let maxCount = 0;
   for (const node of workflowNodesDeep(workflow)) {
-    const inputs = node?.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-      ? node.inputs as Record<string, unknown>
-      : {};
-    const numberedReferenceImages = Object.keys(inputs)
-      .filter((name) => /(?:^|\.)reference_images\.image_\d+$/i.test(name))
-      .length;
+    const inputs =
+      node?.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
+        ? (node.inputs as Record<string, unknown>)
+        : {};
+    const numberedReferenceImages = Object.keys(inputs).filter((name) =>
+      /(?:^|\.)reference_images\.image_\d+$/i.test(name),
+    ).length;
     if (numberedReferenceImages) maxCount = Math.max(maxCount, numberedReferenceImages);
   }
   return maxCount;
@@ -421,7 +430,7 @@ function defaultResolutionForModel(source: string, supportedResolutions: string[
   const key = source.toLowerCase();
   if (key.includes("nano") && key.includes("banana")) return "1K";
   if (isGptImageKey(key)) return "auto";
-  return supportedResolutions.includes("1080p") ? "1080p" : supportedResolutions[0] ?? "1080p";
+  return supportedResolutions.includes("1080p") ? "1080p" : (supportedResolutions[0] ?? "1080p");
 }
 
 function inferDurationConfig(source: string, workflow: unknown, outputType: "image" | "video" | "sequence") {
@@ -485,15 +494,15 @@ function inferSupportedDurations(workflow: unknown, outputType: "image" | "video
 function inferDefaultDurationSeconds(workflow: unknown, supportedDurations: number[]) {
   if (!supportedDurations.length || !workflow || typeof workflow !== "object") return undefined;
   const record = workflow as Record<string, any>;
-  const nodes = Array.isArray(record.nodes)
-    ? record.nodes
-    : Object.values(record.output ?? record.prompt ?? record);
+  const nodes = Array.isArray(record.nodes) ? record.nodes : Object.values(record.output ?? record.prompt ?? record);
 
   for (const node of nodes) {
     const classType = String(node?.type ?? node?.class_type ?? "").toLowerCase();
     if (!isDurationProviderNode(classType)) continue;
     const widgets = Array.isArray(node?.widgets_values) ? node.widgets_values : [];
-    const match = widgets.find((value: unknown) => typeof value === "number" && Number.isInteger(value) && supportedDurations.includes(value));
+    const match = widgets.find(
+      (value: unknown) => typeof value === "number" && Number.isInteger(value) && supportedDurations.includes(value),
+    );
     if (typeof match === "number") return match;
   }
 
@@ -501,22 +510,20 @@ function inferDefaultDurationSeconds(workflow: unknown, supportedDurations: numb
 }
 
 function isDurationProviderNode(classType: string) {
-  return classType.includes("veo3")
-    || classType.includes("bytedance2")
-    || classType.includes("klingfirstlastframenode")
-    || classType.includes("klingimagetovideowithaudio")
-    || classType.includes("klingvideonode");
+  return (
+    classType.includes("veo3") ||
+    classType.includes("bytedance2") ||
+    classType.includes("klingfirstlastframenode") ||
+    classType.includes("klingimagetovideowithaudio") ||
+    classType.includes("klingvideonode")
+  );
 }
 
 function workflowClassTypes(workflow: unknown) {
   if (!workflow || typeof workflow !== "object") return [];
   const record = workflow as Record<string, any>;
-  const nodes = Array.isArray(record.nodes)
-    ? record.nodes
-    : Object.values(record.output ?? record.prompt ?? record);
-  return nodes
-    .map((node) => String(node?.type ?? node?.class_type ?? "").toLowerCase())
-    .filter(Boolean);
+  const nodes = Array.isArray(record.nodes) ? record.nodes : Object.values(record.output ?? record.prompt ?? record);
+  return nodes.map((node) => String(node?.type ?? node?.class_type ?? "").toLowerCase()).filter(Boolean);
 }
 
 function range(min: number, max: number) {
@@ -527,9 +534,22 @@ function inferCategory(lowerPath: string, file: string): ModelCategory {
   const lowerFile = file.toLowerCase();
   if (lowerPath.includes("flf2v")) return "first_last_frame_to_video";
   if (lowerPath.includes("i2v")) return "image_to_video";
-  if (lowerPath.includes("video_editing") || lowerPath.includes("video_edit") || lowerFile.includes("video edit") || lowerFile.includes("video_edit") || lowerFile.includes("r2v")) return "video_editing";
+  if (
+    lowerPath.includes("video_editing") ||
+    lowerPath.includes("video_edit") ||
+    lowerFile.includes("video edit") ||
+    lowerFile.includes("video_edit") ||
+    lowerFile.includes("r2v")
+  )
+    return "video_editing";
   if (lowerFile.includes("upscale") || lowerFile.includes("enhance")) return "image_upscaling";
-  if (lowerPath.includes("image_editing") || lowerFile.includes("i2i") || lowerFile.includes("banana") || lowerFile.includes("transfer")) return "image_editing";
+  if (
+    lowerPath.includes("image_editing") ||
+    lowerFile.includes("i2i") ||
+    lowerFile.includes("banana") ||
+    lowerFile.includes("transfer")
+  )
+    return "image_editing";
   return "image_generation";
 }
 
@@ -559,10 +579,12 @@ function inferRequiredInputs(category: ModelCategory, workflowText: string, sour
 
 function isPromptOptionalWorkflow(source: string) {
   const key = source.toLowerCase();
-  return key.includes("ref_transfer_gpt2")
-    || key.includes("ref transfer gpt2")
-    || key.includes("exteriorgrid")
-    || key.includes("exterior grid");
+  return (
+    key.includes("ref_transfer_gpt2") ||
+    key.includes("ref transfer gpt2") ||
+    key.includes("exteriorgrid") ||
+    key.includes("exterior grid")
+  );
 }
 
 function toApiPrompt(workflow: unknown, objectInfo: Record<string, any> = {}): Record<string, any> {
@@ -624,7 +646,7 @@ function expandSubgraphNode(
   const outputOrigins = new Map<number, { fromNode: string; fromSlot: number }>();
 
   const parentInputLinks = Array.isArray(parentNode.inputs)
-    ? parentNode.inputs.map((input: any) => input?.link == null ? undefined : parentLinks.get(Number(input.link)))
+    ? parentNode.inputs.map((input: any) => (input?.link == null ? undefined : parentLinks.get(Number(input.link))))
     : [];
 
   for (const link of Array.isArray(subgraph.links) ? subgraph.links : []) {
@@ -694,7 +716,9 @@ function pruneUnavailableNodes(prompt: Record<string, any>, objectInfo: Record<s
 
       const classType = String(node?.class_type ?? "");
       const classIsMissing = Boolean(classType) && !availableClassTypes.has(classType);
-      const dependsOnRemovedNode = Object.values(node?.inputs ?? {}).some((value) => referencesRemovedNode(value, removedNodeIds));
+      const dependsOnRemovedNode = Object.values(node?.inputs ?? {}).some((value) =>
+        referencesRemovedNode(value, removedNodeIds),
+      );
 
       if (classIsMissing || dependsOnRemovedNode) {
         delete prompt[nodeId];
@@ -872,9 +896,9 @@ function assertUiWorkflowWidgetsSupported(workflow: unknown, workflowPath: strin
 
   if (unsupported.size) {
     throw new Error(
-      `Workflow ${path.basename(workflowPath)} uses node type(s) with widget values that have no RunPod input mapping: `
-      + `${[...unsupported].sort().join(", ")}. Add them to fallbackWidgetInputSpecs in workflowService.ts `
-      + "so their widget values are not silently dropped.",
+      `Workflow ${path.basename(workflowPath)} uses node type(s) with widget values that have no RunPod input mapping: ` +
+        `${[...unsupported].sort().join(", ")}. Add them to fallbackWidgetInputSpecs in workflowService.ts ` +
+        "so their widget values are not silently dropped.",
     );
   }
 }
@@ -898,9 +922,7 @@ function coerceWidgetValue(
 
 function dynamicComboWidgetValues(widgets: unknown[], widgetIndex: number, options: Record<string, unknown> | undefined) {
   const keyValue = widgets[widgetIndex];
-  const key = typeof keyValue === "string" && keyValue.trim()
-    ? keyValue
-    : firstDynamicComboOptionKey(options) ?? "";
+  const key = typeof keyValue === "string" && keyValue.trim() ? keyValue : (firstDynamicComboOptionKey(options) ?? "");
   const nestedNames = dynamicComboNestedInputNames(options, key);
   const nestedValues = Object.fromEntries(
     nestedNames.map((name, index) => {
@@ -916,7 +938,7 @@ function dynamicComboWidgetValues(widgets: unknown[], widgetIndex: number, optio
 }
 
 function widgetSpan(inputType: unknown, options: Record<string, unknown> | undefined) {
-  const controlOffset = Boolean(options?.control_after_generate) ? 1 : 0;
+  const controlOffset = options?.control_after_generate ? 1 : 0;
   if (inputType === "COMFY_DYNAMICCOMBO_V3") {
     return 1 + dynamicComboNestedWidgetCount(options);
   }
@@ -924,12 +946,12 @@ function widgetSpan(inputType: unknown, options: Record<string, unknown> | undef
 }
 
 function firstDynamicComboOptionKey(options: Record<string, unknown> | undefined) {
-  const option = Array.isArray(options?.options) ? options.options[0] as Record<string, unknown> | undefined : undefined;
+  const option = Array.isArray(options?.options) ? (options.options[0] as Record<string, unknown> | undefined) : undefined;
   return typeof option?.key === "string" ? option.key : undefined;
 }
 
 function dynamicComboNestedWidgetCount(options: Record<string, unknown> | undefined) {
-  const option = Array.isArray(options?.options) ? options.options[0] as Record<string, unknown> | undefined : undefined;
+  const option = Array.isArray(options?.options) ? (options.options[0] as Record<string, unknown> | undefined) : undefined;
   const required = nestedRequiredInputs(option);
   return Object.keys(required).length;
 }
@@ -941,13 +963,14 @@ function dynamicComboNestedInputNames(options: Record<string, unknown> | undefin
 function dynamicComboNestedDefault(options: Record<string, unknown> | undefined, key: string, name: string) {
   const config = dynamicComboNestedRequiredInputs(options, key)[name];
   return Array.isArray(config) && typeof config[1] === "object" && config[1]
-    ? (config[1] as Record<string, unknown>).default ?? ""
+    ? ((config[1] as Record<string, unknown>).default ?? "")
     : "";
 }
 
 function dynamicComboNestedRequiredInputs(options: Record<string, unknown> | undefined, key: string) {
   const option = Array.isArray(options?.options)
-    ? options.options.find((item) => typeof item === "object" && item && (item as Record<string, unknown>).key === key) as Record<string, unknown> | undefined
+    ? (options.options.find((item) => typeof item === "object" && item && (item as Record<string, unknown>).key === key) as
+        Record<string, unknown> | undefined)
     : undefined;
   return nestedRequiredInputs(option);
 }
@@ -981,8 +1004,7 @@ function injectInputs(
   const loadImageNodeIds = orderedLoadImageNodeEntries(prompt)
     .map((entry) => entry.id)
     .filter((id): id is string => Boolean(id));
-  const imageBatchNodeId = Object.entries(prompt)
-    .find(([, node]) => isImageBatchClass(node?.class_type))?.[0];
+  const imageBatchNodeId = Object.entries(prompt).find(([, node]) => isImageBatchClass(node?.class_type))?.[0];
 
   for (const [nodeId, node] of Object.entries(prompt)) {
     const inputs = (node.inputs ??= {});
@@ -1006,7 +1028,8 @@ function injectInputs(
       if (resolution && lowerKey === "model.resolution") inputs[key] = resolutionWidgetLabel(resolution.label ?? "1080p");
       if (resolution && isGptImageNode(node) && lowerKey === "size") inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
       if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) inputs[key] = durationSeconds;
-      if (lowerKey.includes("project_name")) inputs[key] = coerceProjectName(projectName, String(node.class_type ?? ""), objectInfo);
+      if (lowerKey.includes("project_name"))
+        inputs[key] = coerceProjectName(projectName, String(node.class_type ?? ""), objectInfo);
       if (isNumberedImageInput(lowerKey) && typeof inputs[key] === "string") {
         const imageIndex = Number(lowerKey.match(/image_(\d+)/)?.[1] ?? 1) - 1;
         if (images[imageIndex]) inputs[key] = images[imageIndex];
@@ -1030,8 +1053,9 @@ function injectInputs(
       }
     }
     if (isLoadImageClass(classType)) {
-      const key = Object.keys(inputs).find((item) => item.toLowerCase() === "image" && typeof inputs[item] === "string")
-        ?? Object.keys(inputs).find((item) => item.toLowerCase().includes("image") && typeof inputs[item] === "string");
+      const key =
+        Object.keys(inputs).find((item) => item.toLowerCase() === "image" && typeof inputs[item] === "string") ??
+        Object.keys(inputs).find((item) => item.toLowerCase().includes("image") && typeof inputs[item] === "string");
       const imageIndex = loadImageNodeIds.indexOf(nodeId);
       if (key && imageIndex >= 0 && images[imageIndex]) {
         inputs[key] = images[imageIndex];
@@ -1045,7 +1069,9 @@ function injectInputs(
     }
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {
-      const key = Object.keys(inputs).find((item) => isEditablePromptInput(item.toLowerCase()) && typeof inputs[item] === "string");
+      const key = Object.keys(inputs).find(
+        (item) => isEditablePromptInput(item.toLowerCase()) && typeof inputs[item] === "string",
+      );
       if (key) {
         inputs[key] = request.prompt;
       }
@@ -1059,18 +1085,15 @@ function injectInputs(
   void model;
 }
 
-function applyTextOnlyImageWorkflowMode(
-  prompt: Record<string, any>,
-  model: WorkflowModel,
-  request: CreateJobRequest,
-) {
+function applyTextOnlyImageWorkflowMode(prompt: Record<string, any>, model: WorkflowModel, request: CreateJobRequest) {
   if (!supportsTextOnlyImageWorkflow(model) || (request.inputImages?.length ?? 0) > 0) return;
 
   for (const node of Object.values(prompt)) {
     if (!isTextOnlyCapableGenerationNode(node)) continue;
-    const inputs = node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
-      ? node.inputs as Record<string, any>
-      : undefined;
+    const inputs =
+      node.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs)
+        ? (node.inputs as Record<string, any>)
+        : undefined;
     if (!inputs) continue;
     delete inputs.image;
     delete inputs.images;
@@ -1093,21 +1116,17 @@ function isTextOnlyCapableGenerationNode(node: any) {
   return isNanoBananaNode(node) || isGptImageNode(node);
 }
 
-function applyImageOutputCountOptions(
-  prompt: Record<string, any>,
-  model: WorkflowModel,
-  request: CreateJobRequest,
-) {
+function applyImageOutputCountOptions(prompt: Record<string, any>, model: WorkflowModel, request: CreateJobRequest) {
   const isNano = isNanoBananaModel(model);
   const isGpt = isGptImageModel(model);
   if (!isNano && !isGpt) return;
 
-  const generationEntry = Object.entries(prompt).find(([, node]) => isNano ? isNanoBananaNode(node) : isGptImageNode(node));
+  const generationEntry = Object.entries(prompt).find(([, node]) => (isNano ? isNanoBananaNode(node) : isGptImageNode(node)));
   if (!generationEntry) return;
 
   const [generationNodeId, generationNode] = generationEntry;
   const firstSeed = randomSeed();
-  setSeedInput(generationNode.inputs ??= {}, firstSeed);
+  setSeedInput((generationNode.inputs ??= {}), firstSeed);
   if (isGpt) normalizeGptImageInputs(generationNode.inputs);
 
   const outputCount = isNano ? request.workflowOptions?.nanoBanana?.outputCount : request.workflowOptions?.gptImage?.outputCount;
@@ -1119,7 +1138,7 @@ function applyImageOutputCountOptions(
   const secondGenerationNode = cloneJson(generationNode);
   const secondSeed = offsetSeed(firstSeed);
 
-  setSeedInput(secondGenerationNode.inputs ??= {}, secondSeed);
+  setSeedInput((secondGenerationNode.inputs ??= {}), secondSeed);
   if (isGpt) normalizeGptImageInputs(secondGenerationNode.inputs);
   if (secondGenerationNode._meta && typeof secondGenerationNode._meta === "object") {
     secondGenerationNode._meta.title = `${String(secondGenerationNode._meta.title ?? (isNano ? "Nano Banana 2" : "GPT Image"))} Variation 2`;
@@ -1165,16 +1184,14 @@ function normalizeNanoBananaAspectRatio(value: unknown) {
   return typeof value === "string" && nanoBananaAspectRatioOptions.has(value) ? value : undefined;
 }
 
-function applyNanoBananaAspectRatioInput(
-  inputs: Record<string, any>,
-  workflowOptions: CreateJobRequest["workflowOptions"],
-) {
+function applyNanoBananaAspectRatioInput(inputs: Record<string, any>, workflowOptions: CreateJobRequest["workflowOptions"]) {
   const aspectRatio = normalizeNanoBananaAspectRatio(workflowOptions?.nanoBanana?.aspectRatio);
   if (!aspectRatio) return;
-  const key = Object.keys(inputs).find((item) => {
-    const lower = item.toLowerCase();
-    return lower === "aspect_ratio" || lower === "aspect.ratio" || lower === "aspect ratio";
-  }) ?? "aspect_ratio";
+  const key =
+    Object.keys(inputs).find((item) => {
+      const lower = item.toLowerCase();
+      return lower === "aspect_ratio" || lower === "aspect.ratio" || lower === "aspect ratio";
+    }) ?? "aspect_ratio";
   inputs[key] = aspectRatio;
 }
 
@@ -1194,9 +1211,10 @@ function nodeSavesFrom(node: any, nodeId: string) {
 }
 
 function setSeedInput(inputs: Record<string, any>, seed: number) {
-  const seedKey = Object.keys(inputs).find((key) => key.toLowerCase() === "seed")
-    ?? Object.keys(inputs).find((key) => key.toLowerCase().includes("seed"))
-    ?? "seed";
+  const seedKey =
+    Object.keys(inputs).find((key) => key.toLowerCase() === "seed") ??
+    Object.keys(inputs).find((key) => key.toLowerCase().includes("seed")) ??
+    "seed";
   inputs[seedKey] = seed;
 }
 
@@ -1206,8 +1224,9 @@ function randomizeApiVideoSeed(model: WorkflowModel, classType: string, inputs: 
   if (model.outputType !== "video") return;
   if (!modelKey.includes("kling") && !nodeKey.includes("kling")) return;
 
-  const seedKey = Object.keys(inputs).find((key) => key.toLowerCase() === "seed")
-    ?? Object.keys(inputs).find((key) => key.toLowerCase().includes("seed"));
+  const seedKey =
+    Object.keys(inputs).find((key) => key.toLowerCase() === "seed") ??
+    Object.keys(inputs).find((key) => key.toLowerCase().includes("seed"));
   if (!seedKey) return;
   inputs[seedKey] = randomSeed();
 }
@@ -1234,7 +1253,12 @@ function offsetSeed(seed: number) {
 }
 
 function nextPromptNodeId(prompt: Record<string, any>, reserved = new Set<string>()) {
-  const maxId = Math.max(0, ...Object.keys(prompt).map((key) => Number(key)).filter((value) => Number.isFinite(value)));
+  const maxId = Math.max(
+    0,
+    ...Object.keys(prompt)
+      .map((key) => Number(key))
+      .filter((value) => Number.isFinite(value)),
+  );
   let next = maxId + 1;
   while (prompt[String(next)] || reserved.has(String(next))) next += 1;
   return String(next);
@@ -1296,7 +1320,9 @@ function setNumberedSaveInput(inputs: Record<string, any>, name: "camera_number"
 }
 
 function normalizeSaveNumber(value: string | undefined) {
-  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 4);
+  const digits = String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
   return (digits || defaultSaveNumber).padStart(4, "0");
 }
 
@@ -1331,7 +1357,9 @@ function pruneNumberedInputs(inputs: Record<string, any>, pattern: RegExp, maxIn
 }
 
 function isLoadImageClass(classType: unknown) {
-  return String(classType ?? "").toLowerCase().includes("loadimage");
+  return String(classType ?? "")
+    .toLowerCase()
+    .includes("loadimage");
 }
 
 function isImageBatchClass(classType: unknown) {
@@ -1351,15 +1379,19 @@ function numberedReferenceImageInputIndex(lowerKey: string) {
 function isEditablePromptInput(lowerKey: string) {
   if (lowerKey.includes("negative")) return false;
   const leafKey = lowerKey.split(".").at(-1) ?? lowerKey;
-  return ["prompt", "text", "positive", "positive_prompt", "prompt_text", "user_prompt"].includes(leafKey)
-    || /^storyboard_\d+_prompt$/.test(leafKey);
+  return (
+    ["prompt", "text", "positive", "positive_prompt", "prompt_text", "user_prompt"].includes(leafKey) ||
+    /^storyboard_\d+_prompt$/.test(leafKey)
+  );
 }
 
 function isDurationInput(lowerKey: string) {
   const leafKey = lowerKey.split(".").at(-1) ?? lowerKey;
-  return ["duration", "duration_seconds", "video_duration", "length_seconds"].includes(leafKey)
-    || /^storyboard_\d+_duration$/.test(leafKey)
-    || (lowerKey.includes("duration") && lowerKey.includes("second"));
+  return (
+    ["duration", "duration_seconds", "video_duration", "length_seconds"].includes(leafKey) ||
+    /^storyboard_\d+_duration$/.test(leafKey) ||
+    (lowerKey.includes("duration") && lowerKey.includes("second"))
+  );
 }
 
 function isScalarInputValue(value: unknown) {
@@ -1371,14 +1403,11 @@ function normalizeDurationSeconds(value: number | undefined, model: WorkflowMode
   if (!options.length) return undefined;
   if (typeof value === "number" && options.includes(value)) return value;
 
-  const fallback = model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds)
-    ? model.defaultDurationSeconds
-    : options[0];
+  const fallback =
+    model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
 
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return options.reduce((closest, option) => (
-    Math.abs(option - value) < Math.abs(closest - value) ? option : closest
-  ), fallback);
+  return options.reduce((closest, option) => (Math.abs(option - value) < Math.abs(closest - value) ? option : closest), fallback);
 }
 
 function injectDurationInput(
@@ -1398,14 +1427,6 @@ function injectDurationInput(
     if ("duration" in required || classType.toLowerCase().includes("bytedance2")) {
       required.duration = durationSeconds;
     }
-  }
-}
-
-function setNestedModelResolution(modelInput: Record<string, any>, label: string | undefined) {
-  if (!label) return;
-  const required = ((modelInput.inputs ??= {}).required ??= {});
-  if ("resolution" in required) {
-    required.resolution = resolutionWidgetLabel(label);
   }
 }
 
@@ -1434,12 +1455,7 @@ function firstInputName(classType: string, objectInfo: Record<string, any>, name
   return names.find((name) => available.has(name));
 }
 
-function sanitizeInputs(
-  inputs: Record<string, any>,
-  classType: string,
-  projectName: string,
-  objectInfo: Record<string, any>,
-) {
+function sanitizeInputs(inputs: Record<string, any>, classType: string, projectName: string, objectInfo: Record<string, any>) {
   const specs = allInputSpecs(classType, objectInfo);
   for (const [name, spec] of Object.entries(specs)) {
     if (!(name in inputs)) {
@@ -1458,7 +1474,7 @@ function sanitizeInputs(
 
     if (spec.inputType === "INT" || spec.inputType === "FLOAT") {
       const numericValue = typeof inputs[name] === "number" ? inputs[name] : Number(inputs[name]);
-      inputs[name] = Number.isFinite(numericValue) ? numericValue : spec.defaultValue ?? 0;
+      inputs[name] = Number.isFinite(numericValue) ? numericValue : (spec.defaultValue ?? 0);
       if (spec.inputType === "INT") inputs[name] = Math.trunc(inputs[name]);
       continue;
     }
@@ -1516,26 +1532,30 @@ function applyMappedInputs(
   endFrame?: string,
 ) {
   if (mapping.promptNodeIds?.includes(nodeId) && request.prompt) setFirstStringInput(inputs, request.prompt, "text");
-  if (mapping.imageInputNodeIds?.includes(nodeId) && request.inputImages?.[0]) setFirstStringInput(inputs, request.inputImages[0], "image");
+  if (mapping.imageInputNodeIds?.includes(nodeId) && request.inputImages?.[0])
+    setFirstStringInput(inputs, request.inputImages[0], "image");
   if (mapping.startFrameNodeIds?.includes(nodeId) && startFrame) setFirstStringInput(inputs, startFrame, "image");
   if (mapping.endFrameNodeIds?.includes(nodeId) && endFrame) setFirstStringInput(inputs, endFrame, "image");
   if (mapping.videoInputNodeIds?.includes(nodeId) && request.inputVideo) setFirstStringInput(inputs, request.inputVideo, "video");
   if (mapping.widthNodeIds?.includes(nodeId) && request.resolution) setNumberInput(inputs, request.resolution.width, "width");
   if (mapping.heightNodeIds?.includes(nodeId) && request.resolution) setNumberInput(inputs, request.resolution.height, "height");
-  if (mapping.durationNodeIds?.includes(nodeId) && request.durationSeconds) setNumberInput(inputs, request.durationSeconds, "duration");
+  if (mapping.durationNodeIds?.includes(nodeId) && request.durationSeconds)
+    setNumberInput(inputs, request.durationSeconds, "duration");
   if (mapping.seedNodeIds?.includes(nodeId)) setNumberInput(inputs, Math.floor(Math.random() * 1_000_000_000), "seed");
   if (mapping.projectNameNodeIds?.includes(nodeId)) setFirstStringInput(inputs, projectName, "project_name");
 }
 
 function setFirstStringInput(inputs: Record<string, any>, value: string, preferred: string) {
-  const key = Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "string")
-    ?? Object.keys(inputs).find((item) => typeof inputs[item] === "string")
-    ?? preferred;
+  const key =
+    Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "string") ??
+    Object.keys(inputs).find((item) => typeof inputs[item] === "string") ??
+    preferred;
   inputs[key] = value;
 }
 
 function setNumberInput(inputs: Record<string, any>, value: number, preferred: string) {
-  const key = Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "number") ?? preferred;
+  const key =
+    Object.keys(inputs).find((item) => item.toLowerCase().includes(preferred) && typeof inputs[item] === "number") ?? preferred;
   inputs[key] = value;
 }
 
@@ -1545,5 +1565,8 @@ async function readMappings() {
 }
 
 function slug(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }

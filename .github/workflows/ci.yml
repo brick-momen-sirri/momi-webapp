@@ -23,6 +23,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Formatting and lint run before the slower type-check and test steps, so a
+      # style-only failure reports in seconds instead of minutes.
+      - name: Format check
+        run: pnpm run format:check
+
+      # --max-warnings is pinned to the existing warning backlog (see the
+      # comment:lint note in package.json), so this fails on any NEW warning.
+      - name: Lint
+        run: pnpm run lint
+
       - name: Backend type-check
         run: pnpm --filter momi-animation-backend exec tsc --noEmit
 
