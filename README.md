@@ -29,14 +29,15 @@ fork owning job dispatch, plus clustered `momi-api` workers serving HTTP. See
 
 ## Layout
 
-| Path              | What's in it                                                                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/`            | React frontend. `App.tsx` holds most app state; `services/backendApi.ts` is the only place that talks to the API.                            |
-| `backend/src/`    | Express backend. `index.ts` registers the routes, `jobQueue.ts` owns the job lifecycle, `workflowService.ts` maps models onto workflow JSON. |
-| `workflow/`       | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model.              |
-| `backend/config/` | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected.                                                              |
-| `backend/docs/`   | Runbooks: DR, topology split, load test, singleton audit.                                                                                    |
-| `scripts/`        | Windows log-on autostart for the app and the local Credit Portal ComfyUI.                                                                    |
+| Path                  | What's in it                                                                                                                                                                                                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`                | React frontend. `App.tsx` holds most app state; `services/backendApi.ts` is the only place that talks to the API.                                                                                                                                                                                                                        |
+| `backend/src/`        | Express backend. `index.ts` is wiring and lifecycle only; `jobQueue.ts` owns the job lifecycle, `workflowService.ts` maps models onto workflow JSON.                                                                                                                                                                                     |
+| `backend/src/routes/` | One module per route group, each exporting a Router. **Mount order in `index.ts` is a correctness constraint** — three routers sit above the session middleware (ops has its own guard, RunPod input links carry a signed token, sign-in cannot require a session) and the rest below it. Read the comments there before moving a mount. |
+| `workflow/`           | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model.                                                                                                                                                                                                          |
+| `backend/config/`     | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected.                                                                                                                                                                                                                                                          |
+| `backend/docs/`       | Runbooks: DR, topology split, load test, singleton audit.                                                                                                                                                                                                                                                                                |
+| `scripts/`            | Windows log-on autostart for the app and the local Credit Portal ComfyUI.                                                                                                                                                                                                                                                                |
 
 ## Prerequisites
 
@@ -100,7 +101,7 @@ pnpm --filter momi-animation-backend run test
 pnpm --filter momi-animation-backend exec tsc --noEmit
 ```
 
-The backend suite is ~270 tests, including integration tests for the parts that
+The backend suite is ~280 tests, including integration tests for the parts that
 are hard to reason about: dispatcher failover and lease handoff, SQLite backup
 and restore drills, config-split guards. New backend modules are expected to
 land with a matching `*.test.ts`, registered in the `test` script in
