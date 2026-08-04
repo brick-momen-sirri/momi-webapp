@@ -1,5 +1,6 @@
 import type { UploadedImage } from "../types";
 import { getStoredAuthToken } from "./backendApi";
+import { decodeImageBlob } from "./imageBlobDecoder";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const PROMPT_IMAGE_MAX_DIMENSION = 1536;
@@ -310,40 +311,6 @@ async function compressImageForPrompt(blob: Blob) {
   } finally {
     decoded.close();
   }
-}
-
-async function decodeImageBlob(
-  blob: Blob,
-): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
-  if ("createImageBitmap" in window) {
-    try {
-      const bitmap = await createImageBitmap(blob);
-      return {
-        source: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        close: () => bitmap.close(),
-      };
-    } catch {
-      // Fall back to an HTMLImageElement below.
-    }
-  }
-
-  const objectUrl = URL.createObjectURL(blob);
-  const element = new Image();
-  element.decoding = "async";
-  element.src = objectUrl;
-  await new Promise<void>((resolve, reject) => {
-    element.onload = () => resolve();
-    element.onerror = () => reject(new Error("Could not decode uploaded image."));
-  });
-
-  return {
-    source: element,
-    width: element.naturalWidth,
-    height: element.naturalHeight,
-    close: () => URL.revokeObjectURL(objectUrl),
-  };
 }
 
 async function renderPromptImage(
