@@ -25,7 +25,30 @@ Default API URL:
 http://127.0.0.1:3333
 ```
 
-The frontend reads `VITE_API_BASE_URL` and falls back to `http://127.0.0.1:3333`.
+In development, Vite proxies `/api` to this URL. In production, the dedicated
+`momi-web` process serves `dist/` on `:8190` and proxies only allowed API routes
+to this loopback listener.
+
+## Production web gateway
+
+From the repository root:
+
+```powershell
+pnpm run build:production
+pnpm run start:production
+```
+
+The Vite CLI is never started by the PM2 ecosystem. `frontendServer.ts` serves
+hashed assets with immutable one-year caching, serves `index.html` with
+`no-cache`, compresses suitable responses, applies browser security headers,
+and falls back to the SPA for non-file routes. `/healthz` is the gateway health
+check. `/api/health`, `/api/ops-config`, `/api/alerts/recent`, and
+`/api/backup-status` are blocked before proxying so the LAN listener cannot
+accidentally publish operations data.
+
+Gateway environment variables are `FRONTEND_HOST` (default `0.0.0.0`),
+`FRONTEND_PORT` (`8190`), `FRONTEND_DIST_PATH` (repository `dist/`), and
+`FRONTEND_API_TARGET` (`http://127.0.0.1:3333`). Keep the API target loopback.
 
 ## RunPod Serverless ComfyUI
 
@@ -56,10 +79,11 @@ Serverless credit usage is stored on each job and, when a local Credit Tracker i
 
 ## Autorestart
 
-Build the backend, then run it through PM2 using `backend/ecosystem.config.cjs`:
+Build the complete production artifact, then run it through PM2 using
+`backend/ecosystem.config.cjs`:
 
 ```powershell
-pnpm --filter momi-animation-backend build
+pnpm run build:production
 pm2 start backend\ecosystem.config.cjs
 pm2 save
 ```
@@ -111,6 +135,23 @@ pm2 delete momi-api momi-dispatcher
 pm2 start backend\ecosystem.config.cjs --update-env
 pm2 save
 ```
+
+For an application rollback, first stop new deployments, restore the previous
+known-good Git revision (or release directory), and run its build before the
+reload; do not mix an old `dist/` with a new backend build:
+
+```powershell
+git switch <previous-known-good-revision>
+pnpm install --frozen-lockfile
+pnpm run build:production
+pm2 startOrReload backend\ecosystem.config.cjs --update-env
+pm2 save
+```
+
+If the failed release changed only topology, keep `MOMI_SHARED_STATE=true` and
+use the explicit process-name rollback above. Do not roll SQLite files backward
+unless the DR runbook calls for it; schema and live job rows are shared state,
+not release artifacts.
 
 ## Local ComfyUI Development
 

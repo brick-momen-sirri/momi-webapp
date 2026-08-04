@@ -1,0 +1,70 @@
+import type { ModelType } from "../types";
+
+// Offline metadata only; projects, users, jobs, credits, and session state always
+// come from the backend. The backend catalogue replaces these entries after boot.
+export const fallbackModelCatalog: ModelType[] = [
+  {
+    id: "image_to_image",
+    label: "Image to Image",
+    description: "Transform an uploaded reference into a new still.",
+    category: "image",
+    cost: 4,
+    estimatedTime: "45 sec",
+    requiresLandscape: false,
+  },
+  {
+    id: "text_to_image",
+    label: "Text to Image",
+    description: "Generate a still from prompt text only.",
+    category: "image",
+    cost: 3,
+    estimatedTime: "35 sec",
+  },
+  {
+    id: "start_end_frames",
+    label: "Start & End Frames",
+    description: "Animate between two locked 16:9 frames.",
+    category: "video",
+    cost: 18,
+    estimatedTime: "2.6 min",
+    requiresTwoImages: true,
+    requiresLandscape: true,
+    supportsAudio: true,
+  },
+  {
+    id: "video_generation",
+    label: "Video Generation",
+    description: "Create a short cinematic video from an image.",
+    category: "video",
+    cost: 12,
+    estimatedTime: "1.8 min",
+    requiresLandscape: true,
+    supportsAudio: true,
+  },
+  {
+    id: "creative_upscaler",
+    label: "Creative Upscaler",
+    description: "Upscale and add guided detail to an existing frame.",
+    category: "upscale",
+    cost: 8,
+    estimatedTime: "1.2 min",
+  },
+  {
+    id: "magnific_upscale",
+    label: "Magnific / Upscale model",
+    description: "High-detail upscale with creativity controls.",
+    category: "upscale",
+    cost: 10,
+    estimatedTime: "1.5 min",
+  },
+  {
+    id: "google_veo",
+    label: "Google Veo / third-party video model",
+    description: "Third-party image-to-video with strict 16:9 input.",
+    category: "video",
+    cost: 24,
+    estimatedTime: "2.6 min",
+    requiresLandscape: true,
+    supportsAudio: true,
+  },
+];

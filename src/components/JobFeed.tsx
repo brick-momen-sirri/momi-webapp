@@ -162,16 +162,6 @@ export function JobFeed({
     });
     const sortedJobs = [...filteredJobs].sort((a, b) => compareJobs(a, b, sortMode));
 
-    if (import.meta.env.DEV) {
-      console.debug("[ProjectFilter]", {
-        selectedProjectId,
-        selectedFolderId,
-        totalJobs: jobs.length,
-        jobsForSelectedProject: projectJobs.length,
-        visibleJobs: sortedJobs.length,
-      });
-    }
-
     return sortedJobs;
   }, [
     currentUserId,

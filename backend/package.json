@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "comment": "Runs on Node 24 in production (pm2). better-sqlite3 is a native module built for that ABI; if you change the Node major version, run `pnpm rebuild better-sqlite3` or the native binding will fail to load (ERR_DLOPEN_FAILED / NODE_MODULE_VERSION mismatch).",
+  "comment:coverage": "The --check-coverage thresholds in test:coverage are a regression ratchet, not a target. Measured baseline is 64.68/72.71/75.28/64.68; the gates sit ~3 points below it because c8 output drifts by hundredths between runs and a gate inside that drift fails CI on unrelated changes. Raise them deliberately as coverage improves.",
   "engines": {
     "node": ">=24.0.0 <25.0.0"
   },
@@ -11,13 +12,17 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:web": "node dist/frontendServer.js",
     "test:topology": "pnpm run build && tsx src/topologyLoadTest.ts",
     "export:job-store": "tsx src/exportSqliteJobStore.ts",
     "export:app-state": "tsx src/exportSqliteAuthStore.ts",
-    "test": "tsx --test src/processRole.test.ts src/observabilityMetrics.test.ts src/healthWatchdog.test.ts src/alertHistory.test.ts src/corsOrigin.test.ts src/jobPermissions.test.ts src/httpMedia.test.ts src/httpQuery.test.ts src/creditDashboardService.test.ts src/jobFilters.test.ts src/sessionCookie.test.ts src/promptFallback.test.ts src/observabilitySnapshot.test.ts src/creditAnomalies.test.ts src/mediaAccessToken.test.ts src/authQueryTokenRejection.integration.test.ts src/opsAccessGuard.test.ts src/opsAccessConfig.integration.test.ts src/opsAccessUnreachable.integration.test.ts src/loginRateLimiter.test.ts src/sqliteBackupService.test.ts src/sqliteBackupRestoreDrill.integration.test.ts src/projectFolderName.test.ts src/uploadedMediaName.test.ts src/projectMetadataService.test.ts src/resultMoveService.test.ts src/runpodInputUrlService.test.ts src/runpodDebugLogger.test.ts src/runpodActivityTracker.test.ts src/runpodComfyService.test.ts src/runpodService.test.ts src/runpodVideoPreprocessService.test.ts src/seedancePromptWorkflowService.test.ts src/klingPromptWorkflowService.test.ts src/serverlessArtifactService.test.ts src/mediaResolutionService.test.ts src/creditTrackerSyncService.test.ts src/creditUsageAccounting.test.ts src/storageService.test.ts src/thumbnailService.test.ts src/sqliteJobStore.test.ts src/sqliteAuthStore.test.ts src/sqliteProjectStore.test.ts src/sqliteMediaIndexStore.test.ts src/authServiceSqlite.integration.test.ts src/projectServiceSqlite.integration.test.ts src/mediaServiceDispatcher.integration.test.ts src/mediaServiceApiRole.integration.test.ts src/configSplitAuthGuard.integration.test.ts src/configSplitLocalComfyGuard.integration.test.ts src/configSplitBalanceGuard.integration.test.ts src/configSplitSubmissionGuard.integration.test.ts src/exportSqliteJobStore.test.ts src/exportSqliteAuthStore.test.ts src/workflowService.test.ts src/jobReadCache.test.ts src/jobQueue.test.ts src/jobQueueSqlite.integration.test.ts src/jobQueueRowLevel.integration.test.ts src/jobQueueApiRole.integration.test.ts src/jobQueueDataVersion.integration.test.ts src/jobQueueDispatcher.integration.test.ts src/jobQueueDispatcherFailover.integration.test.ts src/jobQueueDispatcherLeaseHandoff.integration.test.ts src/creditEstimator.test.ts src/podStatusService.test.ts"
+    "test": "node scripts/runBackendTests.mjs",
+    "test:list": "node scripts/runBackendTests.mjs --list",
+    "test:coverage": "c8 --all --src src --include \"src/**/*.ts\" --exclude \"src/**/*.test.ts\" --exclude \"src/**/*.integration.test.ts\" --exclude \"src/topologyLoadTest.ts\" --reporter text-summary --reporter json-summary --reporter lcov --reporter html --report-dir coverage/backend --check-coverage --statements 61 --branches 69 --functions 72 --lines 61 node scripts/runBackendTests.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
+    "compression": "1.8.1",
     "cors": "^2.8.5",
     "express": "^4.18.3",
     "pm2": "^7.0.3",
@@ -25,6 +30,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/compression": "1.8.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",

@@ -1,0 +1,206 @@
+import type { Dispatch, SetStateAction } from "react";
+
+import {
+  createBackendProjectFolder,
+  createBackendProject,
+  deleteBackendProjectFolder,
+  renameBackendProjectFolder,
+  updateBackendProject,
+  type AuthUser,
+} from "../../services/backendApi";
+import type { Project } from "../../types";
+import { createClientId } from "../../utils/id";
+import { slugify } from "../workspace/workspaceUtils";
+
+export type ConfirmDialogState = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  tone?: "danger" | "default";
+  onConfirm: () => void;
+};
+
+type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
+
+type ProjectActionsOptions = {
+  account: AuthUser | null;
+  backendAvailable: boolean;
+  projects: Project[];
+  setProjects: Dispatch<SetStateAction<Project[]>>;
+  setSelectedProjectId: Dispatch<SetStateAction<string>>;
+  selectedFolderId: string;
+  setSelectedFolderId: Dispatch<SetStateAction<string>>;
+  setTargetFolderId: Dispatch<SetStateAction<string>>;
+  setConfirmDialog: Dispatch<SetStateAction<ConfirmDialogState | null>>;
+  showToast: ShowToast;
+};
+
+export function useProjectActions(options: ProjectActionsOptions) {
+  const {
+    account,
+    backendAvailable,
+    projects,
+    setProjects,
+    setSelectedProjectId,
+    selectedFolderId,
+    setSelectedFolderId,
+    setTargetFolderId,
+    setConfirmDialog,
+    showToast,
+  } = options;
+
+  async function handleCreateProject(project: Project) {
+    try {
+      const created = backendAvailable ? await createBackendProject(project) : project;
+      setProjects((current) => [created, ...current]);
+      setSelectedProjectId(created.id);
+      showToast("Project created.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not create project.", "error");
+    }
+  }
+
+  async function handleUpdateProject(project: Project) {
+    try {
+      const updated = backendAvailable ? await updateBackendProject(project) : project;
+      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      showToast("Project saved.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not update project.", "error");
+    }
+  }
+
+  async function handleCreateProjectFolder(projectId: string, name: string, parentId?: string | null) {
+    try {
+      if (backendAvailable) {
+        const result = await createBackendProjectFolder(projectId, name, parentId);
+        if (result.project) {
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+        }
+        setSelectedFolderId(result.folder.folderId);
+        setTargetFolderId(result.folder.folderId);
+        showToast("Folder created.");
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const folderId = createClientId("fld_").slice(0, 12);
+      const folder = {
+        folderId,
+        parentId: parentId ?? null,
+        name: name.trim(),
+        slug: slugify(name),
+        diskName: `${folderId}_${slugify(name)}`,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: account?.id,
+        updatedBy: account?.id,
+        archived: false,
+      };
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === projectId ? { ...project, folders: [...(project.folders ?? []), folder] } : project,
+        ),
+      );
+      setSelectedFolderId(folderId);
+      setTargetFolderId(folderId);
+      showToast("Folder created.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not create folder.", "error");
+    }
+  }
+
+  async function handleRenameProjectFolder(projectId: string, folderId: string, name: string) {
+    try {
+      if (backendAvailable) {
+        const result = await renameBackendProjectFolder(projectId, folderId, name);
+        if (result.project) {
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+        }
+        showToast("Folder renamed.");
+        return;
+      }
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                folders: (project.folders ?? []).map((folder) =>
+                  folder.folderId === folderId
+                    ? {
+                        ...folder,
+                        name: name.trim(),
+                        slug: slugify(name),
+                        diskName: `${folder.folderId}_${slugify(name)}`,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : folder,
+                ),
+              }
+            : project,
+        ),
+      );
+      showToast("Folder renamed.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not rename folder.", "error");
+    }
+  }
+
+  function handleDeleteProjectFolder(projectId: string, folderId: string) {
+    const folder = projects.find((item) => item.id === projectId)?.folders?.find((item) => item.folderId === folderId);
+    if (!folder) return;
+    setConfirmDialog({
+      title: "Delete folder",
+      message: `Delete empty folder "${folder.name}"? Folders with media cannot be deleted.`,
+      confirmLabel: "Delete folder",
+      tone: "danger",
+      onConfirm: () => void performDeleteProjectFolder(projectId, folderId),
+    });
+  }
+
+  async function performDeleteProjectFolder(projectId: string, folderId: string) {
+    try {
+      if (backendAvailable) {
+        const result = await deleteBackendProjectFolder(projectId, folderId);
+        if (result.project) {
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+        }
+      } else {
+        setProjects((current) =>
+          current.map((item) =>
+            item.id === projectId
+              ? {
+                  ...item,
+                  folders: (item.folders ?? []).map((entry) =>
+                    entry.folderId === folderId ? { ...entry, archived: true } : entry,
+                  ),
+                }
+              : item,
+          ),
+        );
+      }
+      if (selectedFolderId === folderId) {
+        setSelectedFolderId("all");
+        setTargetFolderId("");
+      }
+      showToast("Folder deleted.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not delete folder.", "error");
+    }
+  }
+
+  function handleSelectFolder(folderId: string) {
+    setSelectedFolderId(folderId);
+    setTargetFolderId(folderId === "all" || folderId === "root" ? "" : folderId);
+  }
+
+  return {
+    handleCreateProject,
+    handleUpdateProject,
+    handleCreateProjectFolder,
+    handleRenameProjectFolder,
+    handleDeleteProjectFolder,
+    handleSelectFolder,
+  };
+}

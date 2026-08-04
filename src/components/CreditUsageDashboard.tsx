@@ -1,26 +1,40 @@
 import { AlertTriangle, ArrowUpDown, BarChart3, Coins, Download, Loader2, RefreshCw, Search, WalletCards, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  fetchBackendCreditDashboard,
   type BackendCreditDashboard,
-  type BackendCreditDashboardAnomaly,
-  type BackendCreditDashboardDay,
   type BackendCreditDashboardGroup,
   type BackendCreditDashboardNodeRow,
   type BackendCreditDashboardRecentJob,
 } from "../services/backendApi";
+import {
+  addDays,
+  buildChartRows,
+  buildDisplayAnomalies,
+  exportRecentCsv,
+  filterRecentJobs,
+  formatCredits,
+  formatDateTime,
+  formatDays,
+  formatDuration,
+  formatExpectedDelta,
+  formatPercent,
+  formatUsd,
+  sortRecentJobs,
+  toDateInput,
+  type ChartGroupBy,
+  type DisplayAnomaly,
+  type SortDirection,
+  type SortKey,
+  type TimePreset,
+} from "../features/credits/creditUsageDashboardUtils";
+import { useCreditDashboard } from "../features/credits/useCreditDashboard";
 
 type CreditUsageDashboardProps = {
   creditsRemaining: number;
   monthlyCreditsSpent: number;
   monthlyCreditsLabel?: string;
 };
-
-type TimePreset = "today" | "last7" | "last30" | "thisMonth" | "lastMonth" | "custom";
-type ChartGroupBy = "total" | "project" | "user" | "workflow";
-type SortKey = "timestamp" | "project" | "user" | "workflow" | "credits" | "usd" | "status" | "resolution" | "duration";
-type SortDirection = "asc" | "desc";
 
 const timeFilters: Array<{ value: TimePreset; label: string }> = [
   { value: "today", label: "Today" },
@@ -38,49 +52,16 @@ const chartGroups: Array<{ value: ChartGroupBy; label: string }> = [
   { value: "workflow", label: "Workflow" },
 ];
 
-const chartColors = ["#14b8a6", "#f97316", "#6366f1", "#e11d48", "#84cc16", "#0ea5e9", "#a855f7"];
-
 export function CreditUsageDashboard({
   creditsRemaining,
   monthlyCreditsSpent,
   monthlyCreditsLabel = "spent this month",
 }: CreditUsageDashboardProps) {
   const [open, setOpen] = useState(false);
-  const [dashboard, setDashboard] = useState<BackendCreditDashboard | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [rangePreset, setRangePreset] = useState<TimePreset>("last30");
   const [customFrom, setCustomFrom] = useState(() => toDateInput(addDays(new Date(), -29)));
   const [customTo, setCustomTo] = useState(() => toDateInput(new Date()));
-
-  // Memoised so the effect below can depend on it honestly rather than omitting it.
-  // Also a click handler for the two refresh controls, so it cannot simply be
-  // inlined into the effect.
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setDashboard(
-        await fetchBackendCreditDashboard({
-          range: rangePreset,
-          from: rangePreset === "custom" ? customFrom : undefined,
-          to: rangePreset === "custom" ? customTo : undefined,
-        }),
-      );
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load credit usage.");
-    } finally {
-      setLoading(false);
-    }
-  }, [customFrom, customTo, rangePreset]);
-
-  useEffect(() => {
-    if (!open) return;
-    // Fetching is exactly what an effect is for, and the loading flag it sets is
-    // intrinsic to the fetch rather than state that could be derived.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-    void loadDashboard();
-  }, [loadDashboard, open]);
+  const { dashboard, loading, error, reload: loadDashboard } = useCreditDashboard(open, rangePreset, customFrom, customTo);
 
   useEffect(() => {
     if (!open) return;
@@ -855,247 +836,4 @@ function EmptyRow({ colSpan, label }: { colSpan: number; label: string }) {
       </td>
     </tr>
   );
-}
-
-type DisplayAnomaly =
-  | BackendCreditDashboardAnomaly
-  | {
-      id: string;
-      type: "low_remaining";
-      severity: "warning" | "critical";
-      message: string;
-      credits: number;
-      threshold: number;
-    };
-
-function buildDisplayAnomalies(
-  anomalies: BackendCreditDashboardAnomaly[],
-  creditsRemaining: number,
-  burnRateCreditsPerDay: number,
-): DisplayAnomaly[] {
-  const output: DisplayAnomaly[] = [...anomalies];
-  const threshold = burnRateCreditsPerDay > 0 ? Math.max(100, burnRateCreditsPerDay * 3) : 100;
-  if (creditsRemaining <= threshold) {
-    output.unshift({
-      id: "low-remaining",
-      type: "low_remaining",
-      severity: creditsRemaining <= threshold / 2 ? "critical" : "warning",
-      message:
-        burnRateCreditsPerDay > 0
-          ? "Remaining credits are low compared with the current burn rate."
-          : "Remaining credits are low.",
-      credits: creditsRemaining,
-      threshold: roundCredits(threshold),
-    });
-  }
-  return output;
-}
-
-function buildChartRows(days: BackendCreditDashboardDay[], events: BackendCreditDashboardRecentJob[], groupBy: ChartGroupBy) {
-  if (groupBy === "total") {
-    return {
-      legend: [{ label: "Total", color: chartColors[0] }],
-      rows: days.map((day) => ({
-        date: day.date,
-        total: day.credits,
-        segments: day.credits > 0 ? [{ label: "Total", credits: day.credits, color: chartColors[0] }] : [],
-      })),
-    };
-  }
-
-  const totals = new Map<string, number>();
-  const byDay = new Map<string, Map<string, number>>();
-  for (const event of events) {
-    if (event.credits <= 0) continue;
-    const date = event.timestamp.slice(0, 10);
-    const label = chartLabel(event, groupBy);
-    totals.set(label, roundCredits((totals.get(label) ?? 0) + event.credits));
-    const dayMap = byDay.get(date) ?? new Map<string, number>();
-    dayMap.set(label, roundCredits((dayMap.get(label) ?? 0) + event.credits));
-    byDay.set(date, dayMap);
-  }
-
-  const topLabels = Array.from(totals.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([label]) => label);
-  const hasOther = Array.from(totals.keys()).some((label) => !topLabels.includes(label));
-  const legend = [...topLabels, ...(hasOther ? ["Other"] : [])].map((label, index) => ({
-    label,
-    color: chartColors[index % chartColors.length],
-  }));
-
-  return {
-    legend,
-    rows: days.map((day) => {
-      const dayMap = byDay.get(day.date);
-      const segments = topLabels
-        .map((label, index) => ({
-          label,
-          credits: dayMap?.get(label) ?? 0,
-          color: chartColors[index % chartColors.length],
-        }))
-        .filter((segment) => segment.credits > 0);
-      const knownCredits = segments.reduce((sum, segment) => sum + segment.credits, 0);
-      const otherCredits = Math.max(0, roundCredits(day.credits - knownCredits));
-      if (otherCredits > 0) {
-        segments.push({
-          label: "Other",
-          credits: otherCredits,
-          color: chartColors[topLabels.length % chartColors.length],
-        });
-      }
-      return { date: day.date, total: day.credits, segments };
-    }),
-  };
-}
-
-function chartLabel(event: BackendCreditDashboardRecentJob, groupBy: ChartGroupBy) {
-  if (groupBy === "project") return event.projectName || "Unknown project";
-  if (groupBy === "user") return event.userName || "Unknown user";
-  return event.modelName || "Unknown workflow";
-}
-
-function filterRecentJobs(rows: BackendCreditDashboardRecentJob[], search: string, statusFilter: string) {
-  const query = search.trim().toLowerCase();
-  return rows.filter((job) => {
-    if (statusFilter !== "all" && job.status !== statusFilter) return false;
-    if (!query) return true;
-    return [job.jobId, job.projectName, job.userName, job.modelName, job.status, job.resolution].some((value) =>
-      String(value ?? "")
-        .toLowerCase()
-        .includes(query),
-    );
-  });
-}
-
-function sortRecentJobs(rows: BackendCreditDashboardRecentJob[], sortKey: SortKey, direction: SortDirection) {
-  const sorted = [...rows].sort((a, b) => {
-    const left = recentSortValue(a, sortKey);
-    const right = recentSortValue(b, sortKey);
-    if (typeof left === "number" && typeof right === "number") return left - right;
-    return String(left).localeCompare(String(right));
-  });
-  return direction === "desc" ? sorted.reverse() : sorted;
-}
-
-function recentSortValue(job: BackendCreditDashboardRecentJob, sortKey: SortKey) {
-  if (sortKey === "timestamp") return new Date(job.timestamp).getTime() || 0;
-  if (sortKey === "project") return job.projectName;
-  if (sortKey === "user") return job.userName;
-  if (sortKey === "workflow") return job.modelName;
-  if (sortKey === "credits") return job.credits;
-  if (sortKey === "usd") return job.usd;
-  if (sortKey === "status") return job.status;
-  if (sortKey === "resolution") return job.resolution;
-  return job.runDurationSeconds ?? 0;
-}
-
-function exportRecentCsv(rows: BackendCreditDashboardRecentJob[]) {
-  const headers = [
-    "timestamp",
-    "project",
-    "user",
-    "workflow",
-    "credits",
-    "cost",
-    "status",
-    "resolution",
-    "duration_seconds",
-    "job_id",
-  ];
-  const body = rows.map((job) => [
-    job.timestamp,
-    job.projectName,
-    job.userName,
-    job.modelName,
-    job.credits,
-    job.usd,
-    job.status,
-    job.resolution,
-    job.runDurationSeconds ?? "",
-    job.jobId,
-  ]);
-  const csv = [headers, ...body].map((row) => row.map(csvCell).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `credit-events-${toDateInput(new Date())}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: unknown) {
-  const text = String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function formatCredits(value: number | undefined) {
-  if (!Number.isFinite(value)) return "0";
-  const safeValue = Number(value);
-  if (Math.abs(safeValue) >= 1000) return new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(safeValue);
-  if (Number.isInteger(safeValue)) return String(safeValue);
-  return safeValue.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function roundCredits(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function formatUsd(value: number | undefined) {
-  if (!Number.isFinite(value) || Number(value) <= 0) return "$0";
-  return `$${Number(value).toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
-}
-
-function formatPercent(value: number | undefined) {
-  if (!Number.isFinite(value)) return "0%";
-  return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;
-}
-
-function formatExpectedDelta(row: BackendCreditDashboardGroup) {
-  if (!row.expectedCredits) return "No expected price";
-  const delta = row.actualVsExpectedCredits;
-  const prefix = delta > 0 ? "+" : "";
-  return `${formatCredits(row.expectedCredits)} expected / ${prefix}${formatCredits(delta)} cr`;
-}
-
-function formatDateTime(value?: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatDuration(seconds?: number) {
-  if (!Number.isFinite(seconds) || !seconds) return "-";
-  const rounded = Math.round(seconds);
-  if (rounded < 60) return `${rounded}s`;
-  const minutes = Math.floor(rounded / 60);
-  const rest = rounded % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
-}
-
-function formatDays(days: number | null) {
-  if (!Number.isFinite(days) || days == null) return "-";
-  if (days < 1) return "<1 day";
-  if (days > 365) return "365+ days";
-  return `${Math.round(days)} days`;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function toDateInput(date: Date) {
-  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }

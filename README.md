@@ -8,36 +8,35 @@ result into the project folder structure on this host.
 ## How it fits together
 
 ```
-browser  ->  Vite dev server :8190  ->  /api proxy  ->  Express backend :3333  ->  RunPod serverless ComfyUI
-                (React 19, src/)                          (backend/src/)              (workflow/*.json)
-                                                                |
-                                                          SQLite stores
-                                                     (jobs, app state, media index)
+development: browser -> Vite/HMR :8190 -> /api proxy -> Express :3333
+production:  browser -> momi-web :8190 -> /api proxy -> Express :3333 -> RunPod
+                              |                              |
+                         built dist/                    SQLite stores
 ```
 
 Two things about this shape are worth knowing before changing anything:
 
-- **The frontend is served by the Vite dev server, not a build.** Edits under
-  `src/` are live on reload; there is no frontend deploy step. `pnpm build`
-  exists to type-check and to prove the app still compiles (CI runs it).
+- **Vite is development-only.** `pnpm dev` provides HMR and source maps. PM2
+  production runs `momi-web`, a compressed static gateway for the built `dist/`
+  assets; it proxies application APIs but blocks operational endpoints.
 - **The browser never talks to RunPod.** All provider API keys stay in the
   backend process environment. The frontend's only origin is this backend.
 
-Production on this host runs the split topology under pm2: one `momi-dispatcher`
-fork owning job dispatch, plus clustered `momi-api` workers serving HTTP. See
+Production on this host runs `momi-web` plus either the monolith or the split
+topology (one `momi-dispatcher` and clustered `momi-api` workers). See
 [backend/docs/web-worker-split.md](backend/docs/web-worker-split.md).
 
 ## Layout
 
-| Path                  | What's in it                                                                                                                                                                                                                                                                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/`                | React frontend. `App.tsx` holds most app state; `services/backendApi.ts` is the only place that talks to the API.                                                                                                                                                                                                                        |
-| `backend/src/`        | Express backend. `index.ts` is wiring and lifecycle only; `jobQueue.ts` owns the job lifecycle, `workflowService.ts` maps models onto workflow JSON.                                                                                                                                                                                     |
-| `backend/src/routes/` | One module per route group, each exporting a Router. **Mount order in `index.ts` is a correctness constraint** — three routers sit above the session middleware (ops has its own guard, RunPod input links carry a signed token, sign-in cannot require a session) and the rest below it. Read the comments there before moving a mount. |
-| `workflow/`           | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model.                                                                                                                                                                                                          |
-| `backend/config/`     | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected.                                                                                                                                                                                                                                                          |
-| `backend/docs/`       | Runbooks: DR, topology split, load test, singleton audit.                                                                                                                                                                                                                                                                                |
-| `scripts/`            | Windows log-on autostart for the app and the local Credit Portal ComfyUI.                                                                                                                                                                                                                                                                |
+| Path                     | What's in it                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/`                   | React frontend. `App.tsx` composes feature hooks under `features/`; `services/api/` contains the shared transport and domain clients.                                                                                                                                                                                                    |
+| `backend/src/`           | Express backend. `index.ts` is wiring and lifecycle only; `jobQueue.ts` orchestrates lifecycle around the focused modules in `jobQueue/`.                                                                                                                                                                                                |
+| `backend/src/routes/`    | One module per route group, each exporting a Router. **Mount order in `index.ts` is a correctness constraint** — three routers sit above the session middleware (ops has its own guard, RunPod input links carry a signed token, sign-in cannot require a session) and the rest below it. Read the comments there before moving a mount. |
+| `workflow/`              | ComfyUI workflow JSON, grouped by task (`i2v`, `flf2v`, `image_editing`, `prompt_generation`). Adding a file here adds a model.                                                                                                                                                                                                          |
+| `backend/config/`        | `workflow-mappings.json`, for workflows whose node IDs cannot be auto-detected.                                                                                                                                                                                                                                                          |
+| `docs/`, `backend/docs/` | Architecture and runbooks: serving, DR, topology split, load test, singleton audit.                                                                                                                                                                                                                                                      |
+| `scripts/`               | Windows log-on autostart for the app and the local Credit Portal ComfyUI.                                                                                                                                                                                                                                                                |
 
 ## Prerequisites
 
@@ -52,7 +51,7 @@ On this host Node is **not** on the global PATH — it lives in the Codex runtim
 directory that `scripts/start-on-login.ps1` and `run_webapp_8190.bat` prepend.
 Prepend the same directory before running pnpm by hand.
 
-## Running it
+## Running it in development
 
 Everything at once, in two console windows (what most people want):
 
@@ -71,6 +70,23 @@ pnpm dev
 ```
 
 Frontend on <http://127.0.0.1:8190>, backend on <http://127.0.0.1:3333>.
+
+## Building and running production
+
+```bash
+pnpm run build:production
+pnpm run start:production
+```
+
+The first command type-checks and creates the minified Vite bundle plus the
+backend build. The second starts/reloads the PM2 topology from
+`backend/ecosystem.config.cjs`. The LAN-facing health check is
+`http://127.0.0.1:8190/healthz`; API health and operational dashboards remain
+loopback-only on `:3333`.
+
+`FRONTEND_HOST`, `FRONTEND_PORT`, `FRONTEND_DIST_PATH`, and
+`FRONTEND_API_TARGET` are documented in `.env.example`. Do not point the gateway
+at a remote or LAN API unless that exposure has been reviewed explicitly.
 
 ## Configuration
 
@@ -101,11 +117,11 @@ pnpm --filter momi-animation-backend run test
 pnpm --filter momi-animation-backend exec tsc --noEmit
 ```
 
-The backend suite is ~280 tests, including integration tests for the parts that
+The backend suite includes integration tests for the parts that
 are hard to reason about: dispatcher failover and lease handoff, SQLite backup
-and restore drills, config-split guards. New backend modules are expected to
-land with a matching `*.test.ts`, registered in the `test` script in
-`backend/package.json`.
+and restore drills, config-split guards. Tests are discovered recursively and
+sorted by `backend/scripts/testDiscovery.mjs`; do not add paths to a manual list.
+`pnpm --filter momi-animation-backend run test:list` shows the exact set.
 
 ### Frontend
 
@@ -118,22 +134,18 @@ Vitest + React Testing Library in jsdom, configured in
 [src/test/setup.ts](src/test/setup.ts) (IntersectionObserver, HTMLMediaElement
 play/pause, scrollIntoView — none of which jsdom implements).
 
-Coverage is a beachhead, not a suite. What is covered:
+Coverage gates run the same suites and emit terminal, JSON, LCOV, and local HTML
+reports:
 
-| Area                                                                                                                            | Why it was first                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Media access token lifecycle                                                                                                    | Built recently, and it fails silently: URLs are assembled during render from a token refreshed on a timer, so a bug produces broken images minutes after a tab opens rather than an error |
-| `saveNumber`                                                                                                                    | Decides the filename a render is filed under; wrong is only noticed much later                                                                                                            |
-| `promptRules`                                                                                                                   | The Kling 2500-char limit is duplicated in the backend; a drift means prompts pass the UI and fail at submission                                                                          |
-| `backendApi` job/project/upload calls                                                                                           | Wiring errors — an unescaped path segment, a missing auth header, an error body swallowed into a useless "500" — are invisible until a user hits one                                      |
-| `CreditUsageDashboard`, `RightProjectPanel`, `ImageUploader`, `CropModal`                                                       | The dashboard reports company spend; the other three decide what a job is submitted with                                                                                                  |
-| Backend services — all nine extracted from `index.ts`                                                                           | Extracted precisely so they could be tested; four real bugs found on first contact                                                                                                        |
-| `JobFeed` — every filter (status, model, scope, specific-user, generation type), sort, Reset/Apply, search, pagination, actions | Busiest list logic in the app; a filter that silently drops a job reads to an artist as "my render is missing"                                                                            |
+```bash
+pnpm run test:coverage
+pnpm --filter momi-animation-backend run test:coverage
+```
 
-Known gaps, in rough priority order:
-
-- `App.tsx` — 2,100 lines, 39 `useState`, no tests. Needs a mocking harness
-  before it can be rendered at all.
+Reports are written to `coverage/frontend/` and
+`backend/coverage/backend/`. Initial global thresholds deliberately sit just
+below the measured baseline and should only move upward. CI publishes both
+directories as one artifact.
 
 When adding a test, prefer asserting the thing a user would notice over the
 implementation detail that produces it. Two traps already caught here:
@@ -162,10 +174,8 @@ each relaxed rule is relaxed. It is deliberately set at the non-type-aware tier:
 first linter that reports hundreds of findings is a linter everyone learns to
 ignore.
 
-**Errors must be zero. Warnings are a ratchet.** `pnpm run lint` passes
-`--max-warnings` pinned to the current count, so any _new_ warning fails CI
-while the backlog is paid down deliberately. Lower that number as the backlog
-shrinks; never raise it. It started at 98 and is now 16.
+**Errors and warnings must both be zero.** `pnpm run lint` uses
+`--max-warnings 0`, so a new warning fails locally and in CI.
 
 The 82 `no-explicit-any` warnings that made up most of the original backlog are
 gone: they were all Comfy graph JSON, and they now use the named `ComfyNode` /
@@ -174,8 +184,8 @@ gone: they were all Comfy graph JSON, and they now use the named `ComfyNode` /
 assuming that made the graph type-safe — it did not, and it says why. What it
 did was turn 67 silent decisions into one explained one.
 
-The remaining 16 are 12 `react-hooks/set-state-in-effect`, 2 `exhaustive-deps`
-and 2 `react-refresh`. Each needs a component refactor rather than type work.
+The warning backlog is now zero. Keep suppressions narrow and explain any
+external-state effect that genuinely cannot follow the default hook rule.
 
 Prettier owns formatting; `printWidth` is 130 because that is roughly the
 99th-percentile line length this code was already written at. The repo-wide
@@ -183,18 +193,18 @@ adoption commit is listed in `.git-blame-ignore-revs` — run
 `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame`
 skips it.
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the format check,
-lint, the backend type-check, the backend suite, and the frontend build on every
-push and PR.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs formatting, lint,
+type-checking, both coverage-gated suites, and the production frontend build.
 
 ## Deploying
 
-Backend changes need a build and a pm2 reload; frontend changes need neither.
-Deploy the backend **first** when a change spans both — the running frontend
-tolerates a newer API, not an older one.
+Backend and frontend changes both require a production build and PM2 reload.
+Deploy compatible backend routes first when a change spans both; the existing
+built frontend should remain usable during that short transition.
 
 ```bash
-pnpm --filter momi-animation-backend build
+pnpm run build:production
+pnpm run start:production
 ```
 
 Then reload through pm2 using `backend/ecosystem.config.cjs`. The topology flip,
@@ -236,6 +246,11 @@ Disaster recovery, including the restore drill, is in
   working tree, or use `pm2 logs` — pm2 already captures backend output.
 - Backend modules get a comment at the top explaining _why_ they exist, not what
   they do. Match that when adding one.
-- `MISSING_DATA_REPORT.md` and `PROJECT_MEDIA_SCAN_REPORT.md` are point-in-time
-  audits from early development, kept for provenance. They are not current
-  documentation.
+- `docs/history/` holds point-in-time audits from early development, kept for
+  provenance and not maintained as current documentation.
+  [comfyui-data-gap-analysis.md](docs/history/comfyui-data-gap-analysis.md) is the
+  field-by-field gap analysis that shaped the job metadata schema — still useful
+  for understanding _why_ a field exists.
+  [project-media-scan-2026-07-02.md](docs/history/project-media-scan-2026-07-02.md)
+  is a dated scanner snapshot; the counts are long stale, and it names client
+  projects, so do not refresh it in place or add new scans here.

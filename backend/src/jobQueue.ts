@@ -1,13 +1,10 @@
 import path from "node:path";
-import fs from "node:fs/promises";
-import os from "node:os";
 import { projectFolderName } from "./projectFolderName.js";
-import { getHistory, queuePrompt, toViewUrl, uploadImage, uploadInputFile } from "./comfyClient.js";
+import { getHistory, queuePrompt, toViewUrl } from "./comfyClient.js";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
   archivedItemsSqlitePath,
   archivedItemsStorePath,
-  brickProjectsRoot,
   comfyRoot,
   creditBalanceDeltaAccountingEnabled,
   dispatcherLeaseHeartbeatMs,
@@ -19,12 +16,8 @@ import {
   jobStoreDriver,
   jobsSqlitePath,
   jobsStorePath,
-  localProjectsRoot,
   runpodOutputMaxBytes,
   runpodTimeoutMs,
-  runpodInlineMediaMaxBytes,
-  runpodInputBaseUrl,
-  uploadedMediaRoot,
 } from "./config.js";
 import { estimateFallbackCreditUsage, estimateWorkflowCredits } from "./creditEstimator.js";
 import { BackendHttpError } from "./httpError.js";
@@ -54,43 +47,46 @@ import {
   cancelComfyWorkflowOnRunpod,
   resumeComfyWorkflowOnRunpod,
   runComfyWorkflowOnRunpod,
-  type RunpodComfyImageInput,
   type RunpodMediaResult,
 } from "./runpodComfyService.js";
 import { isDispatcher } from "./processRole.js";
-import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "./runpodImageInlineService.js";
 import {
   beginRunpodBillableOperation,
   hasExclusiveRunpodActivityWindow,
   runpodActivityBaseline,
   type RunpodActivityBaseline,
 } from "./runpodActivityTracker.js";
-import { createRunpodInputUrl, type RunpodInputKind } from "./runpodInputUrlService.js";
-import { prepareRunpodVideoFile } from "./runpodVideoPreprocessService.js";
 import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
 import { persistServerlessArtifacts } from "./serverlessArtifactService.js";
-import {
-  ensureJobFolders,
-  readJsonFileWithBackup,
-  safeSegment,
-  saveJobMetadata,
-  snapshotJsonStore,
-  writeJsonFile,
-} from "./storageService.js";
+import { ensureJobFolders, readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
 import { moveResultFiles } from "./resultMoveService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
-import {
-  detectWorkflowLoadImageNames,
-  detectWorkflowLoadVideoNames,
-  getWorkflowModel,
-  loadWorkflowForRunpod,
-  loadWorkflowPrompt,
-  saveWorkflowSnapshot,
-} from "./workflowService.js";
-import type { CreateJobRequest, CreditBalanceSnapshot, Job, Project, WorkflowModel } from "./types.js";
+import { getWorkflowModel, loadWorkflowForRunpod, loadWorkflowPrompt, saveWorkflowSnapshot } from "./workflowService.js";
+import type { CreateJobRequest, CreditBalanceSnapshot, Job } from "./types.js";
 import type { ComfyGraph } from "./comfyGraph.js";
+import {
+  DebouncedJobPersistence,
+  ensureWorkerProjectFolder,
+  externalizeJobInputMedia,
+  DispatcherLeaseCoordinator,
+  jobRemoteMediaEntries,
+  inferInputType,
+  loadConsistentChanges,
+  loadConsistentSnapshot,
+  materializeComfyInputImages,
+  materializeComfyInputVideo,
+  materializeRunpodInputImages,
+  materializeRunpodInputVideo,
+  normalizeDurationSeconds,
+  RemoteResultRecovery,
+  resultExtension,
+  type StoreCacheCursor,
+} from "./jobQueue/index.js";
+
+export { chooseRunpodImageInputNames, isRemoteResultMediaUrl, jobRemoteMediaEntries } from "./jobQueue/index.js";
+export type { RemoteMediaEntry } from "./jobQueue/index.js";
 
 let jobs: Job[] = [];
 let archivedMediaJobs: Job[] = [];
@@ -103,18 +99,23 @@ let jobsCacheCursor: StoreCacheCursor | undefined;
 let archivedCacheCursor: StoreCacheCursor | undefined;
 const inFlightJobIds = new Set<string>();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
-const dispatcherOwnerHost = os.hostname();
-const dispatcherOwnerId = `${dispatcherOwnerHost}:${process.pid}:${crypto.randomUUID()}`;
-let dispatcherLeaseHeld = false;
-let dispatcherLeaseWasTakeover = false;
 let dispatchPollTimer: NodeJS.Timeout | undefined;
 let dispatcherHeartbeatTimer: NodeJS.Timeout | undefined;
 let walCheckpointTimer: NodeJS.Timeout | undefined;
-
-type StoreCacheCursor = {
-  dataVersion: number;
-  revision: number;
-};
+const dispatcherLeaseCoordinator = new DispatcherLeaseCoordinator({
+  enabled: usesDispatcherCoordination,
+  store: () => sqliteStore,
+  ttlMs: dispatcherLeaseTtlMs,
+});
+const remoteResultRecovery = new RemoteResultRecovery({
+  jobs: () => jobs,
+  persistJob: persistUpsert,
+});
+const jobPersistence = new DebouncedJobPersistence({
+  jobs: () => jobs,
+  store: () => sqliteStore,
+  jsonPath: jobsStorePath,
+});
 
 export async function loadJobs() {
   if (sqliteStore || archivedStore) closeJobStore();
@@ -228,31 +229,6 @@ async function loadRawJobs(): Promise<Job[]> {
   // main store is corrupt, so a bad file can't silently wipe job history.
   await snapshotJsonStore(jobsStorePath);
   return readJsonFileWithBackup<Job[]>(jobsStorePath, []);
-}
-
-function loadConsistentSnapshot(store: SqliteJobStore) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const before = store.dataVersion();
-    const snapshot = store.loadSnapshot();
-    const after = store.dataVersion();
-    if (before === after) {
-      return {
-        snapshot,
-        cursor: { dataVersion: after, revision: snapshot.revision } satisfies StoreCacheCursor,
-      };
-    }
-  }
-  throw new Error("Could not read a stable SQLite job snapshot after 20 attempts.");
-}
-
-function loadConsistentChanges(store: SqliteJobStore, afterRevision: number) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const before = store.dataVersion();
-    const changes = store.loadChanges(afterRevision);
-    const after = store.dataVersion();
-    if (before === after) return { changes, dataVersion: after };
-  }
-  throw new Error("Could not read stable incremental SQLite job changes after 20 attempts.");
 }
 
 function refreshMainJobsCache() {
@@ -390,13 +366,12 @@ function usesDispatcherCoordination() {
 function ownsDispatcherWork() {
   if (!isDispatcher()) return false;
   if (!usesDispatcherCoordination()) return true;
-  return hasCurrentDispatcherLease();
+  return dispatcherLeaseCoordinator.isHeld();
 }
 
 function initializeDispatcherCoordination() {
-  dispatcherLeaseHeld = false;
-  dispatcherLeaseWasTakeover = false;
-  if (usesDispatcherCoordination()) tryAcquireDispatcherLease();
+  dispatcherLeaseCoordinator.reset();
+  if (usesDispatcherCoordination()) dispatcherLeaseCoordinator.tryAcquire();
 }
 
 function startDispatcherCoordination() {
@@ -416,7 +391,7 @@ function startDispatcherCoordination() {
 
   if (dispatcherWalCheckpointMs > 0) {
     walCheckpointTimer = setInterval(() => {
-      if (!hasCurrentDispatcherLease()) return;
+      if (!dispatcherLeaseCoordinator.isHeld()) return;
       try {
         sqliteStore?.checkpointWalPassive();
       } catch (error) {
@@ -426,7 +401,7 @@ function startDispatcherCoordination() {
     walCheckpointTimer.unref?.();
   }
 
-  if (dispatcherLeaseHeld && acceptingNewWork) void dispatchQueue();
+  if (dispatcherLeaseCoordinator.isHeld() && acceptingNewWork) void dispatchQueue();
 }
 
 function resumeAcknowledgedRunpodJobs() {
@@ -452,27 +427,12 @@ function stopDispatcherCoordination(releaseLease: boolean) {
   dispatcherHeartbeatTimer = undefined;
   walCheckpointTimer = undefined;
 
-  if (releaseLease && dispatcherLeaseHeld) {
-    try {
-      sqliteStore?.releaseDispatcherLease(dispatcherOwnerId);
-    } catch (error) {
-      console.warn(`Could not release dispatcher lease: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
-  }
-  dispatcherLeaseHeld = false;
-  dispatcherLeaseWasTakeover = false;
+  if (releaseLease) dispatcherLeaseCoordinator.release();
+  else dispatcherLeaseCoordinator.reset();
 }
 
 function maintainDispatcherLease() {
-  if (!usesDispatcherCoordination() || !sqliteStore) return false;
-  const wasHeld = hasCurrentDispatcherLease();
-  const now = Date.now();
-  if (wasHeld) {
-    const renewed = sqliteStore.renewDispatcherLease(dispatcherLease(now));
-    dispatcherLeaseHeld = renewed;
-    return false;
-  }
-  const acquired = tryAcquireDispatcherLease();
+  const acquired = dispatcherLeaseCoordinator.maintain();
   if (acquired) {
     void persistNormalizedRunpodJobs(normalizeInterruptedRunpodJobs());
     resumeAcknowledgedRunpodJobs();
@@ -483,8 +443,8 @@ function maintainDispatcherLease() {
 function ensureDispatcherLease() {
   if (!isDispatcher()) return false;
   if (!usesDispatcherCoordination()) return true;
-  if (hasCurrentDispatcherLease()) return true;
-  const acquired = tryAcquireDispatcherLease();
+  if (dispatcherLeaseCoordinator.isHeld()) return true;
+  const acquired = dispatcherLeaseCoordinator.tryAcquire();
   if (acquired) {
     void persistNormalizedRunpodJobs(normalizeInterruptedRunpodJobs());
     resumeAcknowledgedRunpodJobs();
@@ -492,77 +452,12 @@ function ensureDispatcherLease() {
   return acquired;
 }
 
-function hasCurrentDispatcherLease() {
-  if (!usesDispatcherCoordination() || !sqliteStore) return isDispatcher();
-  const now = Date.now();
-  const stored = sqliteStore.readDispatcherLease();
-  const held = stored?.ownerId === dispatcherOwnerId && stored.expiresAt > now;
-  dispatcherLeaseHeld = held;
-  return held;
-}
-
-function tryAcquireDispatcherLease() {
-  if (!usesDispatcherCoordination() || !sqliteStore) return false;
-  const now = Date.now();
-  const existing = sqliteStore.readDispatcherLease();
-  const replaceOwnerId =
-    existing && existing.ownerHost.toLowerCase() === dispatcherOwnerHost.toLowerCase() && !processAppearsAlive(existing.ownerPid)
-      ? existing.ownerId
-      : undefined;
-  const acquired = sqliteStore.tryAcquireDispatcherLease({
-    ...dispatcherLease(now),
-    now,
-    replaceOwnerId,
-  });
-  const changedOwner = acquired && !dispatcherLeaseHeld;
-  if (changedOwner && existing && existing.ownerId !== dispatcherOwnerId) {
-    dispatcherLeaseWasTakeover = true;
-  }
-  dispatcherLeaseHeld = acquired;
-  if (changedOwner) console.log(`Dispatcher lease acquired by ${dispatcherOwnerId}.`);
-  return acquired;
-}
-
 function shouldNormalizeInterruptedJob(job: Job) {
-  if (!usesDispatcherCoordination() || !dispatcherLeaseWasTakeover) return true;
-  const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : Number.NaN;
-  return !Number.isFinite(startedAt) || startedAt <= Date.now() - runpodTimeoutMs;
-}
-
-function dispatcherLease(now: number) {
-  return {
-    ownerId: dispatcherOwnerId,
-    ownerPid: process.pid,
-    ownerHost: dispatcherOwnerHost,
-    heartbeatAt: now,
-    expiresAt: now + dispatcherLeaseTtlMs,
-  };
-}
-
-function processAppearsAlive(pid: number) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return !(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
-  }
+  return dispatcherLeaseCoordinator.shouldNormalizeInterruptedJob(job.startedAt, runpodTimeoutMs);
 }
 
 function dispatcherLeaseSnapshot() {
-  if (!jobRowLevelWrites || !sqliteStore) {
-    return { enabled: false, active: isDispatcher(), heldByThisProcess: isDispatcher() };
-  }
-  const lease = sqliteStore.readDispatcherLease();
-  const active = Boolean(lease && lease.expiresAt > Date.now());
-  return {
-    enabled: true,
-    active,
-    heldByThisProcess: active && lease?.ownerId === dispatcherOwnerId,
-    ownerId: lease?.ownerId,
-    heartbeatAt: lease?.heartbeatAt,
-    expiresAt: lease?.expiresAt,
-  };
+  return dispatcherLeaseCoordinator.snapshot(isDispatcher());
 }
 
 function jobStatusSummary(job: Job) {
@@ -636,73 +531,6 @@ export async function createJob(request: CreateJobRequest) {
   await persistUpsert(job);
   void dispatchQueue();
   return job;
-}
-
-async function externalizeJobInputMedia(project: Project, jobId: string, request: CreateJobRequest) {
-  const prepared: CreateJobRequest = { ...request };
-
-  if (request.inputImages) {
-    prepared.inputImages = [];
-    for (let index = 0; index < request.inputImages.length; index += 1) {
-      prepared.inputImages.push(
-        await persistInputDataUrl(project, jobId, request.inputImages[index], `input_${String(index + 1).padStart(2, "0")}`),
-      );
-    }
-  }
-
-  if (request.startFrame) {
-    prepared.startFrame = await persistInputDataUrl(project, jobId, request.startFrame, "start_frame");
-  }
-
-  if (request.endFrame) {
-    prepared.endFrame = await persistInputDataUrl(project, jobId, request.endFrame, "end_frame");
-  }
-
-  if (request.inputVideo) {
-    prepared.inputVideo = await persistInputDataUrl(project, jobId, request.inputVideo, "input_video");
-  }
-
-  return prepared;
-}
-
-async function persistInputDataUrl(project: Project, jobId: string, value: string, fileBase: string) {
-  const parsed = parseMediaDataUrl(value);
-  if (!parsed) return value;
-
-  const folders = await ensureJobFolders(project, jobId);
-  const filePath = path.join(folders.input, `${safeSegment(fileBase)}.${parsed.extension}`);
-  await fs.writeFile(filePath, parsed.buffer);
-  return mediaUrl(filePath);
-}
-
-function parseMediaDataUrl(value: string) {
-  const match = value.match(/^data:(image|video)\/([a-zA-Z0-9+.-]+);base64,([\s\S]+)$/);
-  if (!match) return undefined;
-
-  const kind = match[1].toLowerCase();
-  const subtype = match[2].toLowerCase();
-  return {
-    kind,
-    subtype,
-    mimeType: `${kind}/${subtype}`,
-    extension: mediaExtension(kind, subtype),
-    buffer: Buffer.from(match[3], "base64"),
-  };
-}
-
-function normalizeDurationSeconds(
-  value: number | undefined,
-  model: { supportedDurations?: number[]; defaultDurationSeconds?: number },
-) {
-  const options = model.supportedDurations ?? [];
-  if (!options.length) return undefined;
-  if (typeof value === "number" && options.includes(value)) return value;
-
-  const fallback =
-    model.defaultDurationSeconds && options.includes(model.defaultDurationSeconds) ? model.defaultDurationSeconds : options[0];
-
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return options.reduce((closest, option) => (Math.abs(option - value) < Math.abs(closest - value) ? option : closest), fallback);
 }
 
 export async function cancelJob(jobId: string) {
@@ -1141,7 +969,7 @@ function claimNextJobForDispatch(concurrencyLimit: number) {
   const claimed = sqliteStore.claimNextQueuedJob(
     new Date().toISOString(),
     concurrencyLimit,
-    usesDispatcherCoordination() ? dispatcherOwnerId : undefined,
+    usesDispatcherCoordination() ? dispatcherLeaseCoordinator.ownerId : undefined,
   );
   if (!claimed) return undefined;
 
@@ -1525,125 +1353,13 @@ async function persistResultMedia(resultUrls: string[], outputFolder: string, jo
   return persistedUrls;
 }
 
-export type RemoteMediaEntry = {
-  kind: "result" | "thumbnail";
-  index: number;
-  url: string;
-};
-
-// A completed job's media should always be a local /api/media URL. Remote
-// http(s) URLs mean the original persist failed (or was skipped for size) and
-// the file only exists on the generation service until its signed URL expires.
-export function isRemoteResultMediaUrl(value: string) {
-  return /^https?:\/\//i.test(value.trim());
-}
-
-export function jobRemoteMediaEntries(job: Pick<Job, "status" | "resultUrls" | "thumbnailUrls">): RemoteMediaEntry[] {
-  if (job.status !== "completed") return [];
-  const entries: RemoteMediaEntry[] = [];
-  (job.resultUrls ?? []).forEach((url, index) => {
-    if (isRemoteResultMediaUrl(url)) entries.push({ kind: "result", index, url });
-  });
-  (job.thumbnailUrls ?? []).forEach((url, index) => {
-    if (isRemoteResultMediaUrl(url)) entries.push({ kind: "thumbnail", index, url });
-  });
-  return entries;
-}
-
-// Signed URLs stop working long before this cap is reached at the default
-// 10-minute recovery interval; the cap just keeps dead links from being
-// re-fetched forever within one process lifetime.
-const remoteRecoveryMaxAttempts = 24;
-const remoteRecoveryFailureCounts = new Map<string, number>();
-let remoteRecoveryRunning = false;
-let remoteRecoveryTimer: NodeJS.Timeout | undefined;
-
 export function scheduleRemoteResultRecovery(delayMs = 60_000) {
-  if (!isDispatcher()) return;
-  if (remoteRecoveryTimer) return;
-  remoteRecoveryTimer = setTimeout(() => {
-    remoteRecoveryTimer = undefined;
-    void recoverRemoteResultMedia().catch(() => undefined);
-  }, delayMs);
-  remoteRecoveryTimer.unref?.();
+  remoteResultRecovery.schedule(delayMs);
 }
 
 export async function recoverRemoteResultMedia(fetchImpl: typeof fetch = fetch) {
-  if (!isDispatcher()) return { recovered: 0, failed: 0 };
   refreshMainJobsCache();
-  if (remoteRecoveryRunning) return { recovered: 0, failed: 0 };
-  remoteRecoveryRunning = true;
-  try {
-    let recovered = 0;
-    let failed = 0;
-    const changedJobs = new Set<Job>();
-
-    for (const job of jobs) {
-      const entries = jobRemoteMediaEntries(job);
-      if (!entries.length) continue;
-      const project = getProject(job.projectId);
-      if (!project) continue;
-
-      const folders = await ensureJobFolders(project, job.id).catch(() => undefined);
-      if (!folders) continue;
-
-      const recoveredByUrl = new Map<string, string>();
-      for (const entry of entries) {
-        let localUrl = recoveredByUrl.get(entry.url);
-        if (!localUrl) {
-          const attempts = remoteRecoveryFailureCounts.get(entry.url) ?? 0;
-          if (attempts >= remoteRecoveryMaxAttempts) continue;
-          localUrl = await downloadRemoteResultMedia(entry, folders.output, job.id, fetchImpl);
-          if (!localUrl) {
-            remoteRecoveryFailureCounts.set(entry.url, attempts + 1);
-            failed += 1;
-            continue;
-          }
-          remoteRecoveryFailureCounts.delete(entry.url);
-          recoveredByUrl.set(entry.url, localUrl);
-        }
-
-        if (entry.kind === "result") {
-          job.resultUrls[entry.index] = localUrl;
-        } else {
-          job.thumbnailUrls[entry.index] = localUrl;
-        }
-        recovered += 1;
-        changedJobs.add(job);
-      }
-    }
-
-    for (const job of changedJobs) await persistUpsert(job);
-    if (recovered || failed) {
-      console.info(`[recovery] Remote result media pass: recovered ${recovered}, failed ${failed}.`);
-    }
-    return { recovered, failed };
-  } finally {
-    remoteRecoveryRunning = false;
-  }
-}
-
-async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: string, jobId: string, fetchImpl: typeof fetch) {
-  try {
-    const url = new URL(entry.url);
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(120000) });
-    if (!response.ok) return undefined;
-
-    const contentType = response.headers.get("content-type") ?? "";
-    const extension = resultExtension(url, contentType);
-    const fileName = `${jobId}_${entry.kind}_${String(entry.index + 1).padStart(2, "0")}_recovered${extension}`;
-    const filePath = path.join(outputFolder, fileName);
-    const contentLength = Number(response.headers.get("content-length") ?? 0);
-    if (Number.isFinite(contentLength) && contentLength > runpodOutputMaxBytes) {
-      await response.body?.cancel().catch(() => undefined);
-      return undefined;
-    }
-
-    await writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes);
-    return `/api/media?path=${encodeURIComponent(filePath)}`;
-  } catch {
-    return undefined;
-  }
+  return remoteResultRecovery.recover(fetchImpl);
 }
 
 async function detectFirstPersistedResultResolution(resultUrls: string[], outputType: Job["outputType"]) {
@@ -1654,20 +1370,6 @@ async function detectFirstPersistedResultResolution(resultUrls: string[], output
     if (resolution) return resolution;
   }
   return undefined;
-}
-
-function resultExtension(url: URL, contentType: string) {
-  const filename = url.searchParams.get("filename") || path.basename(url.pathname);
-  const extension = path.extname(filename);
-  if (extension) return extension;
-  if (contentType.includes("image/jpeg")) return ".jpg";
-  if (contentType.includes("image/png")) return ".png";
-  if (contentType.includes("image/webp")) return ".webp";
-  if (contentType.includes("image/gif")) return ".gif";
-  if (contentType.includes("video/mp4")) return ".mp4";
-  if (contentType.includes("video/quicktime")) return ".mov";
-  if (contentType.includes("video/webm")) return ".webm";
-  return ".bin";
 }
 
 function getPromptHistory(history: Record<string, unknown>, promptId: string) {
@@ -1690,206 +1392,6 @@ function preferredResultMedia(media: RunpodMediaResult[]) {
   return videos.length ? videos : media;
 }
 
-async function materializeRunpodInputImages(job: Job, model: WorkflowModel) {
-  const expectedNames = await detectWorkflowLoadImageNames(model);
-  const images: RunpodComfyImageInput[] = [];
-  const imageNames = chooseRunpodImageInputNames(job.inputImages, job.id, expectedNames);
-  const inlineImageMaxBytes = runpodInlineImageByteBudget(job.inputImages.length);
-
-  for (let index = 0; index < job.inputImages.length; index += 1) {
-    const value = job.inputImages[index];
-    const name = imageNames[index];
-    images.push(await runpodImageInput(value, name, inlineImageMaxBytes));
-  }
-
-  return {
-    images,
-    imageNames: images.map((image) => image.name),
-  };
-}
-
-export function chooseRunpodImageInputNames(inputImages: string[], jobId: string, expectedNames?: string[]) {
-  const usedNames = new Set<string>();
-
-  return inputImages.map((value, index) => {
-    const expectedName = expectedNames?.[index]?.trim();
-    const fallbackName = fallbackRunpodImageName(value, jobId, index);
-    const preferredName = expectedName && !usedNames.has(runpodInputNameKey(expectedName)) ? expectedName : fallbackName;
-
-    return uniqueRunpodInputName(preferredName, usedNames);
-  });
-}
-
-function uniqueRunpodInputName(preferredName: string, usedNames: Set<string>) {
-  const extension = path.extname(preferredName);
-  const base = extension ? preferredName.slice(0, -extension.length) : preferredName;
-  let candidate = preferredName;
-  let suffix = 2;
-
-  while (usedNames.has(runpodInputNameKey(candidate))) {
-    candidate = `${base}_${suffix}${extension}`;
-    suffix += 1;
-  }
-
-  usedNames.add(runpodInputNameKey(candidate));
-  return candidate;
-}
-
-function runpodInputNameKey(value: string) {
-  return value.replaceAll("\\", "/").toLowerCase();
-}
-
-async function materializeRunpodInputVideo(job: Job, model: WorkflowModel, inputFolder: string) {
-  if (!job.inputVideo) return undefined;
-  const expectedNames = await detectWorkflowLoadVideoNames(model);
-  const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
-  const filePath = localMediaFilePathFromUrl(job.inputVideo);
-  const preparedFilePath = filePath ? await prepareRunpodVideoFile(filePath, inputFolder, model) : undefined;
-  return {
-    videos: [
-      preparedFilePath ? await runpodFileInput(preparedFilePath, name, "video") : await runpodVideoInput(job.inputVideo, name),
-    ],
-    videoName: name,
-  };
-}
-
-async function runpodImageInput(value: string, name: string, inlineImageMaxBytes: number): Promise<RunpodComfyImageInput> {
-  if (value.startsWith("data:image/")) {
-    return runpodInlineImageDataUrlInput(value, name, inlineImageMaxBytes);
-  }
-  const filePath = localMediaFilePathFromUrl(value);
-  if (filePath) {
-    return runpodFileInput(filePath, name, "image", inlineImageMaxBytes);
-  }
-  if (/^https?:\/\//i.test(value)) {
-    return { name, url: value };
-  }
-  throw new Error("RunPod image inputs must be saved media, browser data URLs, or public http(s) URLs.");
-}
-
-async function runpodVideoInput(value: string, name: string): Promise<RunpodComfyImageInput> {
-  if (value.startsWith("data:video/")) {
-    return runpodInlineVideoDataUrlInput(value, name);
-  }
-  const filePath = localMediaFilePathFromUrl(value);
-  if (filePath) {
-    return runpodFileInput(filePath, name, "video");
-  }
-  if (/^https?:\/\//i.test(value)) {
-    return { name, url: value };
-  }
-  throw new Error("RunPod video inputs must be saved media, browser data URLs, or public http(s) URLs.");
-}
-
-async function runpodFileInput(
-  filePath: string,
-  name: string,
-  kind: RunpodInputKind,
-  inlineImageMaxBytes?: number,
-): Promise<RunpodComfyImageInput> {
-  const signedUrl = createRunpodInputUrl(filePath, kind);
-  if (signedUrl) {
-    return { name, url: signedUrl };
-  }
-
-  if (kind === "image") {
-    return runpodInlineImageFileInput(filePath, name, inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
-  }
-
-  return {
-    name,
-    image: await readMediaFileAsDataUrl(filePath, kind),
-  };
-}
-
-async function runpodInlineImageDataUrlInput(value: string, name: string, maxBytes: number): Promise<RunpodComfyImageInput> {
-  const parsed = parseImageDataUrl(value);
-  if (!parsed) {
-    throw new Error("Unsupported image data URL.");
-  }
-
-  const prepared = await prepareRunpodInlineImageInput({
-    buffer: parsed.buffer,
-    mimeType: parsed.mimeType,
-    name,
-    source: name,
-    maxBytes,
-  });
-  return { name: prepared.name, image: prepared.image };
-}
-
-async function runpodInlineImageFileInput(filePath: string, name: string, maxBytes: number): Promise<RunpodComfyImageInput> {
-  const buffer = await fs.readFile(filePath);
-  const prepared = await prepareRunpodInlineImageInput({
-    buffer,
-    mimeType: mimeTypeFromMediaPath(filePath, "image"),
-    name,
-    source: filePath,
-    maxBytes,
-  });
-  return { name: prepared.name, image: prepared.image };
-}
-
-function runpodInlineVideoDataUrlInput(value: string, name: string): RunpodComfyImageInput {
-  const byteLength = dataUrlBase64ByteLength(value);
-  if (byteLength != null) {
-    assertRunpodInlineMediaSize(byteLength, "video", name);
-  }
-  return { name, image: value };
-}
-
-function fallbackRunpodImageName(value: string, jobId: string, index: number) {
-  const extension = extensionFromImageInput(value) ?? ".png";
-  return `${jobId}_${index + 1}${extension}`;
-}
-
-function fallbackRunpodVideoName(value: string, jobId: string) {
-  const extension = extensionFromVideoInput(value) ?? ".mp4";
-  return `${jobId}_video${extension}`;
-}
-
-function extensionFromImageInput(value: string) {
-  const dataUrlMatch = value.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,/);
-  if (dataUrlMatch) {
-    return `.${dataUrlMatch[1].toLowerCase().replace("jpeg", "jpg")}`;
-  }
-
-  try {
-    const url = new URL(value);
-    const filename = url.searchParams.get("filename") ?? path.basename(url.pathname);
-    const extension = path.extname(filename);
-    return extension || undefined;
-  } catch {
-    const extension = path.extname(value);
-    return extension || undefined;
-  }
-}
-
-function extensionFromVideoInput(value: string) {
-  const dataUrlMatch = value.match(/^data:video\/([a-zA-Z0-9+.-]+);base64,/);
-  if (dataUrlMatch) {
-    return `.${videoExtension(dataUrlMatch[1])}`;
-  }
-
-  try {
-    const url = new URL(value);
-    const filename = url.searchParams.get("filename") ?? path.basename(url.pathname);
-    const extension = path.extname(filename);
-    return extension || undefined;
-  } catch {
-    const extension = path.extname(value);
-    return extension || undefined;
-  }
-}
-
-function inferInputType(request: CreateJobRequest): Job["inputType"] {
-  if (request.inputVideo) return "video";
-  if (request.startFrame || request.endFrame) return "start_end_frames";
-  if ((request.inputImages?.length ?? 0) > 1) return "multi_image";
-  if (request.inputImages?.length) return "single_image";
-  return "text_only";
-}
-
 function normalizeEditableSaveNumber(value: unknown) {
   const digits = String(value ?? "")
     .replace(/\D/g, "")
@@ -1898,167 +1400,6 @@ function normalizeEditableSaveNumber(value: unknown) {
     throw new Error("Shot/camera number is required.");
   }
   return digits.padStart(4, "0");
-}
-
-async function materializeComfyInputImages(job: Job, serverUrl: string) {
-  const converted: string[] = [];
-  for (let index = 0; index < job.inputImages.length; index += 1) {
-    const value = job.inputImages[index];
-    if (value.startsWith("data:image/")) {
-      converted.push(await uploadDataImageToComfy(serverUrl, value, job.id, index));
-    } else {
-      const filePath = localMediaFilePathFromUrl(value);
-      if (filePath) {
-        converted.push(await uploadLocalMediaToComfy(serverUrl, filePath, `${job.id}_${index + 1}`, "image"));
-      } else {
-        converted.push(value);
-      }
-    }
-  }
-  return converted;
-}
-
-async function uploadLocalMediaToComfy(serverUrl: string, filePath: string, fileBase: string, kind: "image" | "video") {
-  const extension = path.extname(filePath) || (kind === "image" ? ".png" : ".mp4");
-  const filename = `${safeSegment(fileBase)}${extension}`;
-  const file = new Blob([await fs.readFile(filePath)], { type: mimeTypeFromMediaPath(filePath, kind) });
-  const uploaded =
-    kind === "image" ? await uploadImage(serverUrl, file, filename) : await uploadInputFile(serverUrl, file, filename);
-  const uploadedName = uploaded.name || filename;
-  return uploaded.subfolder ? `${uploaded.subfolder}/${uploadedName}` : uploadedName;
-}
-
-async function uploadDataImageToComfy(serverUrl: string, dataUrl: string, jobId: string, index: number) {
-  const match = dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
-  if (!match) {
-    throw new Error("Unsupported image data URL.");
-  }
-  const ext = match[1].toLowerCase().replace("jpeg", "jpg");
-  const filename = `${jobId}_${index + 1}.${ext}`;
-  const file = new Blob([Buffer.from(match[2], "base64")], { type: `image/${match[1].toLowerCase()}` });
-  const uploaded = await uploadImage(serverUrl, file, filename);
-  const uploadedName = uploaded.name || filename;
-  return uploaded.subfolder ? `${uploaded.subfolder}/${uploadedName}` : uploadedName;
-}
-
-async function materializeComfyInputVideo(job: Job, serverUrl: string) {
-  if (!job.inputVideo) {
-    return job.inputVideo;
-  }
-
-  if (!job.inputVideo.startsWith("data:video/")) {
-    const filePath = localMediaFilePathFromUrl(job.inputVideo);
-    if (filePath) {
-      return uploadLocalMediaToComfy(serverUrl, filePath, `${job.id}_video`, "video");
-    }
-    return job.inputVideo;
-  }
-
-  const match = job.inputVideo.match(/^data:video\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
-  if (!match) {
-    throw new Error("Unsupported video data URL.");
-  }
-
-  const ext = videoExtension(match[1]);
-  const filename = `${job.id}_video.${ext}`;
-  const file = new Blob([Buffer.from(match[2], "base64")], { type: `video/${match[1].toLowerCase()}` });
-  const uploaded = await uploadInputFile(serverUrl, file, filename);
-  const uploadedName = uploaded.name || filename;
-  return uploaded.subfolder ? `${uploaded.subfolder}/${uploadedName}` : uploadedName;
-}
-
-function videoExtension(subtype: string) {
-  const normalized = subtype.toLowerCase();
-  if (normalized === "quicktime") return "mov";
-  if (normalized === "x-msvideo") return "avi";
-  if (normalized === "x-matroska") return "mkv";
-  return normalized.replace(/[^a-z0-9]+/g, "") || "mp4";
-}
-
-function mediaExtension(kind: string, subtype: string) {
-  const normalized = subtype.toLowerCase();
-  if (kind === "image" && normalized === "jpeg") return "jpg";
-  if (kind === "video") return videoExtension(normalized);
-  return normalized.replace(/[^a-z0-9]+/g, "") || "bin";
-}
-
-function localMediaFilePathFromUrl(value: string) {
-  try {
-    const url = new URL(value, "http://127.0.0.1");
-    if (url.pathname !== "/api/media") return undefined;
-    const filePath = url.searchParams.get("path");
-    return filePath && isAllowedLocalMediaPath(filePath) ? path.resolve(filePath) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isAllowedLocalMediaPath(filePath: string) {
-  const resolvedPath = path.resolve(filePath).toLowerCase();
-  return [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
-    .map((root) => path.resolve(root).toLowerCase())
-    .some((root) => resolvedPath.startsWith(root));
-}
-
-async function readMediaFileAsDataUrl(filePath: string, kind: "image" | "video") {
-  const stat = await fs.stat(filePath);
-  assertRunpodInlineMediaSize(stat.size, kind, filePath);
-  const buffer = await fs.readFile(filePath);
-  return `data:${mimeTypeFromMediaPath(filePath, kind)};base64,${buffer.toString("base64")}`;
-}
-
-function dataUrlBase64ByteLength(value: string) {
-  const match = value.match(/^data:[^;]+;base64,([\s\S]+)$/);
-  if (!match) return undefined;
-  const payload = match[1].replace(/\s/g, "");
-  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
-}
-
-function assertRunpodInlineMediaSize(byteLength: number, kind: RunpodInputKind, source: string) {
-  if (byteLength <= runpodInlineMediaMaxBytes) return;
-
-  const sourceName = path.basename(source) || `${kind} input`;
-  const baseUrlHint = runpodInputBaseUrl
-    ? "The input could not be sent as a signed file URL, so the backend refused to inline it."
-    : "Set RUNPOD_INPUT_BASE_URL to a public URL for this backend, such as a production URL or tunnel, so RunPod can download the original file bytes.";
-
-  throw new Error(
-    `RunPod ${kind} input "${sourceName}" is ${formatBytes(byteLength)}, which is too large to place inside the JSON request without hitting RunPod's 20MiB body limit. ${baseUrlHint} This avoids any image quality loss.`,
-  );
-}
-
-function formatBytes(value: number) {
-  const mib = value / (1024 * 1024);
-  return `${mib.toFixed(mib >= 10 ? 1 : 2)}MiB`;
-}
-
-function mimeTypeFromMediaPath(filePath: string, kind: "image" | "video") {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
-  if (extension === ".png") return "image/png";
-  if (extension === ".webp") return "image/webp";
-  if (extension === ".gif") return "image/gif";
-  if (extension === ".mp4" || extension === ".m4v") return "video/mp4";
-  if (extension === ".mov") return "video/quicktime";
-  if (extension === ".webm") return "video/webm";
-  if (extension === ".mkv") return "video/x-matroska";
-  if (extension === ".avi") return "video/x-msvideo";
-  return kind === "image" ? "image/png" : "video/mp4";
-}
-
-function mediaUrl(filePath: string) {
-  return `/api/media?path=${encodeURIComponent(filePath)}`;
-}
-
-async function ensureWorkerProjectFolder(serverUrl: string, projectFolderName: string) {
-  const port = new URL(serverUrl).port;
-  if (!/^82\d\d$/.test(port)) return;
-
-  const projectRoot = path.join("C:\\Comfy_pool\\instances", `comfy-${port}`, "output", "projects", projectFolderName);
-  for (const folder of ["images", "sequences", "videos", "metadata", "logs", "jobs"]) {
-    await fs.mkdir(path.join(projectRoot, folder), { recursive: true });
-  }
 }
 
 // Web/worker split Stage A: when JOBS_ROW_LEVEL_WRITES is on (SQLite driver),
@@ -2140,51 +1481,13 @@ async function persistArchivedRemove(id: string): Promise<void> {
 // jobs file many times per second. Coalesce rapid writes into one: callers keep
 // awaiting persistJobs() (the in-memory array is the source of truth for reads),
 // but the disk write is debounced and de-duplicated.
-const persistDebounceMs = 500;
-let persistTimer: NodeJS.Timeout | undefined;
-let pendingPersist: { promise: Promise<void>; resolve: () => void; reject: (error: unknown) => void } | undefined;
-
 function persistJobs(): Promise<void> {
-  if (!pendingPersist) {
-    let resolve!: () => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<void>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    pendingPersist = { promise, resolve, reject };
-  }
-  if (!persistTimer) {
-    persistTimer = setTimeout(() => void runPersistFlush(), persistDebounceMs);
-    persistTimer.unref?.();
-  }
-  return pendingPersist.promise;
-}
-
-async function runPersistFlush() {
-  persistTimer = undefined;
-  const flush = pendingPersist;
-  if (!flush) return;
-  pendingPersist = undefined;
-  try {
-    if (sqliteStore) {
-      sqliteStore.replaceAll(jobs);
-    } else {
-      await writeJsonFile(jobsStorePath, jobs);
-    }
-    flush.resolve();
-  } catch (error) {
-    flush.reject(error);
-  }
+  return jobPersistence.request();
 }
 
 // Flush any pending job write immediately (used on graceful shutdown).
 export async function flushPersistedJobs() {
-  if (persistTimer) {
-    clearTimeout(persistTimer);
-    persistTimer = undefined;
-  }
-  await runPersistFlush();
+  await jobPersistence.flush();
 }
 
 // Close the SQLite store connection (if open) so file handles are released.
@@ -2194,7 +1497,7 @@ export function closeJobStore() {
   // active jobs, leave the lease row to expire so the replacement recognizes
   // a takeover and keeps those jobs inside the global cap for their timeout.
   let releaseLease = true;
-  if (dispatcherLeaseHeld && sqliteStore) {
+  if (dispatcherLeaseCoordinator.isHeld() && sqliteStore) {
     try {
       releaseLease = sqliteStore.countActiveJobs() === 0;
     } catch {

@@ -105,9 +105,27 @@ const api = {
   },
 };
 
+const web = {
+  name: "momi-web",
+  cwd: "C:/Momi-Animation/backend",
+  script: "dist/frontendServer.js",
+  instances: 1,
+  exec_mode: "fork",
+  ...processSafety,
+  env: {
+    NODE_ENV: "production",
+    FRONTEND_HOST: process.env.FRONTEND_HOST || "0.0.0.0",
+    FRONTEND_PORT: process.env.FRONTEND_PORT || "8190",
+    FRONTEND_DIST_PATH: process.env.FRONTEND_DIST_PATH || "C:/Momi-Animation/dist",
+    // The public gateway is the only process exposed to the LAN. API workers
+    // remain loopback-bound, and the gateway refuses the ops-only routes.
+    FRONTEND_API_TARGET: process.env.FRONTEND_API_TARGET || "http://127.0.0.1:3333",
+  },
+};
+
 // Production stays on the existing monolith until the environment flag is
 // explicitly enabled. PM2 does not remove apps omitted by a new config, so use
 // the documented flip/rollback commands when changing this flag.
 module.exports = {
-  apps: splitTopology ? [dispatcher, api] : [monolith],
+  apps: splitTopology ? [dispatcher, api, web] : [monolith, web],
 };

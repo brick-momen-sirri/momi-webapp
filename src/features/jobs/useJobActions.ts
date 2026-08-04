@@ -1,0 +1,244 @@
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+
+import type { ImageDownloadFormat } from "../../components/DownloadImageChoiceModal";
+import {
+  archiveBackendJob,
+  moveBackendJobResult,
+  permanentlyDeleteBackendJob,
+  restoreBackendJob,
+  retryBackendJob,
+  updateBackendJobSaveNumber,
+} from "../../services/backendApi";
+import type { Job, Project } from "../../types";
+import { normalizeRequiredSaveNumber, workflowOptionsWithSaveNumber } from "../generation/generationUtils";
+import { readFavoriteJobIds, writeFavoriteJobIds } from "../preferences/appPreferences";
+import type { ConfirmDialogState } from "../projects/useProjectActions";
+import { matchesFolder, mergeJobs } from "../workspace/workspaceUtils";
+import {
+  clipboardCompatibleImageBlob,
+  convertImageBlobForDownload,
+  downloadBlob,
+  downloadNameForJob,
+  fetchResultBlob,
+  isImageResult,
+} from "./resultMedia";
+
+type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
+
+type JobActionsOptions = {
+  backendAvailable: boolean;
+  projects: Project[];
+  jobs: Job[];
+  setJobs: Dispatch<SetStateAction<Job[]>>;
+  selectedFolderId: string;
+  setBackendJobsTotal: Dispatch<SetStateAction<number>>;
+  setBackendJobsOffset: Dispatch<SetStateAction<number>>;
+  setConfirmDialog: Dispatch<SetStateAction<ConfirmDialogState | null>>;
+  showToast: ShowToast;
+};
+
+export function useJobActions(options: JobActionsOptions) {
+  const {
+    backendAvailable,
+    projects,
+    jobs,
+    setJobs,
+    selectedFolderId,
+    setBackendJobsTotal,
+    setBackendJobsOffset,
+    setConfirmDialog,
+    showToast,
+  } = options;
+  const [favoriteJobIds, setFavoriteJobIds] = useState(readFavoriteJobIds);
+  const [downloadChoiceJob, setDownloadChoiceJob] = useState<Job | null>(null);
+
+  useEffect(() => {
+    writeFavoriteJobIds(favoriteJobIds);
+  }, [favoriteJobIds]);
+
+  async function handleDownloadJobResult(job: Job, resultIndex?: number, imageFormat?: ImageDownloadFormat) {
+    if (isImageResult(job) && imageFormat == null) {
+      setDownloadChoiceJob(job);
+      return;
+    }
+    try {
+      const blob = await fetchResultBlob(job, resultIndex ?? 0);
+      const download = imageFormat ? await convertImageBlobForDownload(blob, imageFormat) : blob;
+      downloadBlob(download, downloadNameForJob(job, download, resultIndex));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download result.", "error");
+    }
+  }
+
+  function handleDownloadChoice(index: number, format: ImageDownloadFormat) {
+    if (!downloadChoiceJob) return;
+    const job = downloadChoiceJob;
+    setDownloadChoiceJob(null);
+    void handleDownloadJobResult(job, index, format);
+  }
+
+  async function handleCopyJobImage(job: Job) {
+    try {
+      const blob = await fetchResultBlob(job);
+      if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+        showToast("Clipboard image copy is not available in this browser.", "error");
+        return;
+      }
+      const imageBlob = await clipboardCompatibleImageBlob(blob);
+      await navigator.clipboard.write([new ClipboardItem({ [imageBlob.type]: imageBlob })]);
+      showToast("Copied image.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not copy image.", "error");
+    }
+  }
+
+  function handleToggleFavorite(job: Job) {
+    setFavoriteJobIds((current) => {
+      const next = new Set(current);
+      if (next.has(job.id)) next.delete(job.id);
+      else next.add(job.id);
+      return next;
+    });
+  }
+
+  async function handleMoveJobResult(job: Job, destinationFolderId: string | null) {
+    const project = projects.find((item) => item.id === job.projectId);
+    if (!project) {
+      showToast("Project not found.", "error");
+      return false;
+    }
+    const destinationFolder = destinationFolderId
+      ? project.folders?.find((folder) => folder.folderId === destinationFolderId && !folder.archived)
+      : undefined;
+    if (destinationFolderId && !destinationFolder) {
+      showToast("Destination folder not found.", "error");
+      return false;
+    }
+
+    const optimisticJob: Job = { ...job, folderId: destinationFolderId, folderName: destinationFolder?.name ?? "Root" };
+    const leavesSelectedFolder = selectedFolderId !== "all" && matchesFolder(job, selectedFolderId);
+    setJobs((current) => current.map((item) => (item.id === job.id ? optimisticJob : item)));
+    if (backendAvailable && leavesSelectedFolder) {
+      setBackendJobsTotal((current) => Math.max(0, current - 1));
+      setBackendJobsOffset((current) => Math.max(0, current - 1));
+    }
+
+    try {
+      const updated = backendAvailable ? await moveBackendJobResult(job.projectId, job.id, destinationFolderId) : optimisticJob;
+      setJobs((current) => current.map((item) => (item.id === job.id ? updated : item)));
+      showToast(`Moved to ${destinationFolder?.name ?? "project root"}.`);
+      return true;
+    } catch (error) {
+      setJobs((current) => current.map((item) => (item.id === job.id ? job : item)));
+      if (backendAvailable && leavesSelectedFolder) {
+        setBackendJobsTotal((current) => current + 1);
+        setBackendJobsOffset((current) => current + 1);
+      }
+      showToast(error instanceof Error ? error.message : "Could not move result.", "error");
+      return false;
+    }
+  }
+
+  async function handleRetryJob(job: Job) {
+    if (!backendAvailable) {
+      showToast("Retry is only available while the backend is connected.", "error");
+      return;
+    }
+    try {
+      const newJob = await retryBackendJob(job.id);
+      setJobs((current) => mergeJobs([newJob], current));
+      setBackendJobsTotal((current) => current + 1);
+      setBackendJobsOffset((current) => current + 1);
+      showToast("Job requeued with the same settings.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not retry job.", "error");
+    }
+  }
+
+  async function setArchivedState(job: Job, restore: boolean) {
+    const previousJobs = jobs;
+    setJobs((current) => current.filter((item) => item.id !== job.id));
+    setBackendJobsTotal((current) => Math.max(0, current - 1));
+    try {
+      if (backendAvailable) {
+        if (restore) await restoreBackendJob(job.id);
+        else await archiveBackendJob(job.id);
+      }
+      showToast(restore ? "Restored to main results." : "Moved to archive.");
+    } catch (error) {
+      setJobs(previousJobs);
+      setBackendJobsTotal((current) => current + 1);
+      showToast(
+        error instanceof Error ? error.message : restore ? "Could not restore result." : "Could not archive result.",
+        "error",
+      );
+    }
+  }
+
+  function handlePermanentlyDeleteJob(job: Job) {
+    setConfirmDialog({
+      title: "Delete archived item",
+      message: "Delete this archived item permanently from the app archive? The media files on disk are left untouched.",
+      confirmLabel: "Delete permanently",
+      tone: "danger",
+      onConfirm: () => void performPermanentlyDeleteJob(job),
+    });
+  }
+
+  async function performPermanentlyDeleteJob(job: Job) {
+    const previousJobs = jobs;
+    setJobs((current) => current.filter((item) => item.id !== job.id));
+    setBackendJobsTotal((current) => Math.max(0, current - 1));
+    try {
+      if (backendAvailable) await permanentlyDeleteBackendJob(job.id);
+      showToast("Archived item permanently deleted.");
+    } catch (error) {
+      setJobs(previousJobs);
+      setBackendJobsTotal((current) => current + 1);
+      showToast(error instanceof Error ? error.message : "Could not delete archived item.", "error");
+    }
+  }
+
+  async function handleUpdateJobSaveNumber(job: Job, value: string) {
+    try {
+      const nextSaveNumber = normalizeRequiredSaveNumber(value);
+      if (!nextSaveNumber) {
+        showToast("Shot/camera number is required.", "error");
+        return;
+      }
+      const fallbackWorkflowOptions = workflowOptionsWithSaveNumber(job.workflowOptions, nextSaveNumber);
+      const updated = backendAvailable
+        ? await updateBackendJobSaveNumber(job.projectId, job.id, nextSaveNumber)
+        : { ...job, workflowOptions: fallbackWorkflowOptions };
+      setJobs((current) =>
+        current.map((item) =>
+          item.id === job.id
+            ? {
+                ...item,
+                workflowOptions: updated.workflowOptions ?? workflowOptionsWithSaveNumber(item.workflowOptions, nextSaveNumber),
+              }
+            : item,
+        ),
+      );
+      showToast("Shot/camera updated.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not update shot/camera.", "error");
+    }
+  }
+
+  return {
+    favoriteJobIds,
+    downloadChoiceJob,
+    closeDownloadChoice: () => setDownloadChoiceJob(null),
+    handleDownloadChoice,
+    handleDownloadJobResult,
+    handleCopyJobImage,
+    handleToggleFavorite,
+    handleMoveJobResult,
+    handleRetryJob,
+    handleArchiveJob: (job: Job) => setArchivedState(job, false),
+    handleRestoreArchivedJob: (job: Job) => setArchivedState(job, true),
+    handlePermanentlyDeleteJob,
+    handleUpdateJobSaveNumber,
+  };
+}
