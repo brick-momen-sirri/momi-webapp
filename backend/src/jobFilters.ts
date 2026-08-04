@@ -10,9 +10,32 @@ export function normalizeJobSaveNumber(value?: number | string | null) {
   return (digits || "0000").padStart(4, "0");
 }
 
-export function isVideoSaveJob(job: Pick<Job, "category" | "inputType" | "modelName" | "outputType">) {
+/**
+ * Does this job's save number belong under "Shot" (video) rather than "Camera"?
+ *
+ * MUST stay in step with isVideoLikeJob in src/utils/saveNumber.ts. The backend
+ * decides which number to index for search; the frontend decides which one to
+ * display. When they disagree, searching "camera" fails to find a job the UI
+ * labels Camera, and a job carrying both numbers is indexed under one and shown
+ * as the other. Both files have a truth-table test over the same cases so a
+ * change to one fails the other.
+ *
+ * Every signal below is positive evidence. This deliberately no longer tests
+ * `outputType !== "image"`, which classified a job with no outputType as video --
+ * an absent field is not evidence, and that was the one clause the two sides
+ * disagreed on.
+ */
+export function isVideoSaveJob(job: Pick<Job, "category" | "inputType" | "modelName" | "outputType" | "durationSeconds">) {
   const modelName = job.modelName.toLowerCase();
-  return job.category.includes("video") || job.outputType !== "image" || job.inputType === "video" || modelName.includes("video");
+  return (
+    job.outputType === "video" ||
+    job.outputType === "sequence" ||
+    // durationSeconds is this side's name for what the frontend calls videoLength.
+    Boolean(job.durationSeconds) ||
+    job.inputType === "video" ||
+    job.category.includes("video") ||
+    modelName.includes("video")
+  );
 }
 
 export function getJobSaveSearchValue(job: Job) {

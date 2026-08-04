@@ -77,3 +77,34 @@ describe("which field wins", () => {
     expect(getJobSaveNumber(job())).toBe("0000");
   });
 });
+
+// --- Cross-side truth table -------------------------------------------------
+//
+// The same cases are asserted in backend/src/jobFilters.test.ts against
+// isVideoSaveJob. Both predicates decide the same question -- the backend picks
+// the save number indexed for search, this one picks the number displayed -- and
+// they drifted once already, so any change to one must fail the other.
+//
+// Keep the two tables identical. Field names differ across the two Job shapes
+// (modelType/backendCategory here, modelName/category there); the CASES do not.
+const VIDEO_TRUTH_TABLE: Array<{ name: string; job: Partial<Job>; isVideo: boolean }> = [
+  { name: "explicit video output", job: { outputType: "video" }, isVideo: true },
+  { name: "sequence output", job: { outputType: "sequence" }, isVideo: true },
+  { name: "carries a video length", job: { outputType: undefined, videoLength: "5" }, isVideo: true },
+  { name: "video input", job: { outputType: undefined, inputType: "video" }, isVideo: true },
+  { name: "video in the category", job: { outputType: undefined, backendCategory: "i2v_video" }, isVideo: true },
+  { name: "video in the model name", job: { outputType: undefined, modelType: "Kling Video 2.6" }, isVideo: true },
+  { name: "explicit image output", job: { outputType: "image" }, isVideo: false },
+  // The case the two sides disagreed on: no evidence either way is NOT video.
+  { name: "no outputType and no other video signal", job: { outputType: undefined }, isVideo: false },
+  { name: "image category and image model", job: { outputType: "image", backendCategory: "image_editing" }, isVideo: false },
+];
+
+describe("cross-side truth table", () => {
+  for (const entry of VIDEO_TRUTH_TABLE) {
+    it(`${entry.name} -> ${entry.isVideo ? "Shot" : "Camera"}`, () => {
+      const label = getJobSaveNumberLabel(job({ modelType: "Nano Banana", inputType: "single_image", ...entry.job }));
+      expect(label).toBe(entry.isVideo ? "Shot" : "Camera");
+    });
+  }
+});

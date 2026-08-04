@@ -10,7 +10,11 @@ type JobPreviewProps = {
 };
 
 export function JobPreview({ job }: JobPreviewProps) {
-  const [shouldLoadMedia, setShouldLoadMedia] = useState(false);
+  // Whether the browser supports IntersectionObserver cannot change during a
+  // session, so it is an initial value rather than something to discover in an
+  // effect and then set state about. Without support there is no way to know when
+  // the card scrolls into view, so media loads immediately.
+  const [shouldLoadMedia, setShouldLoadMedia] = useState(() => !("IntersectionObserver" in window));
   const [fullscreenImage, setFullscreenImage] = useState<{ url: string; name: string } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -21,8 +25,8 @@ export function JobPreview({ job }: JobPreviewProps) {
       return;
     }
 
+    // Handled by the initial state above.
     if (!("IntersectionObserver" in window)) {
-      setShouldLoadMedia(true);
       return;
     }
 

@@ -144,13 +144,12 @@ test("existing project media has no save number to search on", () => {
   assert.equal(getJobSaveSearchValue(media), "");
 });
 
-test("isVideoSaveJob treats an absent outputType as video", () => {
-  // Worth pinning explicitly, because it is a real divergence from the frontend:
-  // src/utils/saveNumber.ts treats a missing outputType as an IMAGE (falling to
-  // cameraNumber), while this treats it as video (preferring shotNumber). Only
-  // reachable for records with no outputType, but it means the number the backend
-  // indexes for search can differ from the one the UI shows for the same job.
-  assert.equal(isVideoSaveJob(job({ outputType: undefined }) as never), true);
+test("isVideoSaveJob requires positive evidence, so an absent outputType is not video", () => {
+  // This used to return true for a missing outputType, via an `outputType !==
+  // "image"` clause -- the one signal that fired on absence rather than presence,
+  // and the only thing the frontend's equivalent disagreed with. An unknown output
+  // type is not evidence of video, so it now falls to Camera on both sides.
+  assert.equal(isVideoSaveJob(job({ outputType: undefined }) as never), false);
   assert.equal(isVideoSaveJob(job({ outputType: "image" }) as never), false);
   assert.equal(isVideoSaveJob(job({ outputType: "video" }) as never), true);
   assert.equal(isVideoSaveJob(job({ outputType: "sequence" }) as never), true);
@@ -175,3 +174,32 @@ test("getJobSaveSearchValue prefers shot for video and camera for stills", () =>
     "0005",
   );
 });
+
+// --- Cross-side truth table -------------------------------------------------
+//
+// The same cases are asserted in src/utils/saveNumber.test.ts against
+// isVideoLikeJob. Both predicates decide the same question -- this one picks the
+// save number indexed for search, the frontend's picks the number displayed --
+// and they drifted once already, so any change to one must fail the other.
+//
+// Keep the two tables identical. Field names differ across the two Job shapes
+// (modelName/category here, modelType/backendCategory there); the CASES do not.
+const VIDEO_TRUTH_TABLE: Array<{ name: string; job: Partial<Job>; isVideo: boolean }> = [
+  { name: "explicit video output", job: { outputType: "video" }, isVideo: true },
+  { name: "sequence output", job: { outputType: "sequence" }, isVideo: true },
+  { name: "carries a video length", job: { outputType: undefined, durationSeconds: 5 }, isVideo: true },
+  { name: "video input", job: { outputType: undefined, inputType: "video" }, isVideo: true },
+  { name: "video in the category", job: { outputType: undefined, category: "i2v_video" }, isVideo: true },
+  { name: "video in the model name", job: { outputType: undefined, modelName: "Kling Video 2.6" }, isVideo: true },
+  { name: "explicit image output", job: { outputType: "image" }, isVideo: false },
+  // The case the two sides disagreed on: no evidence either way is NOT video.
+  { name: "no outputType and no other video signal", job: { outputType: undefined }, isVideo: false },
+  { name: "image category and image model", job: { outputType: "image", category: "image_editing" }, isVideo: false },
+];
+
+for (const entry of VIDEO_TRUTH_TABLE) {
+  test(`truth table: ${entry.name} -> ${entry.isVideo ? "Shot" : "Camera"}`, () => {
+    const subject = job({ modelName: "Nano Banana", category: "image_editing", inputType: "single_image", ...entry.job });
+    assert.equal(isVideoSaveJob(subject as never), entry.isVideo);
+  });
+}

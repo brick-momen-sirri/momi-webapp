@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Info, Loader2, X } from "lucide-react";
 import { AccountPanel } from "./components/AccountPanel";
-import { defaultArchVizGridOptions } from "./components/ArchVizGridControls";
+import { defaultArchVizGridOptions } from "./components/archVizGridDefaults";
 import { AuthScreen } from "./components/AuthScreen";
 import { ComfyPoolManager } from "./components/ComfyPoolManager";
 import { ConfirmModal } from "./components/ConfirmModal";
