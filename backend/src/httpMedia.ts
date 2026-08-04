@@ -199,8 +199,28 @@ export function mediaFilePathFromUrl(url: URL) {
   return undefined;
 }
 
+/**
+ * Is `candidate` the directory `root` itself, or something inside it?
+ *
+ * The point of this over a bare startsWith is the separator boundary. Comparing
+ * resolved strings alone means "<root>-evil" and "<root>.json" count as inside
+ * the root, because they share its prefix. That was a real hole rather than a
+ * theoretical one: localProjectsRoot is `backend/data/projects`, so
+ * `backend/data/projects.json` -- the project store -- passed the media
+ * allowlist, and no project folder matched it either, so no per-project
+ * permission check applied on top.
+ *
+ * Case-insensitive because the Windows filesystem this runs on is.
+ */
+export function isWithinRoot(candidate: string, root: string) {
+  const resolvedCandidate = path.resolve(candidate).toLowerCase();
+  const resolvedRoot = path.resolve(root).toLowerCase();
+  if (resolvedCandidate === resolvedRoot) return true;
+  const withSeparator = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`;
+  return resolvedCandidate.startsWith(withSeparator);
+}
+
 export function isAllowedMediaPath(filePath: string, options: { allowTemp?: boolean } = {}) {
-  const resolvedPath = path.resolve(filePath).toLowerCase();
   const roots = [
     brickProjectsRoot,
     localProjectsRoot,
@@ -212,7 +232,7 @@ export function isAllowedMediaPath(filePath: string, options: { allowTemp?: bool
     roots.push(path.join(comfyRoot, "temp"));
     roots.push("C:\\Comfy_pool\\instances");
   }
-  return roots.map((root) => path.resolve(root).toLowerCase()).some((root) => resolvedPath.startsWith(root));
+  return roots.some((root) => isWithinRoot(filePath, root));
 }
 
 export function extensionFromContentType(contentType: string) {

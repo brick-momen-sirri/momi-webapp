@@ -1,7 +1,14 @@
 // Query-string and pagination parsing shared across routes.
 
 export function parsePaginationNumber(value: unknown, fallback: number, max: number) {
-  const parsed = Number(getQueryValue(value));
+  const raw = getQueryValue(value);
+  // An absent or empty parameter means "not specified", so the caller's default
+  // applies. Without this the fallback was dead code: getQueryValue returns ""
+  // for a missing parameter, Number("") is 0, and 0 is finite -- so
+  // GET /api/jobs with no ?limit returned zero jobs instead of the default 80.
+  // Latent only because the frontend always sends one.
+  if (!raw) return fallback;
+  const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(0, Math.floor(parsed)), max);
 }

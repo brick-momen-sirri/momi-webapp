@@ -35,6 +35,17 @@ class ImmediateIntersectionObserver implements IntersectionObserver {
 
 vi.stubGlobal("IntersectionObserver", ImmediateIntersectionObserver);
 
+// CropModal measures its viewport with a ResizeObserver, which jsdom also lacks.
+// A no-op is right here: jsdom reports zero-size elements anyway, so a resize
+// callback would carry no useful measurements to assert on.
+class NoopResizeObserver implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+vi.stubGlobal("ResizeObserver", NoopResizeObserver);
+
 // jsdom implements neither of these on HTMLMediaElement, and video results call
 // them. Left as no-ops rather than mocks: no test asserts on playback.
 Object.defineProperty(window.HTMLMediaElement.prototype, "play", {

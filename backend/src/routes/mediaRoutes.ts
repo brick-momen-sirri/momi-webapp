@@ -20,6 +20,7 @@ import {
   sendUpstreamBody,
   streamLocalFile,
   uploadedMediaFileName,
+  isWithinRoot,
 } from "../httpMedia.js";
 import { getQueryValue } from "../httpQuery.js";
 import { canAccessJob, canCreateJobInProject, canViewProject, getVisibleJobForResult, isDemoAccount } from "../jobPermissions.js";
@@ -88,10 +89,10 @@ function authorizeMediaRead(
     return { ok: false, status: 403, error: "Media path is outside allowed project roots" };
   }
 
-  const project = getProjects().find((item) => {
-    const folderPath = item.folderPath ? path.resolve(item.folderPath).toLowerCase() : "";
-    return folderPath && resolvedPath.toLowerCase().startsWith(folderPath);
-  });
+  // Boundary-aware, for the same reason isAllowedMediaPath is: a bare startsWith
+  // makes "<folderPath>-other" look like it belongs to this project and applies
+  // the wrong project's permissions to it.
+  const project = getProjects().find((item) => item.folderPath && isWithinRoot(resolvedPath, item.folderPath));
   if (project && !canViewProject(getRequestUser(req), project)) {
     return { ok: false, status: 404, error: "Media file not found" };
   }

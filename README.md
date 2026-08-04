@@ -125,16 +125,15 @@ Coverage is a beachhead, not a suite. What is covered:
 | Media access token lifecycle                                                                                                    | Built recently, and it fails silently: URLs are assembled during render from a token refreshed on a timer, so a bug produces broken images minutes after a tab opens rather than an error |
 | `saveNumber`                                                                                                                    | Decides the filename a render is filed under; wrong is only noticed much later                                                                                                            |
 | `promptRules`                                                                                                                   | The Kling 2500-char limit is duplicated in the backend; a drift means prompts pass the UI and fail at submission                                                                          |
+| `backendApi` job/project/upload calls                                                                                           | Wiring errors — an unescaped path segment, a missing auth header, an error body swallowed into a useless "500" — are invisible until a user hits one                                      |
+| `CreditUsageDashboard`, `RightProjectPanel`, `ImageUploader`, `CropModal`                                                       | The dashboard reports company spend; the other three decide what a job is submitted with                                                                                                  |
+| Backend services: `jobPermissions`, `httpMedia`, `httpQuery`, `creditDashboardService`                                          | Extracted from `index.ts` precisely so they could be tested; two real bugs found on first contact                                                                                         |
 | `JobFeed` — every filter (status, model, scope, specific-user, generation type), sort, Reset/Apply, search, pagination, actions | Busiest list logic in the app; a filter that silently drops a job reads to an artist as "my render is missing"                                                                            |
 
 Known gaps, in rough priority order:
 
 - `App.tsx` — 2,100 lines, 39 `useState`, no tests. Needs a mocking harness
   before it can be rendered at all.
-- `backendApi`'s job, project and upload calls. Only the auth and media-token
-  paths are covered.
-- The remaining components: `CreditUsageDashboard`, `RightProjectPanel`,
-  `ImageUploader`, `CropModal`.
 
 When adding a test, prefer asserting the thing a user would notice over the
 implementation detail that produces it. Two traps already caught here:
