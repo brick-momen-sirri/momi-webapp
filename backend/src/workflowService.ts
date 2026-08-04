@@ -4,6 +4,7 @@ import { serverlessWorkflowRoot, workflowMappingsPath, workflowRoots } from "./c
 import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
+import { isPathWithinRoot } from "./pathContainment.js";
 import { assertNoEmbeddedMedia, readJsonFile } from "./storageService.js";
 import type {
   ArchVizGridOptions,
@@ -363,8 +364,7 @@ function inferImageSlotCount(
 }
 
 function isServerlessWorkflowPath(workflowPath: string) {
-  const root = path.resolve(serverlessWorkflowRoot).toLowerCase();
-  return path.resolve(workflowPath).toLowerCase().startsWith(root);
+  return isPathWithinRoot(workflowPath, serverlessWorkflowRoot);
 }
 
 function serverlessImageSlotCount(workflow: unknown) {

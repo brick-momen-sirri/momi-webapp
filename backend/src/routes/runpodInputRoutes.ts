@@ -6,6 +6,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentTypeFromFilePath, safeHeaderFileName, streamLocalFile } from "../httpMedia.js";
+import { resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
 import { resolveRunpodInputToken } from "../runpodInputUrlService.js";
 
 export const runpodInputRouter = express.Router();
@@ -18,11 +19,15 @@ runpodInputRouter.get("/api/runpod-input", async (req, res) => {
   }
 
   try {
-    await fs.access(input.filePath);
-    await streamLocalFile(req, res, input.filePath, {
+    const filePath = await resolveAllowedExistingMediaPath(input.filePath);
+    if (!filePath) {
+      return res.status(404).json({ error: "RunPod input file not found." });
+    }
+    await fs.access(filePath);
+    await streamLocalFile(req, res, filePath, {
       cacheControl: "no-store",
-      contentType: contentTypeFromFilePath(input.filePath),
-      disposition: `inline; filename="${safeHeaderFileName(path.basename(input.filePath))}"`,
+      contentType: contentTypeFromFilePath(filePath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(filePath))}"`,
     });
   } catch {
     res.status(404).json({ error: "RunPod input file not found." });

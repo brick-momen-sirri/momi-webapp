@@ -1,14 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import {
-  brickProjectsRoot,
-  comfyRoot,
-  localProjectsRoot,
-  runpodInputBaseUrl,
-  runpodInputTokenSecret,
-  runpodInputUrlTtlMs,
-  uploadedMediaRoot,
-} from "./config.js";
+import { runpodInputBaseUrl, runpodInputTokenSecret, runpodInputUrlTtlMs } from "./config.js";
+import { isAllowedMediaPath } from "./mediaPathPolicy.js";
 
 export type RunpodInputKind = "image" | "video";
 
@@ -29,7 +22,7 @@ export function createRunpodInputUrl(filePath: string, kind: RunpodInputKind) {
   if (!runpodInputTokenSecret) return undefined;
 
   const resolvedPath = path.resolve(filePath);
-  if (!isAllowedRunpodInputPath(resolvedPath)) {
+  if (!isAllowedMediaPath(filePath)) {
     throw new Error("RunPod input path is outside allowed media roots.");
   }
 
@@ -55,7 +48,7 @@ export function resolveRunpodInputToken(token: string): ResolvedRunpodInput | un
   if (!payload || payload.exp < Date.now()) return undefined;
 
   const filePath = path.resolve(payload.path);
-  if (!isAllowedRunpodInputPath(filePath)) return undefined;
+  if (!isAllowedMediaPath(payload.path)) return undefined;
 
   return {
     filePath,
@@ -88,16 +81,4 @@ function safeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function isAllowedRunpodInputPath(filePath: string) {
-  const resolvedPath = path.resolve(filePath);
-  return [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
-    .map((root) => path.resolve(root))
-    .some((root) => isPathInsideRoot(resolvedPath, root));
-}
-
-function isPathInsideRoot(filePath: string, root: string) {
-  const relative = path.relative(root, filePath);
-  return relative === "" || Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
 }

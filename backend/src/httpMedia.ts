@@ -6,7 +6,9 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { brickProjectsRoot, comfyRoot, localProjectsRoot, uploadedMediaRoot } from "./config.js";
+import { comfyRoot } from "./config.js";
+import { isAllowedMediaPath as isAllowedMediaPathByPolicy, resolveAllowedExistingMediaPath } from "./mediaPathPolicy.js";
+import { isPathWithinRoot } from "./pathContainment.js";
 import { uploadedMediaBaseName } from "./uploadedMediaName.js";
 import type { Job } from "./types.js";
 
@@ -212,28 +214,13 @@ export function mediaFilePathFromUrl(url: URL) {
  *
  * Case-insensitive because the Windows filesystem this runs on is.
  */
-export function isWithinRoot(candidate: string, root: string) {
-  const resolvedCandidate = path.resolve(candidate).toLowerCase();
-  const resolvedRoot = path.resolve(root).toLowerCase();
-  if (resolvedCandidate === resolvedRoot) return true;
-  const withSeparator = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`;
-  return resolvedCandidate.startsWith(withSeparator);
-}
+export const isWithinRoot = isPathWithinRoot;
 
 export function isAllowedMediaPath(filePath: string, options: { allowTemp?: boolean } = {}) {
-  const roots = [
-    brickProjectsRoot,
-    localProjectsRoot,
-    uploadedMediaRoot,
-    path.join(comfyRoot, "output"),
-    path.join(comfyRoot, "input"),
-  ];
-  if (options.allowTemp) {
-    roots.push(path.join(comfyRoot, "temp"));
-    roots.push("C:\\Comfy_pool\\instances");
-  }
-  return roots.some((root) => isWithinRoot(filePath, root));
+  return isAllowedMediaPathByPolicy(filePath, options);
 }
+
+export { resolveAllowedExistingMediaPath };
 
 export function extensionFromContentType(contentType: string) {
   if (contentType.includes("image/jpeg")) return ".jpg";

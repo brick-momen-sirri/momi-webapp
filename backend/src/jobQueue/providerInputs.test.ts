@@ -6,8 +6,8 @@
 // read from the dispatcher process, so it is pinned here rather than left to the
 // integration tests that happen to exercise it indirectly.
 //
-// These tests assert current behavior on purpose -- including one sharp edge noted
-// at the bottom -- so that a future change to the guard has to be deliberate.
+// These tests pin the separator-aware behavior at the provider boundary so this
+// disk-read guard cannot regress independently from the HTTP media route.
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -63,20 +63,22 @@ test("treats an absolute backend media URL the same as a relative one", () => {
   assert.equal(localMediaFilePathFromUrl(`http://127.0.0.1:3333${mediaUrl(inside)}`), path.resolve(inside));
 });
 
-// Known sharp edge, pinned deliberately rather than fixed here.
-//
-// The allowlist compares with startsWith() on the resolved, lowercased path and
-// does NOT append a separator, so a *sibling* directory whose name merely begins
-// with an allowed root is also accepted. Reaching it still requires the attacker to
-// influence ?path= AND for that file to exist on this host, so this is hardening
-// rather than an open hole -- but the fix (compare against `root + path.sep`, plus
-// an equality check for the root itself) is a security behavior change and should
-// land on its own, with the LAN exposure of /api/media reviewed at the same time.
-test("KNOWN GAP: a sibling directory sharing an allowed root's prefix is accepted", () => {
-  const siblingOfRoot = `${uploadedMediaRoot}_evil${path.sep}stolen.png`;
-  assert.equal(
-    localMediaFilePathFromUrl(mediaUrl(siblingOfRoot)),
-    path.resolve(siblingOfRoot),
-    "documents today's behavior; tighten with a separator-aware comparison",
-  );
+test("refuses sibling directories that merely share an allowed root prefix", () => {
+  // uploadedMediaRoot is intentionally nested inside localProjectsRoot, so its
+  // siblings are separately covered by that broader root. The Comfy input root
+  // has no broader allowlist entry and isolates the prefix-boundary guarantee.
+  const comfyInputRoot = path.join(comfyRoot, "input");
+  const siblingOfRoot = `${comfyInputRoot}_evil${path.sep}stolen.png`;
+  assert.equal(localMediaFilePathFromUrl(mediaUrl(siblingOfRoot)), undefined);
+  assert.equal(localMediaFilePathFromUrl(mediaUrl(`${comfyInputRoot}2${path.sep}stolen.png`)), undefined);
+  assert.equal(localMediaFilePathFromUrl(mediaUrl(`${comfyInputRoot}-backup${path.sep}stolen.png`)), undefined);
+});
+
+test("refuses URL-decoded and double-encoded traversal values", () => {
+  const escaped = path.resolve(uploadedMediaRoot, "..", "outside", "secret.png");
+  const onceEncodedTraversal = `/api/media?path=${encodeURIComponent(uploadedMediaRoot)}%2F..%2Foutside%2Fsecret.png`;
+  const doubleEncodedPath = `/api/media?path=${encodeURIComponent(encodeURIComponent(escaped))}`;
+
+  assert.equal(localMediaFilePathFromUrl(onceEncodedTraversal), undefined);
+  assert.equal(localMediaFilePathFromUrl(doubleEncodedPath), undefined);
 });

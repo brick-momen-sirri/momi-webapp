@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { comfyPoolRoot, comfyServers } from "./config.js";
 import { getSystemStats } from "./comfyClient.js";
+import { isPathWithinRoot } from "./pathContainment.js";
 import type { ComfyServerStatus } from "./types.js";
 
 type ServerRecord = {
@@ -238,9 +239,7 @@ function portFromUrl(url: string) {
 }
 
 async function assertInsidePoolRoot(filePath: string) {
-  const root = path.resolve(comfyPoolRoot).toLowerCase();
-  const resolved = path.resolve(filePath).toLowerCase();
-  if (!resolved.startsWith(root)) {
+  if (!isPathWithinRoot(filePath, comfyPoolRoot)) {
     throw new Error("Comfy pool script path is outside the configured pool root.");
   }
 }

@@ -16,6 +16,7 @@ import {
   mediaFilePathFromUrl,
   mediaUrl,
   requestAbortSignal,
+  resolveAllowedExistingMediaPath,
   safeHeaderFileName,
   sendUpstreamBody,
   streamLocalFile,
@@ -80,13 +81,16 @@ mediaRouter.post("/api/media/upload", async (req, res) => {
 // project root and that the caller may view the owning project. Both /api/media
 // and its thumbnail variant go through this, so the two can never drift apart
 // into an access-control gap.
-function authorizeMediaRead(
+async function authorizeMediaRead(
   req: express.Request,
   rawPath: string,
-): { ok: true; resolvedPath: string } | { ok: false; status: number; error: string } {
-  const resolvedPath = path.resolve(rawPath);
-  if (!isAllowedMediaPath(resolvedPath)) {
+): Promise<{ ok: true; resolvedPath: string } | { ok: false; status: number; error: string }> {
+  if (!isAllowedMediaPath(rawPath)) {
     return { ok: false, status: 403, error: "Media path is outside allowed project roots" };
+  }
+  const resolvedPath = await resolveAllowedExistingMediaPath(rawPath);
+  if (!resolvedPath) {
+    return { ok: false, status: 404, error: "Media file not found" };
   }
 
   // Boundary-aware, for the same reason isAllowedMediaPath is: a bare startsWith
@@ -102,7 +106,7 @@ function authorizeMediaRead(
 
 mediaRouter.get("/api/media", async (req, res) => {
   const rawPath = typeof req.query.path === "string" ? req.query.path : "";
-  const access = authorizeMediaRead(req, rawPath);
+  const access = await authorizeMediaRead(req, rawPath);
   if (!access.ok) {
     return res.status(access.status).json({ error: access.error });
   }
@@ -123,7 +127,7 @@ mediaRouter.get("/api/media", async (req, res) => {
 // decode failure degrades to "slow" rather than "broken image".
 mediaRouter.get("/api/media/thumbnail", async (req, res) => {
   const rawPath = typeof req.query.path === "string" ? req.query.path : "";
-  const access = authorizeMediaRead(req, rawPath);
+  const access = await authorizeMediaRead(req, rawPath);
   if (!access.ok) {
     return res.status(access.status).json({ error: access.error });
   }
@@ -186,9 +190,11 @@ mediaRouter.get("/api/jobs/:jobId/result-file", async (req, res) => {
     const localPath = mediaFilePathFromUrl(absoluteUrl);
     if (localPath) {
       try {
-        await fs.access(localPath);
-        const contentType = contentTypeFromFilePath(localPath);
-        await streamLocalFile(req, res, localPath, {
+        const safeLocalPath = await resolveAllowedExistingMediaPath(localPath);
+        if (!safeLocalPath) throw new Error("Result file not found");
+        await fs.access(safeLocalPath);
+        const contentType = contentTypeFromFilePath(safeLocalPath);
+        await streamLocalFile(req, res, safeLocalPath, {
           contentType,
           disposition: `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
         });
@@ -230,12 +236,14 @@ mediaRouter.get("/api/jobs/:jobId/result-media", async (req, res) => {
     const localPath = mediaFilePathFromUrl(absoluteUrl);
     if (localPath) {
       try {
-        await fs.access(localPath);
+        const safeLocalPath = await resolveAllowedExistingMediaPath(localPath);
+        if (!safeLocalPath) throw new Error("Result file not found");
+        await fs.access(safeLocalPath);
         // ?w= asks for a downscaled rendition for grid/feed display. Ignored for
         // remote-only results below, which have no local file to re-encode.
         const requestedWidth = Number(req.query.w);
         if (Number.isFinite(requestedWidth) && requestedWidth > 0) {
-          const rendition = await getOrCreateThumbnail(localPath, requestedWidth).catch(() => undefined);
+          const rendition = await getOrCreateThumbnail(safeLocalPath, requestedWidth).catch(() => undefined);
           if (rendition?.kind === "rendition") {
             res.setHeader("ETag", `"${rendition.cacheKey}"`);
             if (req.headers["if-none-match"] === `"${rendition.cacheKey}"`) {
@@ -243,15 +251,15 @@ mediaRouter.get("/api/jobs/:jobId/result-media", async (req, res) => {
             }
             await streamLocalFile(req, res, rendition.filePath, {
               contentType: rendition.contentType,
-              disposition: `inline; filename="${safeHeaderFileName(`${path.parse(localPath).name}.webp`)}"`,
+              disposition: `inline; filename="${safeHeaderFileName(`${path.parse(safeLocalPath).name}.webp`)}"`,
               cacheControl: "private, max-age=604800, immutable",
             });
             return;
           }
         }
 
-        const contentType = contentTypeFromFilePath(localPath);
-        await streamLocalFile(req, res, localPath, {
+        const contentType = contentTypeFromFilePath(safeLocalPath);
+        await streamLocalFile(req, res, safeLocalPath, {
           contentType,
           disposition: `inline; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
         });

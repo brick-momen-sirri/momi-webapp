@@ -18,14 +18,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 
 import { uploadImage, uploadInputFile } from "../comfyClient.js";
-import {
-  brickProjectsRoot,
-  comfyRoot,
-  localProjectsRoot,
-  runpodInlineMediaMaxBytes,
-  runpodInputBaseUrl,
-  uploadedMediaRoot,
-} from "../config.js";
+import { runpodInlineMediaMaxBytes, runpodInputBaseUrl } from "../config.js";
+import { isAllowedMediaPath, resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
 import type { RunpodComfyImageInput } from "../runpodComfyService.js";
 import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "../runpodImageInlineService.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "../runpodInputUrlService.js";
@@ -60,7 +54,8 @@ export async function materializeRunpodInputVideo(job: Job, model: WorkflowModel
   const expectedNames = await detectWorkflowLoadVideoNames(model);
   const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
   const filePath = localMediaFilePathFromUrl(job.inputVideo);
-  const preparedFilePath = filePath ? await prepareRunpodVideoFile(filePath, inputFolder, model) : undefined;
+  const safeFilePath = filePath ? await requireAllowedExistingMediaPath(filePath) : undefined;
+  const preparedFilePath = safeFilePath ? await prepareRunpodVideoFile(safeFilePath, inputFolder, model) : undefined;
   return {
     videos: [
       preparedFilePath ? await runpodFileInput(preparedFilePath, name, "video") : await runpodVideoInput(job.inputVideo, name),
@@ -103,18 +98,19 @@ async function runpodFileInput(
   kind: RunpodInputKind,
   inlineImageMaxBytes?: number,
 ): Promise<RunpodComfyImageInput> {
-  const signedUrl = createRunpodInputUrl(filePath, kind);
+  const safeFilePath = await requireAllowedExistingMediaPath(filePath);
+  const signedUrl = createRunpodInputUrl(safeFilePath, kind);
   if (signedUrl) {
     return { name, url: signedUrl };
   }
 
   if (kind === "image") {
-    return runpodInlineImageFileInput(filePath, name, inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
+    return runpodInlineImageFileInput(safeFilePath, name, inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
   }
 
   return {
     name,
-    image: await readMediaFileAsDataUrl(filePath, kind),
+    image: await readMediaFileAsDataUrl(safeFilePath, kind),
   };
 }
 
@@ -173,9 +169,10 @@ export async function materializeComfyInputImages(job: Job, serverUrl: string) {
 }
 
 async function uploadLocalMediaToComfy(serverUrl: string, filePath: string, fileBase: string, kind: "image" | "video") {
-  const extension = path.extname(filePath) || (kind === "image" ? ".png" : ".mp4");
+  const safeFilePath = await requireAllowedExistingMediaPath(filePath);
+  const extension = path.extname(safeFilePath) || (kind === "image" ? ".png" : ".mp4");
   const filename = `${safeSegment(fileBase)}${extension}`;
-  const file = new Blob([await fs.readFile(filePath)], { type: mimeTypeFromMediaPath(filePath, kind) });
+  const file = new Blob([await fs.readFile(safeFilePath)], { type: mimeTypeFromMediaPath(safeFilePath, kind) });
   const uploaded =
     kind === "image" ? await uploadImage(serverUrl, file, filename) : await uploadInputFile(serverUrl, file, filename);
   const uploadedName = uploaded.name || filename;
@@ -230,17 +227,18 @@ export function localMediaFilePathFromUrl(value: string) {
     const url = new URL(value, "http://127.0.0.1");
     if (url.pathname !== "/api/media") return undefined;
     const filePath = url.searchParams.get("path");
-    return filePath && isAllowedLocalMediaPath(filePath) ? path.resolve(filePath) : undefined;
+    return filePath && isAllowedMediaPath(filePath) ? path.resolve(filePath) : undefined;
   } catch {
     return undefined;
   }
 }
 
-function isAllowedLocalMediaPath(filePath: string) {
-  const resolvedPath = path.resolve(filePath).toLowerCase();
-  return [brickProjectsRoot, localProjectsRoot, uploadedMediaRoot, path.join(comfyRoot, "output"), path.join(comfyRoot, "input")]
-    .map((root) => path.resolve(root).toLowerCase())
-    .some((root) => resolvedPath.startsWith(root));
+async function requireAllowedExistingMediaPath(filePath: string) {
+  const resolvedPath = await resolveAllowedExistingMediaPath(filePath);
+  if (!resolvedPath) {
+    throw new Error("Local media path is missing or outside allowed media roots.");
+  }
+  return resolvedPath;
 }
 
 async function readMediaFileAsDataUrl(filePath: string, kind: "image" | "video") {
