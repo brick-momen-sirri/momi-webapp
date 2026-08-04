@@ -28,15 +28,15 @@ export default defineConfig({
       reporter: ["text-summary", "json-summary", "lcov", "html"],
       reportsDirectory: "coverage/frontend",
       // A regression ratchet, not a target. Set ~3 points below the measured
-      // baseline (49.28/46.98/49.95/51.49) because v8 coverage drifts by a few
+      // baseline (54.22/51.42/53.92/56.14) because v8 coverage drifts by a few
       // hundredths between runs, and a threshold sitting inside that drift red-builds
       // CI on unrelated changes. Raise these deliberately when coverage improves --
       // never so tight that ordinary refactor churn trips them.
       thresholds: {
-        statements: 46,
-        branches: 44,
-        functions: 46,
-        lines: 48,
+        statements: 51,
+        branches: 48,
+        functions: 50,
+        lines: 53,
       },
     },
   },
