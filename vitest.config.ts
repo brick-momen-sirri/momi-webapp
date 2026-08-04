@@ -27,16 +27,16 @@ export default defineConfig({
       exclude: ["src/**/*.{test,spec}.{ts,tsx}", "src/test/**", "src/vite-env.d.ts"],
       reporter: ["text-summary", "json-summary", "lcov", "html"],
       reportsDirectory: "coverage/frontend",
-      // A regression ratchet, not a target. Set ~3 points below the measured
-      // baseline (54.22/51.42/53.92/56.14) because v8 coverage drifts by a few
-      // hundredths between runs, and a threshold sitting inside that drift red-builds
-      // CI on unrelated changes. Raise these deliberately when coverage improves --
-      // never so tight that ordinary refactor churn trips them.
+      // A regression ratchet, not a target. The 2026-08-04 risk-focused pass
+      // measured 57.12/52.84/57.44/59.17. These floors remain 3-4 points below
+      // that run so ordinary v8 drift and honest refactors do not encourage
+      // coverage theatre, while still preventing a return to the old baseline.
+      // See docs/COVERAGE_STRATEGY.md for per-risk-module review expectations.
       thresholds: {
-        statements: 51,
-        branches: 48,
-        functions: 50,
-        lines: 53,
+        statements: 53,
+        branches: 49,
+        functions: 53,
+        lines: 55,
       },
     },
   },

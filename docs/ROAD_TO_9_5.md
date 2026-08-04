@@ -261,10 +261,18 @@ how to roll back the change.
   floors that do not exclude difficult files.
 - Tests required before changing it: complete existing and new suites plus coverage,
   builds, formatting, diff hygiene, `.only`/skip/debug/secret/environment-file audit.
-- Implementation status: pending.
-- Verification results: pending.
+- Implementation status: coverage policy and ratchets complete; final gate in
+  progress. `docs/COVERAGE_STRATEGY.md` records global and per-risk-module
+  measurements, justified entrypoint gaps, exclusions, and the rule that new or
+  significantly modified business logic requires corresponding behavior tests.
+- Verification results: frontend coverage is 57.12% statements / 52.84%
+  branches / 57.44% functions / 59.17% lines; backend is 78.82% / 74.44% /
+  87.59% / 78.82%. CI floors were raised to 53/49/53/55 frontend and
+  74/71/82/74 backend, retaining several points of honest-refactor headroom.
 - Remaining risks: production verification stays incomplete until an authorized
-  deployment, health check, browser smoke, monitoring window, and rollback drill.
+  deployment, authenticated health/media smoke, monitoring window, PM2 reboot
+  resurrection, and rollback drill. Low executor/recovery coverage is documented
+  for targeted future failure-injection work rather than hidden by exclusions.
 - Rollback approach: thresholds/documentation revert cleanly; no runtime impact.
 
 ## Change log
