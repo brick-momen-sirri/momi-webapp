@@ -7,8 +7,9 @@
 // arbitrary browser, and this host has no confirmed public hostname (a
 // hardcoded 127.0.0.1 would resolve to the VIEWER's machine, not this server).
 // Serving it from the app itself means it's reachable however this backend is
-// already reached, with no new exposure surface beyond the existing
-// unauthenticated /api/health and /metrics endpoints it reads from.
+// already reached, with no new exposure surface beyond the /api/health and
+// /metrics endpoints it reads from -- all of which, this page included, are
+// behind requireOpsAccess (loopback, or OPS_ACCESS_TOKEN).
 
 export const OPS_DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
@@ -245,8 +246,18 @@ export const OPS_DASHBOARD_HTML = `<!doctype html>
   }
 
   // --- fetch helpers -------------------------------------------------
+  // The ops routes are guarded (loopback, or OPS_ACCESS_TOKEN). An operator
+  // reaching this page from off-box opened it as /ops-dashboard?token=..., so
+  // carry that token onto the polls the page makes for itself.
+  var OPS_TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+  function withToken(url) {
+    if (!OPS_TOKEN) return url;
+    return url + (url.indexOf("?") < 0 ? "?" : "&") + "token=" + encodeURIComponent(OPS_TOKEN);
+  }
+
   function getJson(url) {
-    return fetch(url, { cache: "no-store" }).then(function (r) {
+    return fetch(withToken(url), { cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error(url + " -> " + r.status);
       return r.json();
     });

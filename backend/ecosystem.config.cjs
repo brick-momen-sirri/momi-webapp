@@ -76,6 +76,12 @@ const dispatcher = {
     ROLE: "dispatcher",
     // Internal health/admin port; client traffic remains on the API cluster.
     PORT: process.env.MOMI_DISPATCHER_PORT || "3334",
+    // Defaults to loopback like everything else. Only override this
+    // (e.g. "0.0.0.0") if you specifically want the ops dashboard/health/metrics
+    // reachable from the LAN. Those routes are behind requireOpsAccess, which
+    // trusts loopback and otherwise demands OPS_ACCESS_TOKEN -- so widening this
+    // without also setting a token just makes them answer 403 from the LAN.
+    HOST: process.env.MOMI_DISPATCHER_HOST || "127.0.0.1",
   },
 };
 

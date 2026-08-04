@@ -92,6 +92,33 @@ export const authSessionDays = Number(process.env.AUTH_SESSION_DAYS ?? 14);
 export const defaultAdminEmail = process.env.MOMI_ADMIN_EMAIL ?? process.env.ADMIN_EMAIL ?? "momen@brickvisual.com";
 export const defaultAdminPassword = process.env.MOMI_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD;
 
+// --- Login throttling ---
+// scrypt (N=16384) makes each guess cost ~100ms of CPU, which slows an online
+// attacker but does not bound them, and a burst of parallel guesses is also a
+// cheap way to saturate this box's CPU. Counted per process: with api:N workers
+// the effective ceiling is N x maxAttempts, which is fine for the intent here
+// (stop unbounded guessing) and keeps the limiter dependency-free.
+export const loginRateLimitMaxAttempts = Math.max(1, Math.floor(positiveNumber(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, 10)));
+export const loginRateLimitWindowMs = positiveNumber(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000);
+export const loginRateLimitLockoutMs = positiveNumber(process.env.LOGIN_RATE_LIMIT_LOCKOUT_MS, 15 * 60 * 1000);
+
+// --- Browser origin allowlist ---
+// Comma-separated exact origins (scheme://host[:port]) that may make credentialed
+// cross-origin calls. The normal frontend path is the Vite /api proxy, which is
+// same-origin and never consults CORS, so this stays empty in the default setup.
+// The literal "*" restores the old reflect-any-origin behaviour as an emergency
+// rollback; startup warns when it is used.
+export const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+// Loopback and private-LAN origins on any port stay allowed by default: the app
+// is opened at localhost:8190, over the LAN, and from the credit portal, and
+// enumerating those ports would break the first time one moves.
+export const corsAllowPrivateOrigins = !["0", "false", "no", "off"].includes(
+  String(process.env.CORS_ALLOW_PRIVATE_ORIGINS ?? "true").trim().toLowerCase(),
+);
+
 export const runpodEndpointId = process.env.RUNPOD_ENDPOINT_ID?.trim() ?? "";
 export const runpodSubmissionMode: "sync" | "async" =
   (process.env.RUNPOD_SUBMISSION_MODE ?? "").trim().toLowerCase() === "async" ? "async" : "sync";
@@ -192,6 +219,21 @@ export const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL?.trim() || "";
 export const alertWebhookFormat: "json" | "slack" =
   process.env.ALERT_WEBHOOK_FORMAT?.trim().toLowerCase() === "slack" ? "slack" : "json";
 
+// --- Ops surface access ---
+// /metrics, /ops-dashboard, /api/health, /api/alerts/recent, /api/backup-status
+// and /api/ops-config sit above requireAuth because a Prometheus scraper and the
+// dashboard's first paint have no session to present. They still expose queue
+// depth, RSS, disk headroom and backup state, so they get their own guard:
+// loopback callers are trusted (local scrapers, the topology load test) and
+// anything else must present OPS_ACCESS_TOKEN. Empty token + trusted loopback is
+// the default, which is equivalent to binding the ops surface to localhost.
+// If a same-host reverse proxy or tunnel fronts this backend, its requests also
+// arrive from 127.0.0.1 -- set a token AND OPS_ALLOW_LOOPBACK=false in that case.
+export const opsAccessToken = process.env.OPS_ACCESS_TOKEN?.trim() || "";
+export const opsAllowLoopback = !["0", "false", "no", "off"].includes(
+  String(process.env.OPS_ALLOW_LOOPBACK ?? "true").trim().toLowerCase(),
+);
+
 // --- SQLite disaster recovery ---
 // This host has a single local volume, so a snapshot alone only protects
 // against corruption/accidental deletion. Real DR requires shipping snapshots
@@ -208,6 +250,14 @@ export const backupAzurePrefix = process.env.BACKUP_AZURE_PREFIX?.trim() || "mom
 export const azcopyPath = process.env.AZCOPY_PATH?.trim() || "azcopy";
 
 export function validateRuntimeConfigForStartup() {
+  if (corsAllowedOrigins.includes("*")) {
+    console.warn("CORS_ALLOWED_ORIGINS=* reflects any browser origin. This is an emergency rollback setting, not a configuration.");
+  }
+  if (opsAccessToken && opsAllowLoopback) {
+    console.log("Ops endpoints: loopback trusted, OPS_ACCESS_TOKEN accepted from remote callers.");
+  } else if (!opsAccessToken && !opsAllowLoopback) {
+    throw new Error("OPS_ALLOW_LOOPBACK=false with no OPS_ACCESS_TOKEN set would make /metrics and /ops-dashboard unreachable.");
+  }
   if (backendProcessRole !== "monolith" && !jobRowLevelWrites) {
     throw new Error("ROLE=dispatcher/api requires JOB_STORE_DRIVER=sqlite and JOBS_ROW_LEVEL_WRITES=true.");
   }

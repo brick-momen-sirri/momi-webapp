@@ -50,6 +50,13 @@ import {
   appStateSqlitePath,
   jobStoreDriver,
   appStateDriver,
+  corsAllowedOrigins,
+  corsAllowPrivateOrigins,
+  loginRateLimitLockoutMs,
+  loginRateLimitMaxAttempts,
+  loginRateLimitWindowMs,
+  opsAccessToken,
+  opsAllowLoopback,
 } from "./config.js";
 import {
   changePassword,
@@ -66,6 +73,9 @@ import {
   updateUser,
 } from "./authService.js";
 import { extractAuthToken, getRequestUser, requireAdmin, requireAuth } from "./authMiddleware.js";
+import { isOriginAllowed } from "./corsOrigin.js";
+import { requireOpsAccess } from "./opsAccessGuard.js";
+import { createLoginRateLimiter, loginRateLimitKeys } from "./loginRateLimiter.js";
 import { readWindowsClipboardImage } from "./clipboardService.js";
 import { getServers, refreshServers, runComfyPoolAction, type ComfyPoolAction } from "./comfyPool.js";
 import { getCredits } from "./creditService.js";
@@ -125,10 +135,27 @@ import { writeStreamAtomically } from "./streamingMediaService.js";
 
 const app = express();
 
-app.use(cors({ origin: true, credentials: true }));
+// Pinned rather than reflect-any-origin. The frontend reaches the API through
+// the Vite /api proxy (same-origin, CORS never consulted), so this only governs
+// direct cross-origin callers -- see corsOrigin.ts for the decision order.
+const corsOriginPolicy = { allowedOrigins: corsAllowedOrigins, allowPrivateOrigins: corsAllowPrivateOrigins };
+app.use(
+  cors({
+    origin: (origin, callback) => callback(null, isOriginAllowed(origin, corsOriginPolicy)),
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: jsonBodyLimit }));
 
-app.get("/api/health", async (_req, res) => {
+const loginRateLimiter = createLoginRateLimiter({
+  maxAttempts: loginRateLimitMaxAttempts,
+  windowMs: loginRateLimitWindowMs,
+  lockoutMs: loginRateLimitLockoutMs,
+});
+
+// The ops surface below sits above requireAuth (a scraper has no session) so it
+// carries its own guard: loopback, or OPS_ACCESS_TOKEN. See opsAccessGuard.ts.
+app.get("/api/health", requireOpsAccess, async (_req, res) => {
   const queue = getQueueSnapshot();
   const memory = process.memoryUsage();
   const outputDiskFreeBytes = await freeDiskBytes(brickProjectsRoot);
@@ -208,14 +235,14 @@ async function buildObservabilitySnapshot(): Promise<ObservabilitySnapshot> {
   };
 }
 
-app.get("/metrics", async (_req, res) => {
+app.get("/metrics", requireOpsAccess, async (_req, res) => {
   const snapshot = await buildObservabilitySnapshot();
   res.type("text/plain; version=0.0.4; charset=utf-8").send(renderPrometheusMetrics(snapshot));
 });
 
 // Static config the ops dashboard needs to color its own gauges the same way
 // the real watchdog would judge them -- fetched once on load, not polled.
-app.get("/api/ops-config", (_req, res) => {
+app.get("/api/ops-config", requireOpsAccess, (_req, res) => {
   res.json({
     role: backendProcessRole,
     watchdogMemoryHighMiB,
@@ -225,11 +252,11 @@ app.get("/api/ops-config", (_req, res) => {
   });
 });
 
-app.get("/api/alerts/recent", (_req, res) => {
+app.get("/api/alerts/recent", requireOpsAccess, (_req, res) => {
   res.json({ alerts: getRecentAlerts() });
 });
 
-app.get("/api/backup-status", async (_req, res) => {
+app.get("/api/backup-status", requireOpsAccess, async (_req, res) => {
   try {
     const raw = await fs.readFile(path.join(backupStagingDir, "backup-status.json"), "utf8");
     res.json({ status: JSON.parse(raw) });
@@ -238,7 +265,7 @@ app.get("/api/backup-status", async (_req, res) => {
   }
 });
 
-app.get("/ops-dashboard", (_req, res) => {
+app.get("/ops-dashboard", requireOpsAccess, (_req, res) => {
   res.type("html").send(OPS_DASHBOARD_HTML);
 });
 
@@ -262,13 +289,27 @@ app.get("/api/runpod-input", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
+  const identifier = typeof req.body?.email === "string" ? req.body.email : typeof req.body?.username === "string" ? req.body.username : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  const rateLimitKeys = loginRateLimitKeys(req.ip ?? req.socket.remoteAddress ?? undefined, identifier);
+
+  // Checked before login() so a throttled attempt never reaches scrypt.
+  const verdict = loginRateLimiter.check(rateLimitKeys, Date.now());
+  if (!verdict.allowed) {
+    res.setHeader("Retry-After", String(verdict.retryAfterSeconds));
+    return res.status(429).json({
+      error: `Too many failed sign-in attempts. Try again in ${Math.ceil(verdict.retryAfterSeconds / 60)} minute(s).`,
+      retryAfterSeconds: verdict.retryAfterSeconds,
+    });
+  }
+
   try {
-    const identifier = typeof req.body?.email === "string" ? req.body.email : typeof req.body?.username === "string" ? req.body.username : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
     const result = await login(identifier, password);
+    loginRateLimiter.recordSuccess(rateLimitKeys);
     setSessionCookie(res, result.token, result.expiresAt);
     res.json(result);
   } catch (error) {
+    loginRateLimiter.recordFailure(rateLimitKeys, Date.now());
     res.status(401).json({ error: error instanceof Error ? error.message : "Could not sign in." });
   }
 });
