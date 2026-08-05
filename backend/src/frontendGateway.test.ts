@@ -15,7 +15,9 @@ test("production gateway serves hashed assets, SPA routes, and security/cache he
     assert.match(asset.headers.get("cache-control") ?? "", /max-age=31536000/);
     assert.match(asset.headers.get("cache-control") ?? "", /immutable/);
     assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
-    assert.match(asset.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+    const contentSecurityPolicy = asset.headers.get("content-security-policy") ?? "";
+    assert.match(contentSecurityPolicy, /default-src 'self'/);
+    assert.match(contentSecurityPolicy, /connect-src 'self' data: blob:/);
     assert.equal(asset.headers.get("content-encoding"), "gzip");
 
     const directIndex = await fetch(`${fixture.gatewayUrl}/index.html`);
