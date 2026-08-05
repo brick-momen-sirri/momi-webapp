@@ -14,6 +14,15 @@ const BLOCKED_OPS_PATHS = ["/api/health", "/api/ops-config", "/api/alerts/recent
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom"],
+        },
+      },
+    },
+  },
   server: {
     allowedHosts: true,
     proxy: {

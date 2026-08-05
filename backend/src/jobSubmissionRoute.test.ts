@@ -66,6 +66,7 @@ const providerTripwire = {
 };
 let currentUser = users.owner;
 let creationError: Error | undefined;
+let replayCreation = false;
 
 const handler = createJobSubmissionHandler({
   getProject: (id) => (id === project.id ? project : undefined),
@@ -115,7 +116,7 @@ const handler = createJobSubmissionHandler({
     repository.push(job);
     queue.push(job);
     // The controlled queue deliberately never invokes providerTripwire.submit().
-    return job;
+    return replayCreation ? { job, replayed: true } : job;
   },
 });
 
@@ -147,6 +148,7 @@ after(async () => {
 beforeEach(() => {
   currentUser = users.owner;
   creationError = undefined;
+  replayCreation = false;
   repository.length = 0;
   queue.length = 0;
   createRequests.length = 0;
@@ -174,6 +176,20 @@ test("creates, persists, and queues one owned job without invoking a provider", 
   assert.equal(repository[0].creditsEstimated, estimateWorkflowCredits(model, 5, response.body.job.resolution));
   assert.equal(response.body.job.id, repository[0].id);
   assert.equal(providerTripwire.calls, 0);
+});
+
+test("validates and forwards a client request id, and reports a replay without creating a new contract", async () => {
+  const clientRequestId = "req_route_1234567890";
+  replayCreation = true;
+  const response = await call({ ...validBody(), clientRequestId });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.replayed, true);
+  assert.equal(createRequests[0]?.clientRequestId, clientRequestId);
+
+  const invalid = await call({ ...validBody(), clientRequestId: "short" });
+  assert.equal(invalid.status, 400);
+  assert.match(String(invalid.body.error), /clientRequestId/i);
 });
 
 test("allows a project editor but refuses a viewer and hides the project from an outsider", async () => {

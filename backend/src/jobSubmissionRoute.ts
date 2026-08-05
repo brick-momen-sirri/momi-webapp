@@ -10,7 +10,7 @@ export type JobSubmissionDependencies = {
   canCreateJobInProject: (user: User, project: Project) => boolean;
   isDemoAccount: (user: User) => boolean;
   validateMedia: (request: CreateJobRequest, project: Project, user: User) => Promise<void>;
-  createJob: (request: CreateJobRequest) => Promise<Job>;
+  createJob: (request: CreateJobRequest) => Promise<Job | { job: Job; replayed: boolean }>;
 };
 
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
@@ -49,16 +49,18 @@ export function createJobSubmissionHandler(deps: JobSubmissionDependencies): Req
       }
 
       await deps.validateMedia(request, project, user);
-      const job = await deps.createJob(request);
-      res.status(201).json({ job });
+      const creation = await deps.createJob(request);
+      const result = "job" in creation ? creation : { job: creation, replayed: false };
+      res.status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
-      const status = error instanceof JobSubmissionError ? error.status : 400;
+      const status = error instanceof JobSubmissionError ? error.status : errorStatus(error, 400);
       res.status(status).json({ error: error instanceof Error ? error.message : "Could not create job" });
     }
   };
 }
 
 export function validatedRequest(body: Record<string, unknown>, model: WorkflowModel, userId: string): CreateJobRequest {
+  const clientRequestId = optionalClientRequestId(body.clientRequestId);
   const projectId = requiredIdentifier(body.projectId, "projectId");
   const modelId = requiredIdentifier(body.modelId, "modelId");
   const prompt = optionalString(body.prompt, "prompt");
@@ -95,6 +97,7 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   if (resolution) assertSupportedResolution(resolution, model);
 
   return {
+    clientRequestId,
     projectId,
     modelId,
     userId,
@@ -108,6 +111,20 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
     inputVideo,
     workflowOptions,
   };
+}
+
+function optionalClientRequestId(value: unknown) {
+  if (value == null) return undefined;
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{16,200}$/.test(value)) {
+    throw new JobSubmissionError("clientRequestId must be 16-200 letters, numbers, underscores, or hyphens.");
+  }
+  return value;
+}
+
+function errorStatus(error: unknown, fallback: number) {
+  if (!error || typeof error !== "object" || !("status" in error)) return fallback;
+  const status = Number(error.status);
+  return Number.isInteger(status) && status >= 400 && status <= 599 ? status : fallback;
 }
 
 class JobSubmissionError extends Error {

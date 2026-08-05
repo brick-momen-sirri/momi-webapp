@@ -338,14 +338,37 @@ export function workflowOptionsWithSaveNumber(options: WorkflowOptions | undefin
   };
 }
 
-export async function uploadJobMediaUrl(url: string, options: { projectId: string; kind: "image" | "video"; name?: string }) {
+export async function uploadJobMediaUrl(
+  url: string,
+  options: { projectId: string; kind: "image" | "video"; name?: string; signal?: AbortSignal },
+) {
   if (!url.startsWith("blob:") && !url.startsWith("data:")) return url;
 
-  const response = await fetch(url);
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: options.signal });
+  } catch (error) {
+    throw new LocalMediaReadError(options.kind, error);
+  }
   if (!response.ok) {
-    throw new Error(`Could not read ${options.kind} before upload.`);
+    throw new LocalMediaReadError(options.kind);
   }
 
-  const blob = await response.blob();
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch (error) {
+    throw new LocalMediaReadError(options.kind, error);
+  }
   return uploadBackendMedia(blob, options);
+}
+
+export class LocalMediaReadError extends Error {
+  constructor(
+    readonly kind: "image" | "video",
+    cause?: unknown,
+  ) {
+    super(`Could not read the selected ${kind}. Reselect it and try again.`, { cause });
+    this.name = "LocalMediaReadError";
+  }
 }

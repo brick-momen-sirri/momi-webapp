@@ -204,6 +204,7 @@ export type WorkflowOptions = {
 };
 
 export type CreateJobRequest = {
+  clientRequestId?: string;
   projectId: string;
   targetFolderId?: string | null;
   modelId: string;
@@ -220,6 +221,8 @@ export type CreateJobRequest = {
 
 export type Job = {
   id: string;
+  clientRequestId?: string;
+  clientRequestHash?: string;
   comfyPromptId?: string;
   comfyServerUrl?: string;
   runpodJobId?: string;

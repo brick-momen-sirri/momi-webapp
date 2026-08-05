@@ -16,15 +16,19 @@
    caller's upload directory for that project. Public HTTP(S) media remains
    supported; browser-only, malformed, wrong-kind, unsupported local extensions,
    traversal, missing files, and another project/user's local media are rejected.
-7. `jobQueue.createJob` looks up the model/project again as a defense against
+7. `jobQueue.createJobIdempotent` looks up the model/project again as a defense against
    stale route state, externalizes inline data URLs into the job input directory,
    validates the target folder, normalizes duration, calculates the credit
    estimate, and constructs the persisted `queued` job.
-8. `queuedJobCommit` adds the job to the process cache, persists it, removes the
-   cache entry if persistence fails, and only then wakes the dispatcher.
-9. An API-role process stops here. A dispatcher/monolith later claims the durable
-   queued row and builds provider inputs immediately before provider submission.
-10. Provider results, failures, cancellation, and actual-credit reconciliation are
+8. For SQLite, job creation and the `(user_id, request_id)` idempotency record are
+   inserted in one immediate transaction. A matching retry returns the original
+   row; a reused key with different request content returns 409. JSON mode retains
+   process-local suppression but is not the production multi-worker guarantee.
+9. The new row is added to the process cache only after the transaction commits,
+   and only then is the dispatcher awakened.
+10. An API-role process stops here. A dispatcher/monolith later claims the durable
+    queued row and builds provider inputs immediately before provider submission.
+11. Provider results, failures, cancellation, and actual-credit reconciliation are
     lifecycle concerns after the HTTP 201 response; they are not part of one HTTP
     transaction.
 
@@ -34,21 +38,21 @@ The repository currently has organization-level credit observation and post-job
 usage reconciliation. It does **not** have a per-user/project credit wallet or a
 reservation ledger. Therefore the submission path currently provides:
 
-| Capability                               | Current behavior                                                                                             |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Credit estimate                          | Stored on the queued job before persistence                                                                  |
-| Insufficient-credit gate                 | Not implemented; observed provider balance is not a transactional wallet                                     |
-| Credit reservation                       | Not implemented                                                                                              |
-| Reservation rollback/refund              | Not implemented                                                                                              |
-| Negative-balance prevention              | Not applicable without a balance ledger                                                                      |
-| Idempotency key                          | Not implemented                                                                                              |
-| Duplicate HTTP retry suppression         | Not guaranteed                                                                                               |
-| Duplicate provider submission prevention | Dispatcher claims and persisted RunPod IDs reduce risk, but there is no submission-key uniqueness constraint |
+| Capability                               | Current behavior                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Credit estimate                          | Stored on the queued job before persistence                                                                |
+| Insufficient-credit gate                 | Not implemented; observed provider balance is not a transactional wallet                                   |
+| Credit reservation                       | Not implemented                                                                                            |
+| Reservation rollback/refund              | Not implemented                                                                                            |
+| Negative-balance prevention              | Not applicable without a balance ledger                                                                    |
+| Idempotency key                          | Durable per-user `clientRequestId`, backed by a SQLite unique constraint and request hash                  |
+| Duplicate HTTP retry suppression         | Guaranteed in SQLite mode across API workers; a replay returns HTTP 200 and the original job               |
+| Duplicate provider submission prevention | Retried HTTP creation resolves to one durable queued job; dispatcher claims still fence provider execution |
 
-Tests must not claim those absent guarantees. Adding them safely requires a
-durable reservation/idempotency schema with unique constraints and atomic
-transactions shared by API workers and dispatchers. A fake in-memory balance in a
-route test would prove only the fake.
+The credit-wallet capabilities remain absent and tests do not simulate them with
+an in-memory balance. Idempotency is a real store guarantee: tests race two SQLite
+connections, verify content-mismatch conflicts, exercise cross-worker replay in
+the topology gate, and verify the browser reuses its key after an uncertain response.
 
 ## Safe test harness
 
@@ -82,11 +86,11 @@ job, consumes credits, or accesses production data.
   queue publication.
 - Database/persistence failure with no in-memory orphan and no dispatcher wakeup.
 - A real route request with a hard outbound-network/provider tripwire.
+- Durable same-key replay, different-payload conflict, JSON-to-SQLite backfill,
+  two-connection uniqueness, and cross-API-worker retry recovery.
 
 ## Remaining test/design work
 
-- Durable idempotency key with an API-level unique constraint and concurrent retry
-  tests across two API processes.
 - A reservation ledger with atomic reserve/create/release/refund operations and
   exactly-once settlement identifiers.
 - Queue-broker publication failure tests if persistence is ever replaced by a

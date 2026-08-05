@@ -7,6 +7,7 @@ import { getQueueSnapshot } from "./jobQueue.js";
 import { getMediaIndexStatus } from "./mediaService.js";
 import { backendProcessRole } from "./processRole.js";
 import type { ObservabilitySnapshot } from "./observabilityMetrics.js";
+import { getHttpRequestMetricsSnapshot } from "./requestObservability.js";
 
 export async function freeDiskBytes(targetPath: string) {
   try {
@@ -57,5 +58,6 @@ export async function buildObservabilitySnapshot(): Promise<ObservabilitySnapsho
       heapUsedMiB: Math.round(memory.heapUsed / 1024 / 1024),
     },
     outputDiskFreeBytes,
+    http: getHttpRequestMetricsSnapshot(),
   };
 }

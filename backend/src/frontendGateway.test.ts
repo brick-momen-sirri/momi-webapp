@@ -18,6 +18,9 @@ test("production gateway serves hashed assets, SPA routes, and security/cache he
     const contentSecurityPolicy = asset.headers.get("content-security-policy") ?? "";
     assert.match(contentSecurityPolicy, /default-src 'self'/);
     assert.match(contentSecurityPolicy, /connect-src 'self' data: blob:/);
+    assert.match(contentSecurityPolicy, /form-action 'self'/);
+    assert.equal(asset.headers.get("cross-origin-opener-policy"), "same-origin");
+    assert.equal(asset.headers.get("x-permitted-cross-domain-policies"), "none");
     assert.equal(asset.headers.get("content-encoding"), "gzip");
 
     const directIndex = await fetch(`${fixture.gatewayUrl}/index.html`);
@@ -77,12 +80,14 @@ test("production gateway preserves request bodies, cookies, CORS, and media rang
         "Content-Type": "application/json",
         Cookie: "momi_session=session-in",
         Origin: "http://127.0.0.1:8190",
+        "X-Request-ID": "req_gateway_trace_123",
       },
       body: JSON.stringify({ prompt: "local smoke" }),
     });
     assert.equal(echo.status, 201);
     assert.equal(echo.headers.get("access-control-allow-origin"), "http://127.0.0.1:8190");
     assert.match(echo.headers.get("set-cookie") ?? "", /momi_session=session-out/);
+    assert.equal(echo.headers.get("x-request-id"), "req_gateway_trace_123");
     assert.deepEqual(await echo.json(), {
       method: "POST",
       body: '{"prompt":"local smoke"}',
@@ -90,6 +95,7 @@ test("production gateway preserves request bodies, cookies, CORS, and media rang
       origin: "http://127.0.0.1:8190",
       forwardedHost: new URL(fixture.gatewayUrl).host,
       forwardedProto: "http",
+      requestId: "req_gateway_trace_123",
     });
 
     const media = await fetch(`${fixture.gatewayUrl}/api/media/large`, { headers: { Range: "bytes=1024-2047" } });
@@ -135,6 +141,7 @@ async function gatewayFixture() {
             origin: req.headers.origin,
             forwardedHost: req.headers["x-forwarded-host"],
             forwardedProto: req.headers["x-forwarded-proto"],
+            requestId: req.headers["x-request-id"],
           }),
         );
       });

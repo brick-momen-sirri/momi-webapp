@@ -5,6 +5,7 @@ node_modules/
 # Build outputs
 dist/
 backend/dist/
+.e2e-dist/
 
 # Environment and local secrets
 .env
@@ -27,6 +28,8 @@ pnpm-debug.log*
 
 # Test and tooling output
 coverage/
+playwright-report/
+test-results/
 .nyc_output/
 .cache/
 .vite/

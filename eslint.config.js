@@ -26,6 +26,10 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "backend/dist/**",
+      ".e2e-dist/**",
+      "backend/.e2e-dist/**",
+      "playwright-report/**",
+      "test-results/**",
       "backend/data/**",
       "node_modules/**",
       "**/node_modules/**",
@@ -102,7 +106,7 @@ export default tseslint.config(
 
   // --- Node: backend, config files, and the one-off maintenance scripts ----
   {
-    files: ["backend/**/*.{ts,cjs,mjs}", "vite.config.ts", "*.config.{js,cjs,mjs}"],
+    files: ["backend/**/*.{ts,cjs,mjs}", "e2e/**/*.{ts,cjs,mjs}", "vite.config.ts", "*.config.{js,cjs,mjs}"],
     languageOptions: {
       globals: globals.node,
       sourceType: "module",
@@ -111,6 +115,11 @@ export default tseslint.config(
       // The backend logs to stdout on purpose; pm2 captures it.
       "no-console": "off",
     },
+  },
+
+  {
+    files: ["public/**/*.js"],
+    languageOptions: { globals: globals.browser },
   },
 
   {

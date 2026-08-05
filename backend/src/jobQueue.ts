@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import path from "node:path";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
@@ -27,7 +28,7 @@ import {
 } from "./projectMetadataService.js";
 import { cancelComfyWorkflowOnRunpod } from "./runpodComfyService.js";
 import { isDispatcher } from "./processRole.js";
-import { openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
+import { IdempotencyConflictError, openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
 import { readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
@@ -70,6 +71,7 @@ let archivedStore: SqliteJobStore | undefined;
 let jobsCacheCursor: StoreCacheCursor | undefined;
 let archivedCacheCursor: StoreCacheCursor | undefined;
 const activeExecutions = new ActiveExecutionRegistry();
+const activeIdempotentCreations = new Map<string, { requestHash: string; promise: Promise<JobCreationResult> }>();
 const runpodJobConcurrency = Math.max(1, Number(process.env.RUNPOD_MAX_CONCURRENT_JOBS ?? 1) || 1);
 let dispatchPollTimer: NodeJS.Timeout | undefined;
 let dispatcherHeartbeatTimer: NodeJS.Timeout | undefined;
@@ -92,6 +94,7 @@ const jobPersistence = new DebouncedJobPersistence({
 export async function loadJobs() {
   if (sqliteStore || archivedStore) closeJobStore();
   acceptingNewWork = true;
+  activeIdempotentCreations.clear();
   const rawJobs = await loadRawJobs();
   initializeDispatcherCoordination();
   jobs = rawJobs.map((job) => ({
@@ -410,12 +413,7 @@ function jobStatusSummary(job: Job) {
 }
 
 export async function createJob(request: CreateJobRequest) {
-  const job = await buildQueuedJob(request, {
-    getWorkflowModel,
-    getProject,
-    externalizeInputMedia: externalizeJobInputMedia,
-    loadProjectFolders,
-  });
+  const job = await buildNewQueuedJob(request);
 
   await commitQueuedJob(job, {
     add: (created) => {
@@ -430,6 +428,93 @@ export async function createJob(request: CreateJobRequest) {
     },
   });
   return job;
+}
+
+export type JobCreationResult = { job: Job; replayed: boolean };
+
+export async function createJobIdempotent(request: CreateJobRequest): Promise<JobCreationResult> {
+  if (!request.clientRequestId) return { job: await createJob(request), replayed: false };
+
+  const requestHash = jobRequestHash(request);
+  const lockKey = `${request.userId}\u0000${request.clientRequestId}`;
+  const active = activeIdempotentCreations.get(lockKey);
+  if (active) {
+    if (active.requestHash !== requestHash) throw new IdempotencyConflictError();
+    const result = await active.promise;
+    return { job: result.job, replayed: true };
+  }
+
+  const promise = createIdempotentJobOnce(request, requestHash);
+  activeIdempotentCreations.set(lockKey, { requestHash, promise });
+  try {
+    return await promise;
+  } finally {
+    if (activeIdempotentCreations.get(lockKey)?.promise === promise) activeIdempotentCreations.delete(lockKey);
+  }
+}
+
+async function createIdempotentJobOnce(request: CreateJobRequest, requestHash: string): Promise<JobCreationResult> {
+  const requestId = request.clientRequestId!;
+  const existing = findIdempotentJob(request.userId, requestId, requestHash);
+  if (existing) return { job: mergeIdempotentJobIntoMemory(existing), replayed: true };
+
+  const job = await buildNewQueuedJob(request);
+  job.clientRequestHash = requestHash;
+
+  if (sqliteStore) {
+    const persisted = sqliteStore.insertIdempotentJob(job, requestHash);
+    if (!persisted.inserted) return { job: mergeIdempotentJobIntoMemory(persisted.job), replayed: true };
+    jobs = [job, ...jobs];
+    void dispatchQueue();
+    return { job, replayed: false };
+  }
+
+  await commitQueuedJob(job, {
+    add: (created) => {
+      jobs = [created, ...jobs];
+    },
+    remove: (jobId) => {
+      jobs = jobs.filter((candidate) => candidate.id !== jobId);
+    },
+    persist: persistUpsert,
+    notifyDispatcher: () => {
+      void dispatchQueue();
+    },
+  });
+  return { job, replayed: false };
+}
+
+function findIdempotentJob(userId: string, requestId: string, requestHash: string) {
+  const cached = jobs.find((job) => job.userId === userId && job.clientRequestId === requestId);
+  if (cached) {
+    if (cached.clientRequestHash !== requestHash) throw new IdempotencyConflictError();
+    return cached;
+  }
+  const stored = sqliteStore?.loadByClientRequestId(userId, requestId);
+  if (!stored) return undefined;
+  if (stored.requestHash !== requestHash) throw new IdempotencyConflictError();
+  return stored.job;
+}
+
+function mergeIdempotentJobIntoMemory(job: Job) {
+  const cached = jobs.find((candidate) => candidate.id === job.id);
+  if (cached) return cached;
+  jobs = [job, ...jobs];
+  return job;
+}
+
+function jobRequestHash(request: CreateJobRequest) {
+  const { clientRequestId: _clientRequestId, ...payload } = request;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function buildNewQueuedJob(request: CreateJobRequest) {
+  return buildQueuedJob(request, {
+    getWorkflowModel,
+    getProject,
+    externalizeInputMedia: externalizeJobInputMedia,
+    loadProjectFolders,
+  });
 }
 
 export async function cancelJob(jobId: string) {
@@ -1017,6 +1102,7 @@ export function closeJobStore() {
   archivedStore = undefined;
   archivedCacheCursor = undefined;
   activeExecutions.clear();
+  activeIdempotentCreations.clear();
 }
 
 async function persistArchivedMediaJobs() {

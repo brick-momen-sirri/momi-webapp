@@ -34,6 +34,13 @@ export type ObservabilitySnapshot = {
   mediaIndex: MediaIndexStatus | null;
   memory: { rssMiB: number; heapUsedMiB: number };
   outputDiskFreeBytes: number | null;
+  http: {
+    inFlight: number;
+    total: number;
+    durationMsTotal: number;
+    byStatusClass: Record<"2xx" | "3xx" | "4xx" | "5xx", number>;
+    latencyBuckets: Array<{ upperBoundMs: number; count: number }>;
+  };
 };
 
 export function renderPrometheusMetrics(snapshot: ObservabilitySnapshot): string {
@@ -92,6 +99,21 @@ export function renderPrometheusMetrics(snapshot: ObservabilitySnapshot): string
   if (snapshot.outputDiskFreeBytes != null) {
     gauge("momi_output_disk_free_bytes", "Free bytes on the output volume.", snapshot.outputDiskFreeBytes);
   }
+
+  gauge("momi_http_requests_in_flight", "HTTP requests currently in flight.", snapshot.http.inFlight);
+  lines.push("# HELP momi_http_requests_total HTTP responses by status class.");
+  lines.push("# TYPE momi_http_requests_total counter");
+  for (const [statusClass, value] of Object.entries(snapshot.http.byStatusClass)) {
+    lines.push(`momi_http_requests_total{${baseLabels},status_class="${statusClass}"} ${value}`);
+  }
+  lines.push("# HELP momi_http_request_duration_seconds HTTP response latency.");
+  lines.push("# TYPE momi_http_request_duration_seconds histogram");
+  for (const bucket of snapshot.http.latencyBuckets) {
+    lines.push(`momi_http_request_duration_seconds_bucket{${baseLabels},le="${bucket.upperBoundMs / 1000}"} ${bucket.count}`);
+  }
+  lines.push(`momi_http_request_duration_seconds_bucket{${baseLabels},le="+Inf"} ${snapshot.http.total}`);
+  lines.push(`momi_http_request_duration_seconds_sum{${baseLabels}} ${snapshot.http.durationMsTotal / 1000}`);
+  lines.push(`momi_http_request_duration_seconds_count{${baseLabels}} ${snapshot.http.total}`);
 
   return `${lines.join("\n")}\n`;
 }

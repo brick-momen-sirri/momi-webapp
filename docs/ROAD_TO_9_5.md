@@ -113,11 +113,11 @@ how to roll back the change.
   estimate/state, auth roles, malformed/invalid inputs, media ownership/type/size,
   provider options, persistence failure, and zero provider/network dispatch. The
   production router test observes the queued job in the real queue/store path.
-- Remaining risks: the repository has no reservation ledger, insufficient-balance
-  transaction, exactly-once refund, or idempotency key. Those guarantees remain
-  explicitly unimplemented rather than simulated by a fake test. Provider and
-  cancellation failures occur asynchronously after the 201 response and belong to
-  lifecycle tests.
+- Remaining risks: the repository still has no reservation ledger,
+  insufficient-balance transaction, or exactly-once refund. Durable request
+  idempotency was added in the 2026-08-05 hardening phase; see
+  `docs/PRODUCTION_HARDENING_9_8.md`. Provider and cancellation failures occur
+  asynchronously after the creation response and belong to lifecycle tests.
 - Rollback approach: keep production defaults behind the compatibility export and
   revert the harness/submission commit; tests never use production configuration.
 
@@ -319,3 +319,9 @@ how to roll back the change.
   remained local-only: no PM2 mutation, deployment, provider spend, credit use,
   production data change, or cloud change occurred; Vite PID 34928 still owns
   `0.0.0.0:8190` and the isolated gateway port is closed.
+- 2026-08-05: added compiled-gateway browser E2E, durable cross-worker request
+  idempotency, submission recovery/cancel UX, request correlation and HTTP SLO
+  metrics, patched dependency overrides, bundle splitting, accessibility/security
+  gates, and a protected-listener non-production release drill. The drill passed
+  browser, temporary backup/restore, 100-client topology, dispatcher failover, and
+  zero-duplicate checks without changing the live listeners.

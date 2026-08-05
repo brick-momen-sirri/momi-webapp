@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { openSqliteJobStore } from "./sqliteJobStore.js";
+import { IdempotencyConflictError, openSqliteJobStore } from "./sqliteJobStore.js";
 import type { Job } from "./types.js";
 
 function job(id: string, overrides: Partial<Job> = {}): Job {
@@ -209,6 +209,49 @@ test("insertJob assigns increasing seq and loadAll returns newest-first", async 
       ["job_3", "job_2", "job_1"],
     );
     assert.equal(store.count(), 3);
+    store.close();
+  });
+});
+
+test("idempotent inserts across two connections create exactly one durable job", async () => {
+  await withStore((dbPath) => {
+    const a = openSqliteJobStore(dbPath, "jobs");
+    const b = openSqliteJobStore(dbPath, "jobs");
+    const clientRequestId = "req_1234567890abcdef";
+    const requestHash = "a".repeat(64);
+    const firstJob = job("job_first", { clientRequestId, clientRequestHash: requestHash, status: "queued" });
+    const duplicateJob = job("job_duplicate", { clientRequestId, clientRequestHash: requestHash, status: "queued" });
+
+    const first = a.insertIdempotentJob(firstJob, requestHash);
+    const duplicate = b.insertIdempotentJob(duplicateJob, requestHash);
+
+    assert.equal(first.inserted, true);
+    assert.equal(duplicate.inserted, false);
+    assert.equal(duplicate.job.id, firstJob.id);
+    assert.equal(a.count(), 1);
+    assert.equal(b.loadByClientRequestId("usr_1", clientRequestId)?.job.id, firstJob.id);
+
+    assert.throws(
+      () => b.insertIdempotentJob(job("job_conflict", { clientRequestId, status: "queued" }), "b".repeat(64)),
+      IdempotencyConflictError,
+    );
+    assert.equal(a.count(), 1);
+    a.close();
+    b.close();
+  });
+});
+
+test("replaceAll backfills idempotency records during JSON-to-SQLite migration", async () => {
+  await withStore((dbPath) => {
+    const store = openSqliteJobStore(dbPath);
+    const migrated = job("job_migrated", {
+      clientRequestId: "req_migrated_123456",
+      clientRequestHash: "c".repeat(64),
+    });
+
+    store.replaceAll([migrated]);
+
+    assert.equal(store.loadByClientRequestId("usr_1", "req_migrated_123456")?.job.id, migrated.id);
     store.close();
   });
 });

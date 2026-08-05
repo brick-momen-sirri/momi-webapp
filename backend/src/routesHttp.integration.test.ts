@@ -375,6 +375,7 @@ test("POST /api/jobs persists a queued job without provider or network dispatch"
   const imageData = "data:image/png;base64,AQID";
   const videoData = "data:video/mp4;base64,AQID";
   const body = {
+    clientRequestId: "req_routes_integration_123456",
     projectId: testProjectId,
     modelId: model.id,
     prompt: model.requiresPrompt ? "A safe route integration render" : "",
@@ -407,6 +408,11 @@ test("POST /api/jobs persists a queued job without provider or network dispatch"
     assert.equal(created.userId, "usr_momen");
     assert.equal(typeof created.creditsEstimated, "number");
     assert.equal(jobQueue.getJob(created.id)?.status, "queued");
+
+    const replay = await asAdmin("POST", "/api/jobs", body);
+    assert.equal(replay.status, 200, replay.text);
+    assert.equal((replay.body as { replayed?: boolean }).replayed, true);
+    assert.equal((replay.body as { job?: { id?: string } }).job?.id, created.id);
     assert.equal(outboundAttempt, "");
   } finally {
     globalThis.fetch = nativeFetch;

@@ -194,7 +194,7 @@ function App() {
     setConfirmDialog,
     showToast,
   });
-  const { isSubmitting, handleGenerate } = useJobSubmission({
+  const { isSubmitting, submissionPhase, hasRecoverableSubmission, handleGenerate, cancelSubmission } = useJobSubmission({
     account,
     backendAvailable,
     setBackendAvailable,
@@ -378,6 +378,8 @@ function App() {
             creditsRemaining={creditsRemaining}
             disabledReason={disabledReason}
             isSubmitting={isSubmitting}
+            submissionPhase={submissionPhase}
+            hasRecoverableSubmission={hasRecoverableSubmission}
             onModelChange={handleModelChange}
             onResolutionChange={handleResolutionChange}
             onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
@@ -391,6 +393,7 @@ function App() {
             onImagesChange={setImages}
             onVideoChange={setVideo}
             onGenerate={handleGenerate}
+            onCancelSubmission={cancelSubmission}
           />
         }
         main={

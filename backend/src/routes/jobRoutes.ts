@@ -20,6 +20,7 @@ import {
   archiveJob,
   cancelJob,
   createJob,
+  createJobIdempotent,
   getJob,
   getJobFromAnySource,
   getJobsWithExistingMedia,
@@ -79,7 +80,7 @@ jobRouter.post(
     canCreateJobInProject,
     isDemoAccount,
     validateMedia: validateJobMediaReferences,
-    createJob,
+    createJob: createJobIdempotent,
   }),
 );
 

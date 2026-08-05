@@ -3,12 +3,18 @@ import type { BackendClipboardImage } from "./types";
 
 export { backendResultFileUrl, backendResultMediaUrl, clearMediaAccessToken, refreshMediaAccessToken } from "./mediaAccess";
 
-export async function uploadBackendMedia(media: Blob, options: { projectId: string; kind: "image" | "video"; name?: string }) {
+export async function uploadBackendMedia(
+  media: Blob,
+  options: { projectId: string; kind: "image" | "video"; name?: string; signal?: AbortSignal },
+) {
   const search = new URLSearchParams({ projectId: options.projectId, kind: options.kind });
   if (options.name) search.set("name", options.name);
   const headers = new Headers();
   if (media.type) headers.set("Content-Type", media.type);
-  const data = await apiUpload<{ url: string }>(`/api/media/upload?${search.toString()}`, media, { headers });
+  const data = await apiUpload<{ url: string }>(`/api/media/upload?${search.toString()}`, media, {
+    headers,
+    signal: options.signal,
+  });
   return data.url;
 }
 

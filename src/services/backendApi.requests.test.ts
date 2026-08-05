@@ -61,6 +61,7 @@ beforeEach(() => {
       ok: result.ok ?? true,
       status: result.status ?? 200,
       statusText: "OK",
+      headers: new Headers({ "X-Request-ID": "req_client_trace_123" }),
       json: () => Promise.resolve(result.body ?? {}),
     } as Response);
   });
@@ -104,6 +105,15 @@ describe("error surfacing", () => {
     await expect(api.createBackendJob({ projectId: "p", modelId: "m", resolution: { width: 1, height: 1 } })).rejects.toThrow(
       "Project editor access required.",
     );
+  });
+
+  it("keeps the server request id on API errors for support tracing", async () => {
+    const api = await loadModule();
+    respond = () => ({ ok: false, status: 503, body: { error: "Temporarily unavailable." } });
+
+    const error = await api.fetchBackendProjects().catch((caught) => caught);
+    expect(error).toBeInstanceOf(api.ApiError);
+    expect(error).toMatchObject({ status: 503, requestId: "req_client_trace_123" });
   });
 
   it("falls back to the status when the body carries no message", async () => {
@@ -169,6 +179,7 @@ describe("job mutations", () => {
     respond = () => ({ body: { job: backendJob() } });
 
     await api.createBackendJob({
+      clientRequestId: "req_client_1234567890",
       projectId: "proj_1",
       modelId: "kling_v3",
       prompt: "a tower",
@@ -178,7 +189,12 @@ describe("job mutations", () => {
     expect(lastCall().url).toMatch(/\/api\/jobs$/);
     expect(lastCall().init.method).toBe("POST");
     expect(new Headers(lastCall().init.headers).get("Content-Type")).toBe("application/json");
-    expect(lastBody()).toMatchObject({ projectId: "proj_1", modelId: "kling_v3", prompt: "a tower" });
+    expect(lastBody()).toMatchObject({
+      clientRequestId: "req_client_1234567890",
+      projectId: "proj_1",
+      modelId: "kling_v3",
+      prompt: "a tower",
+    });
   });
 
   it("escapes ids in the path so a slash cannot forge a different route", async () => {

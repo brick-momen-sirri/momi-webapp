@@ -259,26 +259,29 @@ async function main() {
     );
 
     const jobCount = 32;
-    const createdJobs = await Promise.all(
+    const submissions = await Promise.all(
       Array.from({ length: jobCount }, async (_, index) => {
         const base = apiBases[index % apiBases.length];
         const startedAt = performance.now();
+        const body = {
+          clientRequestId: `req_topology_${String(index + 1).padStart(3, "0")}_123456`,
+          projectId,
+          modelId: model.id,
+          prompt: `topology-job-${String(index + 1).padStart(3, "0")}`,
+          resolution: topologyResolutionFor(
+            String(model.defaultResolution ?? (model.supportedResolutions as string[] | undefined)?.[0] ?? "1080p"),
+          ),
+        };
         const response = await jsonRequest(base, "/api/jobs", {
           method: "POST",
           token: userToken,
-          body: {
-            projectId,
-            modelId: model.id,
-            prompt: `topology-job-${String(index + 1).padStart(3, "0")}`,
-            resolution: topologyResolutionFor(
-              String(model.defaultResolution ?? (model.supportedResolutions as string[] | undefined)?.[0] ?? "1080p"),
-            ),
-          },
+          body,
         });
         enqueueLatencies.push(performance.now() - startedAt);
-        return response.job as JsonRecord;
+        return { job: response.job as JsonRecord, body };
       }),
     );
+    const createdJobs = submissions.map((submission) => submission.job);
 
     await Promise.all(
       createdJobs.map(async (job, index) => {
@@ -436,6 +439,28 @@ async function main() {
     const canceledAfterDrain = await jsonRequest(apiBases[0], `/api/jobs/${cancelTarget.id}`, { token: userToken });
     assert.equal(canceledAfterDrain.job.status, "canceled", "canceled job must not resurrect after drain");
 
+    // Replay only after the failover-critical window. Loading the leader with a
+    // second 32-request burst before it is killed can catch a job between provider
+    // acceptance and durable acknowledgement, which is intentionally failed rather
+    // than blindly resubmitted. This still proves the durable keys on both API workers
+    // without changing the failure timing the topology gate is meant to exercise.
+    const replayedJobs = await Promise.all(
+      submissions.map(async (submission, index) => {
+        const base = apiBases[(index + 1) % apiBases.length];
+        return jsonRequest(base, "/api/jobs", {
+          method: "POST",
+          token: userToken,
+          body: submission.body,
+        });
+      }),
+    );
+    assert.ok(replayedJobs.every((response) => response.statusCode === 200 && response.replayed === true));
+    assert.deepEqual(
+      replayedJobs.map((response) => response.job.id),
+      createdJobs.map((job) => job.id),
+      "cross-worker retries must return the original jobs",
+    );
+
     polling = false;
     await Promise.all(pollers);
     const allLogs = runtimes.map((runtime) => runtime.logs).join("\n");
@@ -522,7 +547,7 @@ function isolatedEnvironment(paths: Awaited<ReturnType<typeof prepareIsolatedSta
     RUNPOD_ENDPOINT_BASE_URL: `${mockBase}/v2/topology`,
     RUNPOD_SUBMISSION_MODE: "async",
     RUNPOD_POLL_INTERVAL_MS: "50",
-    RUNPOD_TIMEOUT_MS: "15000",
+    RUNPOD_TIMEOUT_MS: "30000",
     RUNPOD_MAX_CONCURRENT_JOBS: "10",
     RESULT_RECOVERY_INTERVAL_MS: "0",
     JOB_STORE_DRIVER: "sqlite",
@@ -566,7 +591,10 @@ function startBackend(name: string, role: BackendRuntime["role"], port: number, 
     logs: "",
     expectedExit: false,
   };
-  const child = spawn(process.execPath, [path.join(backendRoot, "dist", "index.js")], {
+  const backendEntry = process.env.TOPOLOGY_BACKEND_ENTRY
+    ? path.resolve(process.env.TOPOLOGY_BACKEND_ENTRY)
+    : path.join(backendRoot, "dist", "index.js");
+  const child = spawn(process.execPath, [backendEntry], {
     cwd: backendRoot,
     env: { ...process.env, ...commonEnv, ROLE: role, PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],

@@ -23,6 +23,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Production dependency vulnerability gate
+        run: pnpm audit --prod --audit-level high
+
       # Formatting and lint run before the slower type-check and test steps, so a
       # style-only failure reports in seconds instead of minutes.
       - name: Format check
@@ -44,6 +47,12 @@ jobs:
       - name: Frontend build (type-check + vite)
         run: pnpm run build
 
+      - name: Install browser for production E2E
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Compiled production gateway E2E
+        run: pnpm run test:e2e:production
+
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,3 +61,5 @@ jobs:
           path: |
             coverage/frontend
             backend/coverage/backend
+            playwright-report
+            test-results

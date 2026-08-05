@@ -3,6 +3,7 @@ import path from "node:path";
 
 import compression from "compression";
 import express from "express";
+import { resolveRequestId } from "./requestObservability.js";
 
 const BLOCKED_PUBLIC_API_PATHS = new Set(["/api/health", "/api/ops-config", "/api/alerts/recent", "/api/backup-status"]);
 
@@ -27,6 +28,12 @@ export function createFrontendGateway(options: FrontendGatewayOptions) {
   const indexPath = path.join(options.frontendDistPath, "index.html");
 
   app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    const requestId = resolveRequestId(req.headers["x-request-id"]);
+    res.locals.requestId = requestId;
+    res.setHeader("X-Request-ID", requestId);
+    next();
+  });
   app.use(securityHeaders);
   app.use(compression());
 
@@ -76,11 +83,14 @@ export function createFrontendGateway(options: FrontendGatewayOptions) {
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' data: blob:; font-src 'self' data:",
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' data: blob:; font-src 'self' data:",
   );
   next();
 }
@@ -100,7 +110,11 @@ function proxyApiRequest(req: express.Request, res: express.Response, apiTarget:
     return;
   }
 
-  const headers: http.OutgoingHttpHeaders = { ...req.headers, host: target.host };
+  const headers: http.OutgoingHttpHeaders = {
+    ...req.headers,
+    host: target.host,
+    "x-request-id": res.locals.requestId,
+  };
   headers["x-forwarded-host"] = req.headers.host;
   headers["x-forwarded-proto"] = req.protocol;
   headers["x-forwarded-for"] = req.socket.remoteAddress;
@@ -124,8 +138,9 @@ function proxyApiRequest(req: express.Request, res: express.Response, apiTarget:
   );
 
   upstream.on("error", (error) => {
-    if (!res.headersSent) res.status(502).json({ error: `Internal API unavailable: ${error.message}` });
-    else res.end();
+    if (!res.headersSent) {
+      res.status(502).json({ error: `Internal API unavailable: ${error.message}`, requestId: res.locals.requestId });
+    } else res.end();
   });
   req.pipe(upstream);
 }

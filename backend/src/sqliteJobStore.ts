@@ -46,6 +46,24 @@ export type DispatcherLeaseAttempt = DispatcherLease & {
   replaceOwnerId?: string;
 };
 
+export type IdempotentJobRecord = {
+  job: Job;
+  requestHash: string;
+};
+
+export type IdempotentJobInsertResult = IdempotentJobRecord & {
+  inserted: boolean;
+};
+
+export class IdempotencyConflictError extends Error {
+  readonly status = 409;
+
+  constructor(message = "This submission key was already used with different job settings.") {
+    super(message);
+    this.name = "IdempotencyConflictError";
+  }
+}
+
 export type OpenOptions = {
   // Open an existing store for reading only. The DB file MUST already exist
   // (no create-on-missing) and the schema is not touched; replaceAll throws.
@@ -57,6 +75,7 @@ export type OpenOptions = {
 export type SqliteJobStore = {
   loadAll(): Job[];
   loadById(id: string): Job | undefined;
+  loadByClientRequestId(userId: string, requestId: string): IdempotentJobRecord | undefined;
   loadSnapshot(): JobStoreSnapshot;
   loadChanges(afterRevision: number): JobStoreChanges;
   replaceAll(jobs: Job[]): SyncStats;
@@ -67,6 +86,7 @@ export type SqliteJobStore = {
   // collide. Not yet on the live path — replaceAll remains the default writer
   // until jobQueue is switched over.
   insertJob(job: Job): void;
+  insertIdempotentJob(job: Job, requestHash: string): IdempotentJobInsertResult;
   updateJob(job: Job): boolean;
   applyToJob(id: string, mutate: (job: Job) => Job | void): Job | undefined;
   deleteJob(id: string): boolean;
@@ -98,6 +118,7 @@ type DispatcherLeaseRow = {
   heartbeat_at: number;
   expires_at: number;
 };
+type IdempotencyRow = { job_id: string; request_hash: string };
 
 // `table` lets a second logical store (archived items) reuse this code. It is
 // a hardcoded identifier from config, never user input, but is validated to
@@ -109,6 +130,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   const revisionTable = `${table}_revision`;
   const tombstoneTable = `${table}_tombstones`;
   const metaTable = `${table}_meta`;
+  const idempotencyTable = `${table}_idempotency`;
   const readonly = opts.readonly === true;
   if (!readonly) fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   // fileMustExist stops better-sqlite3 from silently creating an empty DB when
@@ -166,6 +188,14 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
         heartbeat_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS ${idempotencyTable} (
+        user_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        job_id TEXT NOT NULL UNIQUE,
+        request_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, request_id)
+      );
     `);
   }
 
@@ -176,6 +206,13 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   // (the store was never initialized) rather than returning a bogus empty set.
   const selectAll = db.prepare<[], JobRow>(`SELECT data FROM ${table} ORDER BY seq DESC`);
   const selectOne = db.prepare<[string], JobRow>(`SELECT data FROM ${table} WHERE id = ?`);
+  const idempotencySchemaAvailable = hasTable(db, idempotencyTable);
+  const selectIdempotency = idempotencySchemaAvailable
+    ? db.prepare<[string, string], IdempotencyRow>(`
+        SELECT job_id, request_hash FROM ${idempotencyTable}
+        WHERE user_id = ? AND request_id = ?
+      `)
+    : undefined;
   const countStmt = db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
   const countActiveStmt = db.prepare<[], CountRow>(`SELECT COUNT(*) AS n FROM ${table} WHERE status IN ('sending', 'running')`);
   const metaSchemaAvailable = hasTable(db, metaTable);
@@ -222,6 +259,16 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     };
   });
 
+  const loadByClientRequestId = (userId: string, requestId: string): IdempotentJobRecord | undefined => {
+    const record = selectIdempotency?.get(userId, requestId);
+    if (!record) return undefined;
+    const row = selectOne.get(record.job_id);
+    if (!row) {
+      throw new IdempotencyConflictError("This submission key belongs to a job that is no longer available.");
+    }
+    return { job: JSON.parse(row.data) as Job, requestHash: record.request_hash };
+  };
+
   if (readonly) {
     const readonlyError = () => {
       throw new Error("Cannot write to a read-only SQLite job store.");
@@ -234,6 +281,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
         const row = selectOne.get(id);
         return row ? (JSON.parse(row.data) as Job) : undefined;
       },
+      loadByClientRequestId,
       loadSnapshot() {
         return loadSnapshotTx();
       },
@@ -251,6 +299,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       },
       replaceAll: readonlyError,
       insertJob: readonlyError,
+      insertIdempotentJob: readonlyError,
       updateJob: readonlyError,
       applyToJob: readonlyError,
       deleteJob: readonlyError,
@@ -294,6 +343,14 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
   const upsertTombstone = db.prepare(`
     INSERT INTO ${tombstoneTable} (id, revision) VALUES (?, ?)
     ON CONFLICT(id) DO UPDATE SET revision = excluded.revision
+  `);
+  const insertIdempotency = db.prepare(`
+    INSERT INTO ${idempotencyTable} (user_id, request_id, job_id, request_hash, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const insertIdempotencyIfMissing = db.prepare(`
+    INSERT OR IGNORE INTO ${idempotencyTable} (user_id, request_id, job_id, request_hash, created_at)
+    VALUES (?, ?, ?, ?, ?)
   `);
   const clearTombstone = db.prepare<[string]>(`DELETE FROM ${tombstoneTable} WHERE id = ?`);
   const updateColumns = db.prepare(`
@@ -389,6 +446,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       // never fail on data SQLite accepted but writeJsonFile would reject.
       assertNoEmbeddedMedia(job, `job ${job.id}`);
       upsert.run(toRow(job, knownSeq.get(job.id)!, nextRevision(), data));
+      backfillIdempotency(job);
       clearTombstone.run(job.id);
       knownHash.set(job.id, hash);
       written += 1;
@@ -409,10 +467,32 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     assertNoEmbeddedMedia(job, `job ${job.id}`);
     const seq = knownSeq.get(job.id) ?? maxSeqStmt.get()!.m + 1;
     upsert.run(toRow(job, seq, nextRevision(), data));
+    backfillIdempotency(job);
     clearTombstone.run(job.id);
     knownSeq.set(job.id, seq);
     knownHash.set(job.id, hashString(data));
     if (seq >= nextSeq) nextSeq = seq + 1;
+  });
+
+  const insertIdempotentJobTx = db.transaction((job: Job, requestHash: string): IdempotentJobInsertResult => {
+    const requestId = job.clientRequestId;
+    if (!requestId) throw new Error("An idempotent job requires clientRequestId.");
+    const existing = loadByClientRequestId(job.userId, requestId);
+    if (existing) {
+      if (existing.requestHash !== requestHash) throw new IdempotencyConflictError();
+      return { ...existing, inserted: false };
+    }
+
+    const data = JSON.stringify(job);
+    assertNoEmbeddedMedia(job, `job ${job.id}`);
+    const seq = knownSeq.get(job.id) ?? maxSeqStmt.get()!.m + 1;
+    upsert.run(toRow(job, seq, nextRevision(), data));
+    insertIdempotency.run(job.userId, requestId, job.id, requestHash, job.createdAt);
+    clearTombstone.run(job.id);
+    knownSeq.set(job.id, seq);
+    knownHash.set(job.id, hashString(data));
+    if (seq >= nextSeq) nextSeq = seq + 1;
+    return { job, requestHash, inserted: true };
   });
 
   // Read-modify-write a single row atomically (forward-safe for cross-process:
@@ -487,6 +567,7 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       const row = selectOne.get(id);
       return row ? (JSON.parse(row.data) as Job) : undefined;
     },
+    loadByClientRequestId,
     loadSnapshot() {
       return loadSnapshotTx();
     },
@@ -498,6 +579,9 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
     },
     insertJob(job: Job) {
       insertJobTx.immediate(job);
+    },
+    insertIdempotentJob(job: Job, requestHash: string) {
+      return insertIdempotentJobTx.immediate(job, requestHash);
     },
     updateJob(job: Job) {
       return updateJobTx.immediate(job);
@@ -556,6 +640,11 @@ export function openSqliteJobStore(dbPath: string, table = "jobs", opts: OpenOpt
       db.close();
     },
   };
+
+  function backfillIdempotency(job: Job) {
+    if (!job.clientRequestId || !job.clientRequestHash) return;
+    insertIdempotencyIfMissing.run(job.userId, job.clientRequestId, job.id, job.clientRequestHash, job.createdAt);
+  }
 }
 
 function toDispatcherLease(row: DispatcherLeaseRow | undefined): DispatcherLease | undefined {

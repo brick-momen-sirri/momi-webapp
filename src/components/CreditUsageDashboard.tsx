@@ -1,9 +1,13 @@
 import { Coins } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { formatCredits } from "../features/credits/creditUsageDashboardUtils";
-import { CreditUsageDashboardDialog } from "./credit-usage/CreditUsageDashboardDialog";
+
+const loadCreditUsageDialog = () => import("./credit-usage/CreditUsageDashboardDialog");
+const CreditUsageDashboardDialog = lazy(async () => ({
+  default: (await loadCreditUsageDialog()).CreditUsageDashboardDialog,
+}));
 
 type CreditUsageDashboardProps = {
   creditsRemaining: number;
@@ -23,6 +27,8 @@ export function CreditUsageDashboard({
       <button
         type="button"
         onClick={() => setOpen(true)}
+        onMouseEnter={() => void loadCreditUsageDialog()}
+        onFocus={() => void loadCreditUsageDialog()}
         className="flex w-full items-center justify-between gap-3 rounded-lg border border-line bg-white p-3 text-left shadow-panel transition hover:border-accent hover:bg-mist/50"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -43,7 +49,20 @@ export function CreditUsageDashboard({
       </button>
 
       {open
-        ? createPortal(<CreditUsageDashboardDialog creditsRemaining={creditsRemaining} onOpenChange={setOpen} />, document.body)
+        ? createPortal(
+            <Suspense
+              fallback={
+                <div className="fixed inset-0 z-50 grid place-items-center bg-black/30" role="status" aria-live="polite">
+                  <span className="rounded-lg bg-white px-4 py-3 text-sm font-semibold text-ink shadow-panel">
+                    Loading credit usage...
+                  </span>
+                </div>
+              }
+            >
+              <CreditUsageDashboardDialog creditsRemaining={creditsRemaining} onOpenChange={setOpen} />
+            </Suspense>,
+            document.body,
+          )
         : null}
     </>
   );

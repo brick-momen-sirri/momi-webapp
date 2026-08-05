@@ -5,13 +5,15 @@ export const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   readonly status?: number;
-  readonly code: "http" | "network" | "timeout" | "invalid_response";
+  readonly code: "http" | "network" | "timeout" | "canceled" | "invalid_response";
+  readonly requestId?: string;
 
-  constructor(message: string, options: { status?: number; code: ApiError["code"]; cause?: unknown }) {
+  constructor(message: string, options: { status?: number; code: ApiError["code"]; cause?: unknown; requestId?: string }) {
     super(message, { cause: options.cause });
     this.name = "ApiError";
     this.status = options.status;
     this.code = options.code;
+    this.requestId = options.requestId;
   }
 }
 
@@ -28,6 +30,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, option
       status: response.status,
       code: "invalid_response",
       cause: error,
+      requestId: responseRequestId(response),
     });
   }
 }
@@ -52,13 +55,20 @@ async function apiFetch(path: string, init: RequestInit, options: ApiRequestOpti
   try {
     const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: "include", signal });
     if (!response.ok) {
-      throw new ApiError(await errorMessageFromResponse(response), { status: response.status, code: "http" });
+      throw new ApiError(await errorMessageFromResponse(response), {
+        status: response.status,
+        code: "http",
+        requestId: responseRequestId(response),
+      });
     }
     return response;
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (timeoutController?.signal.aborted) {
       throw new ApiError(`Request timed out after ${timeoutMs}ms.`, { code: "timeout", cause: error });
+    }
+    if (init.signal?.aborted) {
+      throw new ApiError("Request canceled.", { code: "canceled", cause: error });
     }
     throw new ApiError(error instanceof Error ? error.message : "Network request failed.", { code: "network", cause: error });
   } finally {
@@ -74,4 +84,8 @@ export async function errorMessageFromResponse(response: Response) {
     // Reverse proxies can return HTML or an empty body. The status remains useful.
   }
   return `${response.status} ${response.statusText}`;
+}
+
+function responseRequestId(response: Response) {
+  return response.headers?.get?.("X-Request-ID") ?? undefined;
 }

@@ -27,6 +27,17 @@ function snap(overrides: Partial<ObservabilitySnapshot> = {}): ObservabilitySnap
     mediaIndex: { dirtyRevision: 170, builtRevision: 168, cachedRevision: 167, cachedItems: 7491 },
     memory: { rssMiB: 398, heapUsedMiB: 70 },
     outputDiskFreeBytes: 35_751_124_992,
+    http: {
+      inFlight: 2,
+      total: 120,
+      durationMsTotal: 30_000,
+      byStatusClass: { "2xx": 100, "3xx": 2, "4xx": 15, "5xx": 3 },
+      latencyBuckets: [
+        { upperBoundMs: 100, count: 60 },
+        { upperBoundMs: 300, count: 95 },
+        { upperBoundMs: 1_000, count: 115 },
+      ],
+    },
     ...overrides,
   };
 }
@@ -39,6 +50,9 @@ test("renders gauges with role/pid labels and expected values", () => {
   assert.match(text, /momi_dispatcher_lease_held\{role="dispatcher",pid="4242"\} 1/);
   assert.match(text, /momi_dispatcher_lease_active\{role="dispatcher",pid="4242"\} 1/);
   assert.match(text, /momi_output_disk_free_bytes\{role="dispatcher",pid="4242"\} 35751124992/);
+  assert.match(text, /momi_http_requests_total\{role="dispatcher",pid="4242",status_class="5xx"\} 3/);
+  assert.match(text, /momi_http_request_duration_seconds_bucket\{role="dispatcher",pid="4242",le="0.3"\} 95/);
+  assert.match(text, /momi_http_request_duration_seconds_count\{role="dispatcher",pid="4242"\} 120/);
   // Trailing newline so concatenated scrapes stay well-formed.
   assert.ok(text.endsWith("\n"));
 });

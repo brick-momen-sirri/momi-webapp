@@ -1,4 +1,5 @@
 import { AlertCircle, FolderCheck } from "lucide-react";
+import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
 import { ArchVizGridControls } from "./ArchVizGridControls";
 import { DurationSelector } from "./DurationSelector";
@@ -30,6 +31,8 @@ type LeftSettingsPanelProps = {
   creditsRemaining: number;
   disabledReason?: string;
   isSubmitting: boolean;
+  submissionPhase: SubmissionPhase;
+  hasRecoverableSubmission: boolean;
   onModelChange: (modelId: string) => void;
   onResolutionChange: (resolution: string) => void;
   onNanoBananaAspectRatioChange: (aspectRatio: string) => void;
@@ -43,6 +46,7 @@ type LeftSettingsPanelProps = {
   onImagesChange: (images: UploadedImage[]) => void;
   onVideoChange: (video: UploadedVideo | undefined) => void;
   onGenerate: () => void;
+  onCancelSubmission: () => void;
 };
 
 export function LeftSettingsPanel({
@@ -65,6 +69,8 @@ export function LeftSettingsPanel({
   creditsRemaining,
   disabledReason,
   isSubmitting,
+  submissionPhase,
+  hasRecoverableSubmission,
   onModelChange,
   onResolutionChange,
   onNanoBananaAspectRatioChange,
@@ -78,6 +84,7 @@ export function LeftSettingsPanel({
   onImagesChange,
   onVideoChange,
   onGenerate,
+  onCancelSubmission,
 }: LeftSettingsPanelProps) {
   const showResolution = selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel);
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
@@ -170,7 +177,10 @@ export function LeftSettingsPanel({
         creditsRemaining={creditsRemaining}
         disabledReason={disabledReason}
         isSubmitting={isSubmitting}
+        submissionPhase={submissionPhase}
+        hasRecoverableSubmission={hasRecoverableSubmission}
         onGenerate={onGenerate}
+        onCancelSubmission={onCancelSubmission}
       />
     </div>
   );

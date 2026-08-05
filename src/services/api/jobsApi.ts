@@ -28,25 +28,30 @@ export async function fetchBackendJobs(params: FetchBackendJobsParams = {}): Pro
   };
 }
 
-export async function createBackendJob(payload: {
-  projectId: string;
-  targetFolderId?: string | null;
-  modelId: string;
-  prompt?: string;
-  resolution: { width: number; height: number; label?: string };
-  durationSeconds?: number;
-  inputImages?: string[];
-  startFrame?: string;
-  endFrame?: string;
-  inputVideo?: string;
-  workflowOptions?: WorkflowOptions;
-}) {
-  const data = await apiRequest<{ job: BackendJob }>("/api/jobs", {
+export async function createBackendJob(
+  payload: {
+    clientRequestId?: string;
+    projectId: string;
+    targetFolderId?: string | null;
+    modelId: string;
+    prompt?: string;
+    resolution: { width: number; height: number; label?: string };
+    durationSeconds?: number;
+    inputImages?: string[];
+    startFrame?: string;
+    endFrame?: string;
+    inputVideo?: string;
+    workflowOptions?: WorkflowOptions;
+  },
+  options: { signal?: AbortSignal } = {},
+) {
+  const data = await apiRequest<{ job: BackendJob; replayed?: boolean }>("/api/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: options.signal,
   });
-  return mapJob(data.job);
+  return { job: mapJob(data.job), replayed: data.replayed === true };
 }
 
 export async function renameBackendJob(projectId: string, jobId: string, title: string) {

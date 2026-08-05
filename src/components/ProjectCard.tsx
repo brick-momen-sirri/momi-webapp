@@ -48,7 +48,12 @@ export function ProjectCard({
         selected ? "border-accent bg-accent/10" : "border-transparent bg-white hover:border-line hover:bg-stone-50"
       }`}
     >
-      <button type="button" onClick={() => onSelect(project.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button
+        type="button"
+        aria-label={`Select project ${project.name}`}
+        onClick={() => onSelect(project.id)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-mist text-stone-600">
           <Folder className="h-4 w-4" />
         </span>

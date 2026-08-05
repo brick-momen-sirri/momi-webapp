@@ -32,6 +32,7 @@ export async function buildQueuedJob(request: CreateJobRequest, deps: JobFactory
 
   return {
     id: jobId,
+    clientRequestId: preparedRequest.clientRequestId,
     projectId: project.id,
     folderId: targetFolderId,
     folderName: folderDisplayName(targetFolderId, projectFolders),

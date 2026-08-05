@@ -224,6 +224,7 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
       </div>
 
       <textarea
+        aria-label="Generation prompt"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Describe the generation you want..."

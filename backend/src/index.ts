@@ -86,8 +86,10 @@ import { creditRouter } from "./routes/creditRoutes.js";
 import { promptRouter } from "./routes/promptRoutes.js";
 import { mediaRouter } from "./routes/mediaRoutes.js";
 import { jobRouter } from "./routes/jobRoutes.js";
+import { createRequestObservability } from "./requestObservability.js";
 
 const app = express();
+app.use(createRequestObservability());
 
 // Pinned rather than reflect-any-origin. The frontend reaches the API through
 // the Vite /api proxy (same-origin, CORS never consulted), so this only governs
@@ -97,6 +99,7 @@ app.use(
   cors({
     origin: (origin, callback) => callback(null, isOriginAllowed(origin, corsOriginPolicy)),
     credentials: true,
+    exposedHeaders: ["X-Request-ID"],
   }),
 );
 app.use(express.json({ limit: jsonBodyLimit }));
@@ -135,6 +138,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
   res.status(500).json({
     error: error instanceof Error ? error.message : "Unexpected server error.",
+    requestId: res.locals.requestId,
   });
 });
 

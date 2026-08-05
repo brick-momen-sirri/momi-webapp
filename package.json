@@ -19,6 +19,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:gateway-smoke": "pnpm --dir backend run test:gateway-smoke",
+    "build:e2e": "tsc -b && vite build --outDir .e2e-dist/frontend --emptyOutDir && pnpm --dir backend exec tsc -p tsconfig.json --outDir .e2e-dist",
+    "test:e2e:production": "pnpm run build:e2e && playwright test",
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -33,6 +35,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@playwright/test": "1.55.0",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

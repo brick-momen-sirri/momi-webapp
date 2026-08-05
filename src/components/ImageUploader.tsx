@@ -778,7 +778,14 @@ function UploadSlot({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
-        <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          aria-label={`Upload ${slot.label}`}
+          className="hidden"
+          onChange={handleFileInput}
+        />
       </div>
     );
   }
@@ -799,7 +806,14 @@ function UploadSlot({
         <span className="mt-2 text-xs font-semibold">{slot.label}</span>
         <span className="mt-1 text-[11px] leading-4 text-stone-500">Drop image, result, or browse</span>
       </button>
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        aria-label={`Upload ${slot.label}`}
+        className="hidden"
+        onChange={handleFileInput}
+      />
     </>
   );
 }
