@@ -558,6 +558,16 @@ function isolatedEnvironment(paths: Awaited<ReturnType<typeof prepareIsolatedSta
     JOBS_ARCHIVED_SQLITE_PATH: path.join(paths.dataDir, "archived-items.sqlite"),
     APP_STATE_DRIVER: "sqlite",
     APP_STATE_SQLITE_PATH: path.join(paths.dataDir, "app-state.sqlite"),
+    // Every database above is a throwaway under paths.dataDir, but
+    // SQLITE_BACKUP_STAGING_DIR defaults to a directory anchored to the REPO
+    // (config.ts), not to the data directory. Left unset while the host
+    // environment has backups enabled, these harness processes snapshot their
+    // empty databases straight into production backup history and rotate real
+    // snapshots out to honour the retention count -- which is what happened on
+    // 2026-08-05. Pin both, so the harness is inert even if someone re-enables
+    // backups in the inherited environment.
+    SQLITE_BACKUP_ENABLED: "false",
+    SQLITE_BACKUP_STAGING_DIR: path.join(paths.dataDir, "backups"),
     USERS_STORE_PATH: path.join(paths.dataDir, "users.json"),
     SESSIONS_STORE_PATH: path.join(paths.dataDir, "sessions.json"),
     PROJECTS_STORE_PATH: path.join(paths.dataDir, "projects.json"),

@@ -8,7 +8,15 @@ import type { ObservabilitySnapshot } from "./observabilityMetrics.js";
 import { recordAlert } from "./alertHistory.js";
 
 export type AlertSeverity = "warning" | "critical";
-export type AlertRule = "queue_stall" | "dispatch_outage" | "memory_high" | "disk_low" | "backup_failed" | "backup_upload_failed";
+export type AlertRule =
+  | "queue_stall"
+  | "dispatch_outage"
+  | "memory_high"
+  | "disk_low"
+  | "backup_failed"
+  | "backup_upload_failed"
+  | "backup_staging_conflict"
+  | "backup_shrink_suspect";
 export type AlertPhase = "firing" | "resolved";
 
 export type AlertEvent = {

@@ -121,10 +121,24 @@ same logic this describes:
    newest first (label is an ISO-ish timestamp, lexically sortable). Offsite:
    `azcopy copy "<container-sas-url>/<prefix>/<date>/<name>-<label>.sqlite" <local-path>`
    to pull it back down first.
-3. **Verify the snapshot before trusting it** — open it read-only and run
-   `PRAGMA integrity_check;` (e.g. via the `sqlite3` CLI, or
-   `node -e "const D=require('better-sqlite3'); const d=new D('<path>',{readonly:true}); console.log(d.pragma('integrity_check',{simple:true}))"`
-   from `backend/` so `better-sqlite3` resolves). Expect exactly `ok`.
+3. **Verify the snapshot before trusting it.** Two separate questions, and
+   `integrity_check` only answers the first:
+
+   - _Is the file a well-formed database?_ Open it read-only and run
+     `PRAGMA integrity_check;` (e.g. via the `sqlite3` CLI, or
+     `node -e "const D=require('better-sqlite3'); const d=new D('<path>',{readonly:true}); console.log(d.pragma('integrity_check',{simple:true}))"`
+     from `backend/` so `better-sqlite3` resolves). Expect exactly `ok`.
+   - _Is it a backup of **this** database?_ `integrity_check` cannot tell you:
+     an empty database is perfectly intact and returns `ok`. Run
+
+     ```bash
+     node scripts/auditBackupSnapshots.mjs
+     ```
+
+     from `backend/` and check the snapshot's row count against the rest of its
+     cohort. A snapshot holding a fraction of its neighbours' population is a
+     backup of something else. See §7.
+
 4. **Clear any stale sidecars at the live path** before copying in the
    restored file: delete `<live-path>-wal` and `<live-path>-shm` if they exist.
    (SQLite's own WAL salt-matching would ignore a mismatched stale WAL anyway,
@@ -142,7 +156,77 @@ same logic this describes:
    Anything created or changed after the restored snapshot's timestamp and
    before the incident is genuinely gone — that gap is the RPO from §2.
 
-## 6. Verifying backups are actually healthy (day to day)
+### Operational offsite drill history
+
+- **2026-08-05: PASS.** Downloaded backup cycle
+  `2026-08-05T12-26-16-174Z` from Azure prefix
+  `momi-backend/2026-08-05` into an isolated temporary directory with AzCopy.
+  The downloaded `jobs`, `archived-items`, and `app-state` snapshots matched
+  their local source snapshots byte-for-byte by SHA-256, returned `ok` from
+  `PRAGMA integrity_check`, exposed every expected application table, and had
+  readable production row counts (554 jobs, 13 archived jobs, 62 projects,
+  119 users, and 7 sessions). Download plus validation took 7.99 seconds; this
+  is not a full-host RTO measurement. No live database or process was touched,
+  and all temporary database copies were removed after validation.
+
+## 6. Which databases a staging directory belongs to
+
+A staging directory serves exactly one set of source databases, and the backup
+service enforces it. The first cycle to run against a directory writes
+`staging-owner.json` there, recording the canonical directories of the databases
+it snapshots. Every later cycle must come from those same directories or it is
+refused: no snapshot, no rotation, no `backup-status.json` rewrite, and a
+`backup_staging_conflict` alert.
+
+This exists because the guard is not theoretical — see §7. Note that
+`SQLITE_BACKUP_STAGING_DIR` defaults to a path anchored to the **repository**
+(`backend/data/backups` via `config.ts`), while every database path is
+independently overridable. Any process started from this checkout with backups
+enabled therefore aims at the production staging directory by default, whatever
+databases it is actually pointed at.
+
+Two situations need an operator decision:
+
+- **You genuinely moved the data directory.** Delete `staging-owner.json` from
+  the staging directory; the next cycle re-claims it for the new paths.
+- **You are running a harness, drill, or dev instance.** Point it somewhere of
+  its own with `SQLITE_BACKUP_STAGING_DIR`, or set `SQLITE_BACKUP_ENABLED=false`.
+  The topology load test now pins both for itself.
+
+## 7. Incident: foreign snapshots in production backup history (2026-08-05)
+
+Between 10:43 and 10:50 UTC, twelve backup cycles wrote snapshots of a test
+harness's own throwaway databases into the production staging directory — 36
+files across `jobs`, `archived-items`, and `app-state`. The harness
+(`topologyLoadTest.ts`) overrode every database path to a temporary directory
+but inherited the repo-anchored default staging directory.
+
+Why nothing caught it:
+
+- Every foreign snapshot returned `integrity_check: ok`. They were valid
+  databases with the correct schema — just nearly empty.
+- `backup-status.json` reported a healthy cycle, because from the service's
+  point of view it was one.
+- Rotation is a count, so twelve foreign snapshots evicted twelve hours of
+  genuine history to stay within `SQLITE_BACKUP_RETENTION_COUNT`.
+- At 10:50 the newest `app-state` snapshot was one of the foreign ones. An
+  operator restoring "the latest snapshot" at that moment would have replaced
+  119 users and 62 projects with 1 and 1, and every check in this runbook as it
+  then stood would have said the backup was fine.
+
+Fixed by the ownership guard in §6 (`ensureStagingOwnership`), by the harness
+pinning its own staging directory, and by a `backup_shrink_suspect` alert when a
+snapshot collapses in size against its predecessor. The 36 foreign files were
+moved to `data/backups-quarantine/` — not deleted — by
+`scripts/auditBackupSnapshots.mjs`.
+
+One honest limitation: the shrink alert and the audit script's population check
+are heuristics and **under-detect**. Six of the foreign `jobs` snapshots held 66
+rows against a cohort median of 551 — implausible to a human, but only 12%
+below, and the harness could easily have produced more. Identity is what the
+ownership marker establishes; population is only a smell test.
+
+## 8. Verifying backups are actually healthy (day to day)
 
 - `GET /metrics` on the dispatcher for the standard health signals (this
   endpoint doesn't currently expose backup-cycle status directly — check
@@ -150,6 +234,16 @@ same logic this describes:
   for that).
 - `data/backups/backup-status.json` — `ok`/`uploaded` per the most recent
   cycle, one entry per database.
-- pm2 logs: `[backup]` on success, `[alert]` (`backup_failed` /
-  `backup_upload_failed`) on failure — and, if `ALERT_WEBHOOK_URL` is
-  configured, the same alert on your webhook channel.
+- pm2 logs: `[backup]` on success, `[alert]` on trouble — and, if
+  `ALERT_WEBHOOK_URL` is configured, the same alert on your webhook channel.
+  The backup rules are:
+
+  | Alert                     | Means                                                                                         |
+  | ------------------------- | --------------------------------------------------------------------------------------------- |
+  | `backup_failed`           | A snapshot failed, or the cycle completed without its offsite upload.                         |
+  | `backup_upload_failed`    | Snapshots are on local disk but did not reach Azure. Local-only is not DR on this host.       |
+  | `backup_staging_conflict` | A process tried to back up different databases into this staging directory. See §6.           |
+  | `backup_shrink_suspect`   | A snapshot collapsed in size against its predecessor. Verify the source before relying on it. |
+
+- `node scripts/auditBackupSnapshots.mjs` from `backend/` for a population
+  check across the whole retention window (read-only unless `--apply`).
