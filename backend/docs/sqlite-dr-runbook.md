@@ -1,6 +1,6 @@
 # SQLite Disaster Recovery — Runbook
 
-**Status:** implemented, tested, off by default (`SQLITE_BACKUP_ENABLED=false`) · **Scope:** `data/jobs.sqlite`, `data/archived-items.sqlite`, `data/app-state.sqlite`
+**Status:** implemented, tested, off by default (`SQLITE_BACKUP_ENABLED=false`) · **Scope:** `data/jobs.sqlite`, `data/archived-items.sqlite`, `data/app-state.sqlite`, and generated media under `data/projects`
 
 This host (`C:\Momi-Animation`, machine AZWEU1AI002) has a single local volume (`C:`).
 A local snapshot alone only protects against corruption or an accidental delete —
@@ -37,6 +37,19 @@ result) and raises `[alert]` events — routed through the same `emitAlert`/
 `backup_failed` (a snapshot or the overall cycle failed) and
 `backup_upload_failed` (offsite shipping failed specifically).
 
+When the Azure leg and `MEDIA_BACKUP_ENABLED` are both enabled, the same cycle
+also protects `LOCAL_PROJECTS_ROOT` (default `backend/data/projects`). The first
+successful run uploads a full baseline. Later runs upload only files modified
+since the previous successful cycle, each into a new append-only
+`<prefix>/media/cycles/<timestamp>/` path. A `backup-manifest.json` is uploaded
+last as the cycle's commit marker; a partial prefix without that marker is not a
+restorable cycle, and the local cursor does not advance after a failed upload.
+No media payload or cycle manifest is deleted or overwritten. A fixed
+`<prefix>/media/restore-index.json` is republished after each committed cycle so
+restoration does not depend on the production SAS having List permission. Local
+deletions are deliberately not propagated, so recovery may contain extra old
+files rather than silently losing them.
+
 ## 2. Configuration
 
 All flags live in `.env.example` under "SQLite disaster recovery". Summary:
@@ -50,6 +63,7 @@ All flags live in `.env.example` under "SQLite disaster recovery". Summary:
 | `BACKUP_AZURE_SAS_URL`          | _(empty)_        | Container SAS URL with **write** access. Empty = local snapshots only, no offsite leg — not real DR against host/disk loss. **Never commit this.** Set it in the process environment (or your secrets manager), not in `ecosystem.config.cjs`. |
 | `BACKUP_AZURE_PREFIX`           | `momi-backend`   | Blob path prefix; a dated subfolder is added per upload.                                                                                                                                                                                       |
 | `AZCOPY_PATH`                   | `azcopy`         | Override if azcopy isn't on `PATH`.                                                                                                                                                                                                            |
+| `MEDIA_BACKUP_ENABLED`          | `true`           | With the master switch and Azure leg enabled, upload a full generated-media baseline followed by hourly append-only deltas from `LOCAL_PROJECTS_ROOT`. Set false only if another backup system owns that tree.                                 |
 
 Enabling requires a restart (`pm2 restart momi-dispatcher` — see the reload
 sequence used for other changes to this backend).
@@ -156,6 +170,31 @@ same logic this describes:
    Anything created or changed after the restored snapshot's timestamp and
    before the incident is genuinely gone — that gap is the RPO from §2.
 
+### Restoring generated media
+
+Generated-media cycles live at `<prefix>/media/cycles/<timestamp>/`. Generate a
+temporary **Read** SAS for restoration; the production Write + Create SAS need
+not be able to download backup data or enumerate the container.
+
+1. Download the known `<prefix>/media/restore-index.json` path. It lists complete
+   cycles in restore order without requiring List permission. Each listed cycle
+   was added only after its `backup-manifest.json` commit marker uploaded.
+2. Create a fresh restore directory. Never overlay the live tree until the
+   reconstruction has been inspected.
+3. Starting with the earliest manifested baseline, apply each manifested cycle
+   in lexical timestamp order up to the desired recovery point. Copy each
+   cycle's contents into the same restore directory and let later files replace
+   earlier versions. Exclude `backup-manifest.json` from the restored content.
+4. Compare the final file/byte inventory with the last applied manifest and
+   spot-check representative images and videos before swapping directories.
+
+The media history intentionally records no delete operations. A recovered tree
+can therefore contain a file that had later been deleted locally; this is the
+safer failure mode for generated assets. The initial baseline must be retained
+for as long as any dependent deltas. If Azure lifecycle rules are introduced,
+they must expire a baseline and all of its deltas as one set, only after a newer
+full baseline exists.
+
 ### Operational offsite drill history
 
 - **2026-08-05: PASS.** Downloaded backup cycle
@@ -177,6 +216,11 @@ service enforces it. The first cycle to run against a directory writes
 it snapshots. Every later cycle must come from those same directories or it is
 refused: no snapshot, no rotation, no `backup-status.json` rewrite, and a
 `backup_staging_conflict` alert.
+
+Generated media has a separate `media-backup-owner.json` marker in the same
+staging directory. It binds the offsite media history to one canonical source
+tree and refuses a different `LOCAL_PROJECTS_ROOT`, preventing the same class of
+foreign-harness contamination from recurring outside SQLite.
 
 This exists because the guard is not theoretical — see §7. Note that
 `SQLITE_BACKUP_STAGING_DIR` defaults to a path anchored to the **repository**
@@ -233,17 +277,18 @@ ownership marker establishes; population is only a smell test.
   `data/backups/backup-status.json` or the `[backup]`/`[alert]` pm2 log lines
   for that).
 - `data/backups/backup-status.json` — `ok`/`uploaded` per the most recent
-  cycle, one entry per database.
+  cycle, one entry per database plus a `media` object with baseline/delta label,
+  source inventory, cursor, completion time, and any error.
 - pm2 logs: `[backup]` on success, `[alert]` on trouble — and, if
   `ALERT_WEBHOOK_URL` is configured, the same alert on your webhook channel.
   The backup rules are:
 
-  | Alert                     | Means                                                                                         |
-  | ------------------------- | --------------------------------------------------------------------------------------------- |
-  | `backup_failed`           | A snapshot failed, or the cycle completed without its offsite upload.                         |
-  | `backup_upload_failed`    | Snapshots are on local disk but did not reach Azure. Local-only is not DR on this host.       |
-  | `backup_staging_conflict` | A process tried to back up different databases into this staging directory. See §6.           |
-  | `backup_shrink_suspect`   | A snapshot collapsed in size against its predecessor. Verify the source before relying on it. |
+  | Alert                     | Means                                                                                                |
+  | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+  | `backup_failed`           | A snapshot failed, or the cycle completed without its offsite upload.                                |
+  | `backup_upload_failed`    | A database snapshot or generated-media cycle did not reach Azure. Local-only is not DR on this host. |
+  | `backup_staging_conflict` | A process tried to back up different databases into this staging directory. See §6.                  |
+  | `backup_shrink_suspect`   | A snapshot collapsed in size against its predecessor. Verify the source before relying on it.        |
 
 - `node scripts/auditBackupSnapshots.mjs` from `backend/` for a population
   check across the whole retention window (read-only unless `--apply`).

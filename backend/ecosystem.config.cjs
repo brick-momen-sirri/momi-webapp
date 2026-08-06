@@ -34,6 +34,7 @@ const commonEnv = {
   BACKUP_AZURE_SAS_URL: process.env.BACKUP_AZURE_SAS_URL || "",
   BACKUP_AZURE_PREFIX: process.env.BACKUP_AZURE_PREFIX || "momi-backend",
   AZCOPY_PATH: process.env.AZCOPY_PATH || "azcopy",
+  MEDIA_BACKUP_ENABLED: process.env.MEDIA_BACKUP_ENABLED || "true",
 };
 
 const processSafety = {

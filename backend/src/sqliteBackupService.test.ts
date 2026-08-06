@@ -8,7 +8,9 @@ import Database from "better-sqlite3";
 
 import {
   backupLabel,
+  backupMediaViaAzcopy,
   buildAzcopyDest,
+  ensureMediaBackupOwnership,
   rotateBackups,
   backupOneDatabase,
   runBackupCycle,
@@ -41,6 +43,140 @@ test("buildAzcopyDest inserts a dated prefix before the SAS query string", () =>
 test("buildAzcopyDest works without a query string", () => {
   const dest = buildAzcopyDest("https://acct.blob.core.windows.net/backups", "p", "f.sqlite");
   assert.equal(dest, "https://acct.blob.core.windows.net/backups/p/f.sqlite");
+});
+
+test("generated-media staging is claimed once and rejects a foreign source tree", async () => {
+  const dir = await tempDir();
+  const stagingDir = path.join(dir, "staging");
+  const productionMedia = path.join(dir, "production-media");
+  const foreignMedia = path.join(dir, "foreign-media");
+  await Promise.all([fs.mkdir(productionMedia), fs.mkdir(foreignMedia)]);
+
+  const first = await ensureMediaBackupOwnership(stagingDir, productionMedia, { role: "dispatcher" });
+  assert.equal(first.claimed, true);
+  const second = await ensureMediaBackupOwnership(stagingDir, productionMedia, { role: "dispatcher" });
+  assert.equal(second.claimed, false);
+  await assert.rejects(
+    ensureMediaBackupOwnership(stagingDir, foreignMedia, { role: "load-test" }),
+    /media backup staging is owned by/,
+  );
+});
+
+test("generated media uploads a full baseline, then an append-only delta with a manifest commit marker", async () => {
+  const dir = await tempDir();
+  const sourceDir = path.join(dir, "projects");
+  const stagingDir = path.join(dir, "staging");
+  await fs.mkdir(path.join(sourceDir, "project-a"), { recursive: true });
+  await fs.writeFile(path.join(sourceDir, "project-a", "render.png"), "abc");
+  await fs.writeFile(path.join(sourceDir, "project-a", "clip.mp4"), "12345");
+
+  let nowMs = Date.parse("2026-08-06T08:00:00.000Z");
+  let calls: string[][] = [];
+  let uploadedManifest: Record<string, unknown> | undefined;
+  let uploadedRestoreIndex: { cycles?: unknown[] } | undefined;
+  const runner = async (_azcopyPath: string, args: string[]) => {
+    calls.push(args);
+    if (path.basename(args[1] ?? "").startsWith(".media-backup-")) {
+      uploadedManifest = JSON.parse(await fs.readFile(args[1], "utf8"));
+    }
+    if (path.basename(args[1] ?? "") === "media-backup-history.json") {
+      uploadedRestoreIndex = JSON.parse(await fs.readFile(args[1], "utf8"));
+    }
+  };
+
+  const baseline = await backupMediaViaAzcopy({
+    sourceDir,
+    stagingDir,
+    sasUrl: "https://acct.blob.core.windows.net/backups?sig=test",
+    prefix: "momi-backend",
+    azcopyPath: "azcopy",
+    role: "dispatcher",
+    now: () => nowMs,
+    runner,
+  });
+
+  assert.equal(baseline.ok, true);
+  assert.equal(baseline.baseline, true);
+  assert.equal(baseline.files, 2);
+  assert.equal(baseline.bytes, 8);
+  assert.equal(calls.length, 3, "data, manifest commit marker, then fixed restore index");
+  assert.match(calls[0][1], /projects[\\/]\*$/);
+  assert.ok(calls[0].includes("--recursive=true"));
+  assert.ok(calls[0].includes("--put-md5=true"));
+  assert.ok(!calls[0].some((arg) => arg.startsWith("--include-after=")));
+  assert.match(calls[0][2], /momi-backend\/media\/cycles\/2026-08-06T08-00-00-000Z\?sig=test$/);
+  assert.match(calls[1][2], /backup-manifest\.json\?sig=test$/);
+  assert.match(calls[2][2], /momi-backend\/media\/restore-index\.json\?sig=test$/);
+  assert.equal(uploadedManifest?.baseline, true);
+  assert.deepEqual(uploadedManifest?.inventory, { files: 2, bytes: 8 });
+  assert.equal(uploadedRestoreIndex?.cycles?.length, 1);
+
+  const firstCursor = JSON.parse(await fs.readFile(path.join(stagingDir, "media-backup-cursor.json"), "utf8"));
+  assert.equal(firstCursor.lastSuccessfulStartedAt, "2026-08-06T08:00:00.000Z");
+
+  nowMs = Date.parse("2026-08-06T09:00:00.000Z");
+  calls = [];
+  uploadedManifest = undefined;
+  uploadedRestoreIndex = undefined;
+  await fs.writeFile(path.join(sourceDir, "project-a", "second.png"), "new");
+  const delta = await backupMediaViaAzcopy({
+    sourceDir,
+    stagingDir,
+    sasUrl: "https://acct.blob.core.windows.net/backups?sig=test",
+    prefix: "momi-backend",
+    azcopyPath: "azcopy",
+    role: "dispatcher",
+    now: () => nowMs,
+    runner,
+  });
+
+  assert.equal(delta.baseline, false);
+  assert.equal(delta.incrementalSince, "2026-08-06T08:00:00.000Z");
+  assert.ok(calls[0].includes("--include-after=2026-08-06T08:00:00.000Z"));
+  assert.match(calls[0][2], /momi-backend\/media\/cycles\/2026-08-06T09-00-00-000Z\?sig=test$/);
+  assert.equal(uploadedManifest?.baseline, false);
+  assert.equal(uploadedRestoreIndex?.cycles?.length, 2);
+});
+
+test("a failed media upload neither advances its cursor nor publishes a manifest", async () => {
+  const dir = await tempDir();
+  const sourceDir = path.join(dir, "projects");
+  const stagingDir = path.join(dir, "staging");
+  await fs.mkdir(sourceDir);
+  await fs.writeFile(path.join(sourceDir, "render.png"), "abc");
+  let nowMs = Date.parse("2026-08-06T08:00:00.000Z");
+
+  await backupMediaViaAzcopy({
+    sourceDir,
+    stagingDir,
+    sasUrl: "https://acct.blob.core.windows.net/backups?sig=test",
+    prefix: "momi-backend",
+    azcopyPath: "azcopy",
+    now: () => nowMs,
+    runner: async () => undefined,
+  });
+  const cursorPath = path.join(stagingDir, "media-backup-cursor.json");
+  const cursorBefore = await fs.readFile(cursorPath, "utf8");
+  let calls = 0;
+  nowMs += 60 * 60 * 1000;
+
+  await assert.rejects(
+    backupMediaViaAzcopy({
+      sourceDir,
+      stagingDir,
+      sasUrl: "https://acct.blob.core.windows.net/backups?sig=test",
+      prefix: "momi-backend",
+      azcopyPath: "azcopy",
+      now: () => nowMs,
+      runner: async () => {
+        calls += 1;
+        throw new Error("network unreachable");
+      },
+    }),
+    /network unreachable/,
+  );
+  assert.equal(calls, 1, "the manifest is never attempted after the data transfer fails");
+  assert.equal(await fs.readFile(cursorPath, "utf8"), cursorBefore);
 });
 
 test("backupOneDatabase captures WAL-resident rows that a plain file copy would lose", async () => {
@@ -217,6 +353,68 @@ test("runBackupCycle reports ok=false when the uploader fails, without throwing"
   assert.equal(cycle.uploaded, false);
   assert.equal(cycle.results[0].ok, true, "the local snapshot itself still succeeded");
   assert.equal(cycle.results[0].uploaded, undefined);
+});
+
+test("runBackupCycle records generated-media success in the shared backup status", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "fixed-label",
+    uploader: async () => undefined,
+    mediaSourceDir: path.join(dir, "projects"),
+    mediaUploader: async () => ({
+      ok: true,
+      uploaded: true,
+      sourceDir: path.join(dir, "projects"),
+      cycleLabel: "media-cycle",
+      baseline: true,
+      incrementalSince: null,
+      files: 2,
+      bytes: 8,
+      completedAt: "2026-08-06T08:00:01.000Z",
+    }),
+  });
+
+  assert.equal(cycle.ok, true);
+  assert.equal(cycle.uploaded, true);
+  assert.equal(cycle.media?.cycleLabel, "media-cycle");
+  const status = JSON.parse(await fs.readFile(cycle.statusPath, "utf8"));
+  assert.deepEqual(
+    { ok: status.media.ok, uploaded: status.media.uploaded, files: status.media.files, bytes: status.media.bytes },
+    { ok: true, uploaded: true, files: 2, bytes: 8 },
+  );
+});
+
+test("runBackupCycle fails observably when generated-media upload fails after database upload", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "fixed-label",
+    uploader: async () => undefined,
+    mediaSourceDir: path.join(dir, "projects"),
+    mediaUploader: async () => {
+      throw new Error("media network unreachable");
+    },
+  });
+
+  assert.equal(cycle.ok, false);
+  assert.equal(cycle.uploaded, false);
+  assert.equal(cycle.results[0].uploaded, true, "the database upload itself still succeeded");
+  assert.equal(cycle.media?.ok, false);
+  assert.match(cycle.media?.error ?? "", /media network unreachable/);
+  const status = JSON.parse(await fs.readFile(cycle.statusPath, "utf8"));
+  assert.equal(status.media.uploaded, false);
+  assert.match(status.media.error, /media network unreachable/);
 });
 
 test("runBackupCycle is ok=false when any target's snapshot fails, and still snapshots the rest", async () => {

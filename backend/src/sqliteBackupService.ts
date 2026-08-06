@@ -11,6 +11,10 @@ import { emitAlert, type AlertRule, type WebhookFormat } from "./healthWatchdog.
 // `running` guard in startScheduledBackups) forever. Generous because a full
 // hourly snapshot set could legitimately take minutes on a slow link.
 const AZCOPY_TIMEOUT_MS = 15 * 60 * 1000;
+// The first generated-media baseline is currently several GiB and may run on a
+// much slower link than the small SQLite snapshots. Later cycles are deltas,
+// but the initial seed still needs a bounded, realistic window.
+const MEDIA_AZCOPY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 // SQLite disaster-recovery backups for the web/worker split. Each cycle takes a
 // CONSISTENT hot snapshot of every database using SQLite's online backup API
@@ -27,6 +31,9 @@ export type BackupTarget = { name: string; sourcePath: string };
 // A staging directory belongs to exactly one set of source databases. The name
 // of the file is deliberately not `.sqlite`, so rotation never sees it.
 const STAGING_OWNER_FILE = "staging-owner.json";
+const MEDIA_OWNER_FILE = "media-backup-owner.json";
+const MEDIA_CURSOR_FILE = "media-backup-cursor.json";
+const MEDIA_HISTORY_FILE = "media-backup-history.json";
 
 // A snapshot smaller than this fraction of the previous one for the same target
 // is reported as suspect. Real databases grow; an order-of-magnitude collapse is
@@ -48,6 +55,12 @@ export type StagingOwnershipVerdict =
 function canonicalDir(filePath: string): string {
   const pathApi = process.platform === "win32" ? path.win32 : path.posix;
   const resolved = pathApi.dirname(pathApi.resolve(filePath));
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function canonicalPath(filePath: string): string {
+  const pathApi = process.platform === "win32" ? path.win32 : path.posix;
+  const resolved = pathApi.resolve(filePath);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
@@ -170,7 +183,47 @@ export type BackupCycleResult = {
   ok: boolean;
   uploaded: boolean;
   results: BackupResult[];
+  media?: MediaBackupResult;
   statusPath: string;
+};
+
+export type MediaBackupResult = {
+  ok: boolean;
+  uploaded: boolean;
+  sourceDir: string;
+  cycleLabel?: string;
+  baseline?: boolean;
+  incrementalSince?: string | null;
+  files?: number;
+  bytes?: number;
+  completedAt?: string;
+  error?: string;
+};
+
+type MediaBackupOwner = {
+  sourceDir: string;
+  claimedAt: string;
+  claimedBy?: { role?: string; pid: number };
+};
+
+type MediaBackupCursor = {
+  sourceDir: string;
+  lastSuccessfulStartedAt: string;
+  completedAt: string;
+  cycleLabel: string;
+};
+
+type MediaBackupHistory = {
+  version: 1;
+  sourceDir: string;
+  cycles: Array<{
+    cycleLabel: string;
+    baseline: boolean;
+    incrementalSince: string | null;
+    startedAt: string;
+    completedAt: string;
+    inventory: { files: number; bytes: number };
+  }>;
 };
 
 // A filesystem-safe, lexically-sortable timestamp label (so a plain readdir sort
@@ -337,6 +390,227 @@ export async function uploadViaAzcopy(files: string[], sasUrl: string, prefix: s
   }
 }
 
+async function readJsonFile<T>(filePath: string): Promise<T | null> {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error(`${path.basename(filePath)} is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function writeJsonAtomically(filePath: string, value: unknown): Promise<void> {
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  try {
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    // Windows rename does not consistently replace an existing destination.
+    // The completed temp file is already durable, so replace only after it is
+    // ready and make one final rename attempt.
+    if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    await fs.rm(filePath, { force: true });
+    await fs.rename(tmpPath, filePath);
+  } finally {
+    await fs.rm(tmpPath, { force: true }).catch(() => undefined);
+  }
+}
+
+export async function ensureMediaBackupOwnership(
+  stagingDir: string,
+  sourceDir: string,
+  opts: { role?: string; now?: () => number } = {},
+): Promise<{ claimed: boolean; owner: MediaBackupOwner }> {
+  const markerPath = path.join(stagingDir, MEDIA_OWNER_FILE);
+  const canonicalSource = canonicalPath(sourceDir);
+  const existing = await readJsonFile<MediaBackupOwner>(markerPath);
+  if (existing) {
+    if (typeof existing.sourceDir !== "string" || canonicalPath(existing.sourceDir) !== canonicalSource) {
+      throw new Error(`media backup staging is owned by ${String(existing.sourceDir)} but this process uses ${canonicalSource}`);
+    }
+    return { claimed: false, owner: existing };
+  }
+
+  const owner: MediaBackupOwner = {
+    sourceDir: canonicalSource,
+    claimedAt: new Date(opts.now ? opts.now() : Date.now()).toISOString(),
+    claimedBy: { role: opts.role, pid: process.pid },
+  };
+  await writeJsonAtomically(markerPath, owner);
+  return { claimed: true, owner };
+}
+
+async function mediaInventory(rootDir: string): Promise<{ files: number; bytes: number }> {
+  let files = 0;
+  let bytes = 0;
+
+  const visit = async (directory: string): Promise<void> => {
+    let entries: import("node:fs").Dirent<string>[];
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && directory !== rootDir) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(fullPath);
+      } else if (entry.isFile()) {
+        try {
+          const stat = await fs.stat(fullPath);
+          files += 1;
+          bytes += stat.size;
+        } catch (error) {
+          // A temporary upload can disappear while the live tree is scanned.
+          // AzCopy handles the same race; do not fail the whole DR cycle for an
+          // entry that no longer exists by the time it is inspected.
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      // Deliberately do not follow symlinks out of the owned media root.
+    }
+  };
+
+  await visit(rootDir);
+  return { files, bytes };
+}
+
+/**
+ * Uploads one append-only generated-media cycle.
+ *
+ * The first successful cycle is a full baseline. Later cycles use AzCopy's
+ * local --include-after filter and land in new timestamped prefixes, so no
+ * backup blob is ever deleted or overwritten. A manifest is uploaded last as
+ * the commit marker; a partially uploaded cycle has no manifest and is ignored
+ * during restore. The local cursor advances only after that marker succeeds.
+ */
+export async function backupMediaViaAzcopy(opts: {
+  sourceDir: string;
+  stagingDir: string;
+  sasUrl: string;
+  prefix: string;
+  azcopyPath: string;
+  role?: string;
+  now?: () => number;
+  runner?: (azcopyPath: string, args: string[], timeoutMs?: number) => Promise<void>;
+}): Promise<MediaBackupResult> {
+  const startedMs = opts.now ? opts.now() : Date.now();
+  const startedAt = new Date(startedMs).toISOString();
+  const cycleLabel = backupLabel(startedMs);
+  const sourceDir = canonicalPath(opts.sourceDir);
+  const stat = await fs.stat(sourceDir);
+  if (!stat.isDirectory()) throw new Error(`media backup source is not a directory: ${sourceDir}`);
+
+  await ensureMediaBackupOwnership(opts.stagingDir, sourceDir, { role: opts.role, now: opts.now });
+  const cursorPath = path.join(opts.stagingDir, MEDIA_CURSOR_FILE);
+  const cursor = await readJsonFile<MediaBackupCursor>(cursorPath);
+  if (cursor && (typeof cursor.sourceDir !== "string" || canonicalPath(cursor.sourceDir) !== sourceDir)) {
+    throw new Error(`media backup cursor belongs to ${String(cursor.sourceDir)} but this process uses ${sourceDir}`);
+  }
+  const historyPath = path.join(opts.stagingDir, MEDIA_HISTORY_FILE);
+  const history = await readJsonFile<MediaBackupHistory>(historyPath);
+  if (
+    history &&
+    (history.version !== 1 ||
+      typeof history.sourceDir !== "string" ||
+      canonicalPath(history.sourceDir) !== sourceDir ||
+      !Array.isArray(history.cycles))
+  ) {
+    throw new Error(`media backup history does not belong to ${sourceDir} or has an unsupported format`);
+  }
+  if (cursor && !history) {
+    throw new Error("media backup cursor exists without media-backup-history.json; refusing to lose the restore chain");
+  }
+
+  const incrementalSince = cursor?.lastSuccessfulStartedAt ?? null;
+  const inventory = await mediaInventory(sourceDir);
+  const destinationPrefix = `${opts.prefix}/media/cycles/${cycleLabel}`;
+  const destination = buildAzcopyDest(opts.sasUrl, destinationPrefix, "");
+  const args = [
+    "copy",
+    path.join(sourceDir, "*"),
+    destination,
+    "--recursive=true",
+    "--overwrite=true",
+    "--put-md5=true",
+    "--log-level=ERROR",
+  ];
+  if (incrementalSince) args.push(`--include-after=${incrementalSince}`);
+
+  const runner = opts.runner ?? runAzcopy;
+  await runner(opts.azcopyPath, args, MEDIA_AZCOPY_TIMEOUT_MS);
+
+  // Upload the manifest last. Its presence is the offsite proof that AzCopy
+  // completed this cycle; failed/partial prefixes never get a commit marker.
+  const manifestPath = path.join(opts.stagingDir, `.media-backup-${cycleLabel}.json`);
+  const completedAt = new Date(opts.now ? opts.now() : Date.now()).toISOString();
+  const manifest = {
+    version: 1,
+    cycleLabel,
+    sourceDir,
+    baseline: !cursor,
+    incrementalSince,
+    startedAt,
+    completedAt,
+    inventory,
+    restore:
+      "Apply every manifested cycle in cycleLabel order; later files overwrite earlier ones. Deletions are intentionally not propagated.",
+  };
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  try {
+    const manifestDestination = buildAzcopyDest(opts.sasUrl, destinationPrefix, "backup-manifest.json");
+    await runner(opts.azcopyPath, ["copy", manifestPath, manifestDestination, "--overwrite=true", "--log-level=ERROR"]);
+  } finally {
+    await fs.rm(manifestPath, { force: true }).catch(() => undefined);
+  }
+
+  // Keep a fixed, downloadable index of the append-only chain. The production
+  // SAS does not need List permission: after host loss an operator can generate
+  // a temporary Read SAS and fetch this known path to discover every complete
+  // baseline/delta in restore order. Write the local history first; if the
+  // index upload fails, the next retry republishes the already-valid manifested
+  // cycle instead of forgetting it.
+  const nextHistory: MediaBackupHistory = {
+    version: 1,
+    sourceDir,
+    cycles: [
+      ...(history?.cycles ?? []),
+      {
+        cycleLabel,
+        baseline: !cursor,
+        incrementalSince,
+        startedAt,
+        completedAt,
+        inventory,
+      },
+    ],
+  };
+  await writeJsonAtomically(historyPath, nextHistory);
+  const restoreIndexDestination = buildAzcopyDest(opts.sasUrl, `${opts.prefix}/media`, "restore-index.json");
+  await runner(opts.azcopyPath, ["copy", historyPath, restoreIndexDestination, "--overwrite=true", "--log-level=ERROR"]);
+
+  await writeJsonAtomically(cursorPath, {
+    sourceDir,
+    lastSuccessfulStartedAt: startedAt,
+    completedAt,
+    cycleLabel,
+  } satisfies MediaBackupCursor);
+
+  return {
+    ok: true,
+    uploaded: true,
+    sourceDir,
+    cycleLabel,
+    baseline: !cursor,
+    incrementalSince,
+    files: inventory.files,
+    bytes: inventory.bytes,
+    completedAt,
+  };
+}
+
 type AlertOpts = { role?: string; webhookUrl?: string; webhookFormat?: WebhookFormat };
 
 // Routes backup alerts through the same emitAlert/webhook path the health
@@ -356,6 +630,8 @@ export async function runBackupCycle(opts: {
   retention: number;
   label?: string;
   uploader?: (files: string[]) => Promise<void>;
+  mediaUploader?: () => Promise<MediaBackupResult>;
+  mediaSourceDir?: string;
   now?: () => number;
   role?: string;
   webhookUrl?: string;
@@ -443,19 +719,36 @@ export async function runBackupCycle(opts: {
     await rotateBackups(opts.stagingDir, result.name, opts.retention);
   }
 
-  let uploaded = false;
+  let databaseUploaded = false;
   if (opts.uploader && uploadable.length) {
     try {
       await opts.uploader(uploadable);
-      uploaded = true;
+      databaseUploaded = true;
       for (const result of results) if (result.ok) result.uploaded = true;
     } catch (error) {
       raiseAlert("backup_upload_failed", error instanceof Error ? error.message : String(error), opts);
     }
   }
 
+  let media: MediaBackupResult | undefined;
+  if (opts.mediaUploader) {
+    try {
+      media = await opts.mediaUploader();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      media = {
+        ok: false,
+        uploaded: false,
+        sourceDir: opts.mediaSourceDir ?? "unknown",
+        error: detail,
+      };
+      raiseAlert("backup_upload_failed", `generated media: ${detail}`, opts);
+    }
+  }
+
   const snapshotsOk = results.length > 0 && results.every((result) => result.ok);
-  const ok = snapshotsOk && (!opts.uploader || uploaded);
+  const uploaded = databaseUploaded && (!opts.mediaUploader || media?.uploaded === true);
+  const ok = snapshotsOk && (!opts.uploader || databaseUploaded) && (!opts.mediaUploader || media?.ok === true);
   const statusPath = path.join(opts.stagingDir, "backup-status.json");
   await fs.mkdir(opts.stagingDir, { recursive: true });
   await fs.writeFile(
@@ -465,6 +758,20 @@ export async function runBackupCycle(opts: {
         at,
         ok,
         uploaded,
+        media: media
+          ? {
+              ok: media.ok,
+              uploaded: media.uploaded,
+              sourceDir: media.sourceDir,
+              cycleLabel: media.cycleLabel ?? null,
+              baseline: media.baseline ?? null,
+              incrementalSince: media.incrementalSince ?? null,
+              files: media.files ?? null,
+              bytes: media.bytes ?? null,
+              completedAt: media.completedAt ?? null,
+              error: media.error ?? null,
+            }
+          : null,
         results: results.map((result) => ({
           name: result.name,
           ok: result.ok,
@@ -487,18 +794,23 @@ export async function runBackupCycle(opts: {
     raiseAlert(
       "backup_failed",
       `backup cycle ${at} had failures: ${
-        results
-          .filter((r) => !r.ok)
-          .map((r) => `${r.name}: ${r.error}`)
-          .join("; ") || "upload did not complete"
+        [
+          ...results.filter((r) => !r.ok).map((r) => `${r.name}: ${r.error}`),
+          ...(media && !media.ok ? [`generated media: ${media.error ?? "upload did not complete"}`] : []),
+        ].join("; ") || "upload did not complete"
       }`,
       opts,
     );
   } else {
-    console.info("[backup]", { at, uploaded, dbs: results.map((r) => `${r.name}:${r.bytes ?? 0}b`).join(",") });
+    console.info("[backup]", {
+      at,
+      uploaded,
+      dbs: results.map((r) => `${r.name}:${r.bytes ?? 0}b`).join(","),
+      media: media ? `${media.files ?? 0} files/${media.bytes ?? 0}b/${media.baseline ? "baseline" : "delta"}` : "disabled",
+    });
   }
 
-  return { at, ok, uploaded, results, statusPath };
+  return { at, ok, uploaded, results, media, statusPath };
 }
 
 export function startScheduledBackups(opts: {
@@ -507,6 +819,8 @@ export function startScheduledBackups(opts: {
   retention: number;
   intervalMs: number;
   uploader?: (files: string[]) => Promise<void>;
+  mediaUploader?: () => Promise<MediaBackupResult>;
+  mediaSourceDir?: string;
   role?: string;
   webhookUrl?: string;
   webhookFormat?: WebhookFormat;

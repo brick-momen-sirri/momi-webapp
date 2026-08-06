@@ -299,6 +299,14 @@ export const backupStagingDir = process.env.SQLITE_BACKUP_STAGING_DIR?.trim() ||
 export const backupAzureSasUrl = process.env.BACKUP_AZURE_SAS_URL?.trim() || "";
 export const backupAzurePrefix = process.env.BACKUP_AZURE_PREFIX?.trim() || "momi-backend";
 export const azcopyPath = process.env.AZCOPY_PATH?.trim() || "azcopy";
+// Generated media already lives locally; when SQLite DR has an offsite Azure
+// leg, include the application-managed project tree by default. Set explicitly
+// false only if another system owns that directory's backup.
+export const mediaBackupEnabled = !["0", "false", "no", "off"].includes(
+  String(process.env.MEDIA_BACKUP_ENABLED ?? "true")
+    .trim()
+    .toLowerCase(),
+);
 
 export function validateRuntimeConfigForStartup() {
   if (corsAllowedOrigins.includes("*")) {

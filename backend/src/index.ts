@@ -15,7 +15,7 @@ import express from "express";
 import { backendProcessRole, isDispatcher } from "./processRole.js";
 
 import { createHealthWatchdog } from "./healthWatchdog.js";
-import { startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
+import { backupMediaViaAzcopy, startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
 import { pruneThumbnailCache } from "./thumbnailService.js";
 
 import {
@@ -41,6 +41,8 @@ import {
   backupAzureSasUrl,
   backupAzurePrefix,
   azcopyPath,
+  mediaBackupEnabled,
+  localProjectsRoot,
   jobsSqlitePath,
   archivedItemsSqlitePath,
   appStateSqlitePath,
@@ -210,6 +212,19 @@ async function boot() {
         uploader: backupAzureSasUrl
           ? (files) => uploadViaAzcopy(files, backupAzureSasUrl, backupAzurePrefix, azcopyPath)
           : undefined,
+        mediaUploader:
+          backupAzureSasUrl && mediaBackupEnabled
+            ? () =>
+                backupMediaViaAzcopy({
+                  sourceDir: localProjectsRoot,
+                  stagingDir: backupStagingDir,
+                  sasUrl: backupAzureSasUrl,
+                  prefix: backupAzurePrefix,
+                  azcopyPath,
+                  role: backendProcessRole,
+                })
+            : undefined,
+        mediaSourceDir: localProjectsRoot,
         role: backendProcessRole,
         webhookUrl: alertWebhookUrl || undefined,
         webhookFormat: alertWebhookFormat,
