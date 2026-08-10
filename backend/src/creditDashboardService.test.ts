@@ -4,10 +4,16 @@ import assert from "node:assert/strict";
 import {
   addDay,
   addDays,
+  bucketStart,
+  buildCreditBuckets,
+  buildCreditPivot,
+  creditDashboardGranularity,
   creditDashboardRange,
   dayKey,
   daysBetween,
+  defaultGranularity,
   fillDailyRange,
+  isoWeekKey,
   normalizeProjectStatName,
   parseDateOnly,
   projectStatNameCandidates,
@@ -20,6 +26,7 @@ import {
   stringField,
   type CreditDashboardDay,
   type CreditDashboardGroup,
+  type CreditDashboardRecentJob,
 } from "./creditDashboardService.js";
 import type { Job, Project } from "./types.js";
 import type { CreditTrackerProjectStats } from "./creditUsageService.js";
@@ -283,5 +290,197 @@ test("projectStatNameCandidates offers the folder name first and drops empties",
   assert.ok(
     candidates.every((candidate) => Boolean(candidate)),
     "an empty candidate would match an empty tracker key",
+  );
+});
+
+// Day/week/month bucketing and the spend pivot. These replace the old
+// client-side grouping, which derived its stacked segments from the recent-event
+// list the route caps at 500 rows and so under-reported on busy ranges.
+
+function pivotEvent(overrides: Partial<CreditDashboardRecentJob> & { timestamp: string }): CreditDashboardRecentJob {
+  return {
+    jobId: `job-${overrides.timestamp}-${overrides.modelId ?? "m"}`,
+    projectId: "p1",
+    projectName: "Tower A",
+    userId: "u1",
+    userName: "Momen",
+    modelId: "m1",
+    modelName: "Veo 3",
+    status: "completed",
+    credits: 10,
+    usd: 0.05,
+    expectedCredits: 10,
+    source: "tracker",
+    resolution: "1080p",
+    createdAt: overrides.timestamp,
+    ...overrides,
+  };
+}
+
+test("defaultGranularity widens the bucket as the range grows", () => {
+  const endAt = new Date(2026, 7, 8);
+  assert.equal(defaultGranularity(addDays(endAt, -1), endAt), "day");
+  assert.equal(defaultGranularity(addDays(endAt, -14), endAt), "day");
+  assert.equal(defaultGranularity(addDays(endAt, -30), endAt), "week");
+  assert.equal(defaultGranularity(addDays(endAt, -92), endAt), "week");
+  assert.equal(defaultGranularity(addDays(endAt, -365), endAt), "month");
+});
+
+test("creditDashboardGranularity honours an explicit param and ignores junk", () => {
+  const endAt = new Date(2026, 7, 8);
+  const startAt = addDays(endAt, -30);
+  assert.equal(creditDashboardGranularity({ granularity: "day" }, startAt, endAt), "day");
+  assert.equal(creditDashboardGranularity({ granularity: "month" }, startAt, endAt), "month");
+  // Anything unrecognised falls back to the range-derived default rather than
+  // producing an unbucketable series.
+  assert.equal(creditDashboardGranularity({ granularity: "hour" }, startAt, endAt), "week");
+  assert.equal(creditDashboardGranularity({}, startAt, endAt), "week");
+});
+
+test("bucketStart snaps to the Monday of the ISO week and the first of the month", () => {
+  const saturday = new Date(2026, 7, 8);
+  assert.equal(dayKey(bucketStart(saturday, "day")), "2026-08-08");
+  assert.equal(dayKey(bucketStart(saturday, "week")), "2026-08-03");
+  assert.equal(dayKey(bucketStart(saturday, "month")), "2026-08-01");
+  // A Monday is already its own week start.
+  assert.equal(dayKey(bucketStart(new Date(2026, 7, 3), "week")), "2026-08-03");
+  // Sunday belongs to the week that began the previous Monday, not the next one.
+  assert.equal(dayKey(bucketStart(new Date(2026, 7, 9), "week")), "2026-08-03");
+});
+
+test("isoWeekKey puts early-January days in the previous ISO year when the week straddles", () => {
+  // 2027-01-01 is a Friday, so its ISO week is 2026-W53.
+  assert.equal(isoWeekKey(new Date(2027, 0, 1)), "2026-W53");
+  assert.equal(isoWeekKey(new Date(2026, 0, 1)), "2026-W01");
+  assert.equal(isoWeekKey(new Date(2026, 7, 8)), "2026-W32");
+});
+
+test("buildCreditBuckets covers the range at each granularity and zero-fills quiet buckets", () => {
+  const startAt = new Date(2026, 7, 1);
+  const endAt = new Date(2026, 7, 15);
+
+  const days = buildCreditBuckets(startAt, endAt, "day");
+  assert.equal(days.length, 14);
+  assert.equal(days[0].key, "2026-08-01");
+  assert.equal(days[0].label, "Aug 01");
+  assert.deepEqual([days[0].credits, days[0].usd, days[0].jobs], [0, 0, 0]);
+
+  // The window starts mid-week, so the first bucket reaches back to Jul 27.
+  const weeks = buildCreditBuckets(startAt, endAt, "week");
+  assert.deepEqual(
+    weeks.map((bucket) => bucket.key),
+    ["2026-W31", "2026-W32", "2026-W33"],
+  );
+  assert.equal(weeks[0].label, "Jul 27 - Aug 2");
+
+  const months = buildCreditBuckets(new Date(2026, 5, 10), endAt, "month");
+  assert.deepEqual(
+    months.map((bucket) => bucket.key),
+    ["2026-06", "2026-07", "2026-08"],
+  );
+  assert.equal(months[2].label, "Aug 2026");
+});
+
+test("buildCreditBuckets caps the series and keeps the most recent buckets", () => {
+  const endAt = new Date(2026, 7, 1);
+  const buckets = buildCreditBuckets(addDays(endAt, -3650), endAt, "day");
+  assert.equal(buckets.length, 120);
+  // Truncation drops the oldest end, matching fillDailyRange.
+  assert.equal(buckets[buckets.length - 1].key, "2026-07-31");
+});
+
+test("buildCreditPivot totals each bucket and splits it by project, user and model", () => {
+  const startAt = new Date(2026, 7, 3);
+  const endAt = new Date(2026, 7, 17);
+  const events = [
+    pivotEvent({ timestamp: "2026-08-04T10:00:00.000Z", credits: 30, usd: 0.15 }),
+    pivotEvent({
+      timestamp: "2026-08-05T10:00:00.000Z",
+      credits: 20,
+      usd: 0.1,
+      projectId: "p2",
+      projectName: "Riverside",
+      modelId: "m2",
+      modelName: "Seedance",
+    }),
+    pivotEvent({ timestamp: "2026-08-12T10:00:00.000Z", credits: 50, usd: 0.25, userId: "u2", userName: "Sara" }),
+  ];
+
+  const { buckets, breakdown } = buildCreditPivot(events, startAt, endAt, "week");
+  assert.deepEqual(
+    buckets.map((bucket) => bucket.key),
+    ["2026-W32", "2026-W33"],
+  );
+  assert.deepEqual(
+    buckets.map((bucket) => bucket.credits),
+    [50, 50],
+  );
+  assert.deepEqual(
+    buckets.map((bucket) => bucket.jobs),
+    [2, 1],
+  );
+
+  // perBucket is index-aligned with buckets, so the pivot's row and column
+  // totals are the same numbers read two ways.
+  const towerA = breakdown.project.find((row) => row.id === "p1");
+  assert.deepEqual(towerA?.perBucket, [30, 50]);
+  assert.equal(towerA?.credits, 80);
+  assert.equal(towerA?.percentage, 80);
+  assert.deepEqual(
+    breakdown.model.map((row) => [row.label, row.credits]),
+    [
+      ["Veo 3", 80],
+      ["Seedance", 20],
+    ],
+  );
+  assert.deepEqual(
+    breakdown.user.find((row) => row.id === "u2")?.perBucket,
+    [0, 50],
+  );
+});
+
+test("buildCreditPivot ignores events that fall outside the bucket window", () => {
+  const startAt = new Date(2026, 7, 10);
+  const endAt = new Date(2026, 7, 17);
+  const { buckets, breakdown } = buildCreditPivot(
+    [
+      pivotEvent({ timestamp: "2026-08-01T10:00:00.000Z", credits: 99 }),
+      pivotEvent({ timestamp: "2026-08-11T10:00:00.000Z", credits: 7 }),
+      pivotEvent({ timestamp: "not-a-date", credits: 5 }),
+    ],
+    startAt,
+    endAt,
+    "day",
+  );
+  assert.equal(
+    buckets.reduce((sum, bucket) => sum + bucket.credits, 0),
+    7,
+  );
+  assert.equal(breakdown.project[0].credits, 7);
+});
+
+test("buildCreditPivot folds everything past the top rows into one Other series", () => {
+  const startAt = new Date(2026, 7, 3);
+  const endAt = new Date(2026, 7, 5);
+  // Twelve models, descending spend: eight survive as rows, four collapse.
+  const events = Array.from({ length: 12 }, (_, index) =>
+    pivotEvent({
+      timestamp: index % 2 === 0 ? "2026-08-03T10:00:00.000Z" : "2026-08-04T10:00:00.000Z",
+      credits: 100 - index,
+      modelId: `m${index}`,
+      modelName: `Model ${index}`,
+    }),
+  );
+
+  const { breakdown } = buildCreditPivot(events, startAt, endAt, "day");
+  assert.equal(breakdown.model.length, 9);
+  assert.equal(breakdown.model[8].label, "Other (4)");
+  // The four cheapest are indices 8-11 (92, 91, 90, 89); the even-indexed ones
+  // land in the first bucket.
+  assert.deepEqual(breakdown.model[8].perBucket, [182, 180]);
+  assert.equal(breakdown.model[8].credits, 362);
+  assert.equal(
+    Math.round(breakdown.model.reduce((sum, row) => sum + row.percentage, 0)),
+    100,
   );
 });

@@ -121,6 +121,35 @@ export type BackendCreditDashboardGroup = {
 
 export type BackendCreditDashboardDay = { date: string; credits: number; usd: number; jobs: number };
 
+export type BackendCreditDashboardGranularity = "day" | "week" | "month";
+
+export type BackendCreditDashboardBucket = {
+  key: string;
+  label: string;
+  startAt: string;
+  endAt: string;
+  credits: number;
+  usd: number;
+  jobs: number;
+};
+
+// perBucket is index-aligned with the dashboard's buckets array.
+export type BackendCreditDashboardBreakdownRow = {
+  id: string;
+  label: string;
+  credits: number;
+  usd: number;
+  jobs: number;
+  percentage: number;
+  perBucket: number[];
+};
+
+export type BackendCreditDashboardBreakdown = {
+  project: BackendCreditDashboardBreakdownRow[];
+  user: BackendCreditDashboardBreakdownRow[];
+  model: BackendCreditDashboardBreakdownRow[];
+};
+
 export type BackendCreditDashboardRecentJob = {
   jobId: string;
   projectId: string;
@@ -193,10 +222,13 @@ export type BackendCreditDashboard = {
     jobsWithUsage: number;
     totalJobs: number;
   };
+  granularity: BackendCreditDashboardGranularity;
   byProject: BackendCreditDashboardGroup[];
   byUser: BackendCreditDashboardGroup[];
   byModel: BackendCreditDashboardGroup[];
   byDay: BackendCreditDashboardDay[];
+  buckets: BackendCreditDashboardBucket[];
+  breakdown: BackendCreditDashboardBreakdown;
   anomalies: BackendCreditDashboardAnomaly[];
   recent: BackendCreditDashboardRecentJob[];
   nodeRows: BackendCreditDashboardNodeRow[];

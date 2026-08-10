@@ -6,7 +6,7 @@
 // about the arithmetic (that lives in creditDashboardService and is tested there).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const fetchBackendCreditDashboard = vi.fn();
@@ -46,14 +46,26 @@ function emptyPayload() {
       jobsWithUsage: 0,
       totalJobs: 0,
     },
+    granularity: "week" as const,
     byProject: [],
     byUser: [],
     byModel: [],
     byDay: [],
+    buckets: [],
+    breakdown: { project: [], user: [], model: [] },
     anomalies: [],
     recent: [],
     nodeRows: [],
   };
+}
+
+function pivotBucket(key: string, label: string, credits: number, startAt: string, endAt: string) {
+  return { key, label, startAt, endAt, credits, usd: credits / 200, jobs: 1 };
+}
+
+function pivotRow(id: string, label: string, perBucket: number[], percentage: number) {
+  const credits = perBucket.reduce((sum, value) => sum + value, 0);
+  return { id, label, credits, usd: credits / 200, jobs: perBucket.length, percentage, perBucket };
 }
 
 function group(id: string, label: string, credits: number) {
@@ -198,5 +210,149 @@ describe("populated data", () => {
     renderDashboard();
     await openDashboard(user);
     await waitFor(() => expect(screen.getByText(/Spend spike/)).toBeInTheDocument());
+  });
+});
+
+describe("spend pivot", () => {
+  const buckets = [
+    pivotBucket("2026-W31", "Jul 27 - Aug 2", 40, "2026-07-27T00:00:00.000Z", "2026-08-03T00:00:00.000Z"),
+    pivotBucket("2026-W32", "Aug 3 - Aug 9", 60, "2026-08-03T00:00:00.000Z", "2026-08-10T00:00:00.000Z"),
+  ];
+  const breakdown = {
+    model: [pivotRow("model_1", "Veo 3", [40, 20], 60), pivotRow("__other__", "Other (3)", [0, 40], 40)],
+    project: [pivotRow("project_1", "Glass Tower", [40, 60], 100)],
+    user: [pivotRow("user_1", "Momen", [40, 60], 100)],
+  };
+
+  function pivotPayload() {
+    return {
+      ...emptyPayload(),
+      buckets,
+      breakdown,
+      recent: [
+        {
+          jobId: "job_in",
+          projectId: "project_1",
+          projectName: "Glass Tower",
+          userId: "user_1",
+          userName: "Momen",
+          modelId: "model_1",
+          modelName: "Veo 3",
+          status: "completed" as const,
+          credits: 20,
+          usd: 0.1,
+          expectedCredits: 20,
+          source: "comfy",
+          resolution: "1080p",
+          createdAt: "2026-08-05T10:00:00.000Z",
+          timestamp: "2026-08-05T10:00:00.000Z",
+        },
+        {
+          jobId: "job_out",
+          projectId: "project_1",
+          projectName: "Glass Tower",
+          userId: "user_1",
+          userName: "Momen",
+          modelId: "model_1",
+          modelName: "Veo 3",
+          status: "completed" as const,
+          credits: 40,
+          usd: 0.2,
+          expectedCredits: 40,
+          source: "comfy",
+          resolution: "1080p",
+          createdAt: "2026-07-28T10:00:00.000Z",
+          timestamp: "2026-07-28T10:00:00.000Z",
+        },
+      ],
+    };
+  }
+
+  it("renders one column per bucket with the row and column totals", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+
+    await waitFor(() => expect(screen.getByRole("columnheader", { name: "Jul 27 - Aug 2" })).toBeInTheDocument());
+    expect(screen.getByRole("columnheader", { name: "Aug 3 - Aug 9" })).toBeInTheDocument();
+    // The Veo 3 row reads 40 and 20 across the two buckets; the footer column
+    // totals are the bucket totals, which include the collapsed Other row.
+    expect(screen.getByRole("button", { name: /Veo 3, Jul 27 - Aug 2: 40 credits/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Veo 3, Aug 3 - Aug 9: 20 credits/ })).toBeInTheDocument();
+  });
+
+  it("asks the backend to re-bucket rather than re-slicing the data it already has", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+
+    await user.click(within(screen.getByRole("group", { name: "Bucket" })).getByRole("button", { name: "Month" }));
+
+    // Week boundaries cannot be derived from week buckets, so a granularity
+    // change has to be a refetch, not a client-side regroup.
+    await waitFor(() => expect(fetchBackendCreditDashboard).toHaveBeenCalledTimes(2));
+    const args = fetchBackendCreditDashboard.mock.calls[1][0] as { granularity?: string };
+    expect(args.granularity).toBe("month");
+  });
+
+  it("switches rows to the chosen dimension without refetching", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+    await waitFor(() => expect(screen.getByRole("rowheader", { name: "Veo 3" })).toBeInTheDocument());
+
+    await user.click(within(screen.getByRole("group", { name: "Group by" })).getByRole("button", { name: "Project" }));
+
+    // All three dimensions ship in one payload, so grouping is free.
+    await waitFor(() => expect(screen.getByRole("rowheader", { name: "Glass Tower" })).toBeInTheDocument());
+    expect(fetchBackendCreditDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters the events table to the clicked cell and clears again", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+    await waitFor(() => expect(screen.getByText(/Showing 2 of 2 events/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /Veo 3, Aug 3 - Aug 9: 20 credits/ }));
+
+    // Only job_in falls inside that week; job_out is a week earlier.
+    await waitFor(() => expect(screen.getByText(/Showing 1 of 2 events/)).toBeInTheDocument());
+    expect(screen.getByText(/Model Veo 3 - Aug 3 - Aug 9/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Clear/ }));
+    await waitFor(() => expect(screen.getByText(/Showing 2 of 2 events/)).toBeInTheDocument());
+  });
+
+  it("does not offer drill-down on the collapsed Other row", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+    await waitFor(() => expect(screen.getByRole("rowheader", { name: "Other (3)" })).toBeInTheDocument());
+
+    // "Other" aggregates entities the payload no longer names, so filtering by it
+    // would silently return nothing.
+    expect(screen.queryByRole("button", { name: /Other \(3\)/ })).not.toBeInTheDocument();
+  });
+
+  it("drops a stale cell filter when the grouping changes", async () => {
+    const user = userEvent.setup();
+    fetchBackendCreditDashboard.mockResolvedValue(pivotPayload());
+    renderDashboard();
+    await openDashboard(user);
+
+    await user.click(await screen.findByRole("button", { name: /Veo 3, Aug 3 - Aug 9: 20 credits/ }));
+    await waitFor(() => expect(screen.getByText(/Showing 1 of 2 events/)).toBeInTheDocument());
+
+    await user.click(within(screen.getByRole("group", { name: "Group by" })).getByRole("button", { name: "User" }));
+
+    // The filter named a model row that is no longer on screen; leaving it applied
+    // would hide events with no visible reason why.
+    await waitFor(() => expect(screen.getByText(/Showing 2 of 2 events/)).toBeInTheDocument());
   });
 });

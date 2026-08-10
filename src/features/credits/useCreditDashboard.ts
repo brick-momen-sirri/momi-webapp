@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchBackendCreditDashboard, type BackendCreditDashboard } from "../../services/backendApi";
-import { dashboardRangeParams, type TimePreset } from "./creditUsageDashboardUtils";
+import {
+  fetchBackendCreditDashboard,
+  type BackendCreditDashboard,
+  type BackendCreditDashboardGranularity,
+} from "../../services/backendApi";
+import { dashboardRangeParams, withPivotFallback, type TimePreset } from "./creditUsageDashboardUtils";
 
-export function useCreditDashboard(open: boolean, range: TimePreset, customFrom: string, customTo: string) {
+export function useCreditDashboard(
+  open: boolean,
+  range: TimePreset,
+  customFrom: string,
+  customTo: string,
+  // null asks the server to pick a granularity from the range width; an explicit
+  // value is the user overriding that choice.
+  granularity: BackendCreditDashboardGranularity | null = null,
+) {
   const [dashboard, setDashboard] = useState<BackendCreditDashboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -14,8 +26,10 @@ export function useCreditDashboard(open: boolean, range: TimePreset, customFrom:
     setLoading(true);
     setError("");
     try {
-      const nextDashboard = await fetchBackendCreditDashboard(dashboardRangeParams(range, customFrom, customTo));
-      if (currentRequestId === requestId.current) setDashboard(nextDashboard);
+      const nextDashboard = await fetchBackendCreditDashboard(
+        dashboardRangeParams(range, customFrom, customTo, granularity),
+      );
+      if (currentRequestId === requestId.current) setDashboard(withPivotFallback(nextDashboard));
     } catch (loadError) {
       if (currentRequestId === requestId.current) {
         setError(loadError instanceof Error ? loadError.message : "Could not load credit usage.");
@@ -23,7 +37,7 @@ export function useCreditDashboard(open: boolean, range: TimePreset, customFrom:
     } finally {
       if (currentRequestId === requestId.current) setLoading(false);
     }
-  }, [customFrom, customTo, range]);
+  }, [customFrom, customTo, granularity, range]);
 
   useEffect(() => {
     if (!open) {

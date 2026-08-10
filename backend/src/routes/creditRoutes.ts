@@ -13,7 +13,9 @@ import {
   addDay,
   addDays,
   addGroup,
+  buildCreditPivot,
   creditAnomalies,
+  creditDashboardGranularity,
   creditDashboardRange,
   creditsSpentForJob,
   daysBetween,
@@ -52,6 +54,7 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
     .filter((job) => job.source !== "existing_project_media");
   const now = new Date();
   const range = creditDashboardRange(req.query, now);
+  const granularity = creditDashboardGranularity(req.query, range.startAt, range.endAt);
   const todayStart = startOfDay(now);
   const todayEnd = addDays(todayStart, 1);
   const { startAt: monthStart, endAt: monthEnd, month } = currentMonthRange();
@@ -148,6 +151,7 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
     addGroup(byUser, event.userId, event.userName, event);
     addGroup(byModel, event.modelId, event.modelName, event);
   }
+  const pivot = buildCreditPivot(periodUsageEvents, range.startAt, range.endAt, granularity);
   summary.averageCreditsPerRun = periodEvents.length ? roundCredits(summary.periodCredits / periodEvents.length) : 0;
   summary.burnRateCreditsPerDay = roundCredits(summary.periodCredits / Math.max(1, daysBetween(range.startAt, range.endAt)));
   const monthDays = daysBetween(monthStart, monthEnd);
@@ -196,10 +200,13 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
         endAt: range.endAt.toISOString(),
       },
       summary,
+      granularity,
       byProject: sortedGroups(byProject),
       byUser: sortedGroups(byUser),
       byModel: sortedGroups(byModel),
       byDay: fillDailyRange(range.startAt, range.endAt, byDay),
+      buckets: pivot.buckets,
+      breakdown: pivot.breakdown,
       anomalies: creditAnomalies(periodEvents, byDay),
       recent: periodEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 500),
       nodeRows: nodeRows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 500),

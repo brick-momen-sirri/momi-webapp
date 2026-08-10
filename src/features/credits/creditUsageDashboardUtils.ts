@@ -1,12 +1,18 @@
 import type {
+  BackendCreditDashboard,
   BackendCreditDashboardAnomaly,
+  BackendCreditDashboardBreakdown,
+  BackendCreditDashboardBreakdownRow,
+  BackendCreditDashboardBucket,
   BackendCreditDashboardDay,
+  BackendCreditDashboardGranularity,
   BackendCreditDashboardGroup,
   BackendCreditDashboardRecentJob,
 } from "../../services/backendApi";
 
 export type TimePreset = "today" | "last7" | "last30" | "thisMonth" | "lastMonth" | "custom";
-export type ChartGroupBy = "total" | "project" | "user" | "workflow";
+export type ChartGroupBy = "total" | PivotDimension;
+export type PivotDimension = "model" | "project" | "user";
 export type SortKey = "timestamp" | "project" | "user" | "workflow" | "credits" | "usd" | "status" | "resolution" | "duration";
 export type SortDirection = "asc" | "desc";
 
@@ -21,14 +27,33 @@ export type DisplayAnomaly =
       threshold: number;
     };
 
-const chartColors = ["#14b8a6", "#f97316", "#6366f1", "#e11d48", "#84cc16", "#0ea5e9", "#a855f7"];
+const chartColors = ["#14b8a6", "#f97316", "#6366f1", "#e11d48", "#84cc16", "#0ea5e9", "#a855f7", "#f59e0b"];
+const OTHER_ROW_ID = "__other__";
+const OTHER_COLOR = "#94a3b8";
 
-export function dashboardRangeParams(range: TimePreset, from: string, to: string) {
+export function dashboardRangeParams(
+  range: TimePreset,
+  from: string,
+  to: string,
+  granularity?: BackendCreditDashboardGranularity | null,
+) {
   return {
     range,
     from: range === "custom" ? from : undefined,
     to: range === "custom" ? to : undefined,
+    granularity: granularity ?? undefined,
   };
+}
+
+// The server folds everything past the top rows into one synthetic row. It has
+// no id to match events against and is not a category, so it neither takes a
+// category colour nor supports drill-down.
+export function isOtherRow(row: BackendCreditDashboardBreakdownRow) {
+  return row.id === OTHER_ROW_ID;
+}
+
+export function breakdownColor(row: BackendCreditDashboardBreakdownRow, index: number) {
+  return isOtherRow(row) ? OTHER_COLOR : chartColors[index % chartColors.length];
 }
 
 export function buildDisplayAnomalies(
@@ -54,85 +79,125 @@ export function buildDisplayAnomalies(
   return output;
 }
 
-export function buildChartRows(
-  days: BackendCreditDashboardDay[],
-  events: BackendCreditDashboardRecentJob[],
+// The frontend is served by vite and goes live the moment src/ changes, while
+// the backend only picks this up once dist is rebuilt and pm2 reloads. For that
+// window the API still answers without buckets, so fall back to the daily series
+// rather than blanking the dashboard on a missing field.
+export function withPivotFallback(dashboard: BackendCreditDashboard): BackendCreditDashboard {
+  if (dashboard.buckets && dashboard.breakdown && dashboard.granularity) return dashboard;
+  return {
+    ...dashboard,
+    granularity: dashboard.granularity ?? "day",
+    buckets: dashboard.buckets ?? (dashboard.byDay ?? []).map(dayAsBucket),
+    // No per-dimension series exists in the old payload; the Total chart still
+    // works and the pivot shows its empty state instead of wrong numbers.
+    breakdown: dashboard.breakdown ?? { project: [], user: [], model: [] },
+  };
+}
+
+function dayAsBucket(day: BackendCreditDashboardDay): BackendCreditDashboardBucket {
+  const [year, month, date] = day.date.split("-").map(Number);
+  const startAt = new Date(year, (month || 1) - 1, date || 1);
+  return {
+    key: day.date,
+    label: `${monthLabels[startAt.getMonth()] ?? ""} ${String(startAt.getDate()).padStart(2, "0")}`.trim(),
+    startAt: startAt.toISOString(),
+    endAt: addDays(startAt, 1).toISOString(),
+    credits: day.credits,
+    usd: day.usd,
+    jobs: day.jobs,
+  };
+}
+
+const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Both the chart and the pivot read the server's buckets and breakdown, so they
+// cannot disagree. This used to be re-aggregated in the browser from the recent
+// event list, which the API caps at 500 rows -- past that cap the stacked
+// segments quietly under-reported while the Total view stayed correct.
+export function buildBucketChartRows(
+  buckets: BackendCreditDashboardBucket[],
+  breakdown: BackendCreditDashboardBreakdown,
   groupBy: ChartGroupBy,
 ) {
   if (groupBy === "total") {
     return {
       legend: [{ label: "Total", color: chartColors[0] }],
-      rows: days.map((day) => ({
-        date: day.date,
-        total: day.credits,
-        segments: day.credits > 0 ? [{ label: "Total", credits: day.credits, color: chartColors[0] }] : [],
+      rows: buckets.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        total: bucket.credits,
+        segments: bucket.credits > 0 ? [{ label: "Total", credits: bucket.credits, color: chartColors[0] }] : [],
       })),
     };
   }
 
-  const totals = new Map<string, number>();
-  const byDay = new Map<string, Map<string, number>>();
-  const seenJobIds = new Set<string>();
-  for (const event of events) {
-    if (!Number.isFinite(event.credits) || event.credits <= 0 || !isValidTimestamp(event.timestamp)) continue;
-    const jobId = typeof event.jobId === "string" ? event.jobId.trim() : "";
-    if (jobId && seenJobIds.has(jobId)) continue;
-    if (jobId) seenJobIds.add(jobId);
-    const date = event.timestamp.slice(0, 10);
-    const label = chartLabel(event, groupBy);
-    totals.set(label, roundCredits((totals.get(label) ?? 0) + event.credits));
-    const dayMap = byDay.get(date) ?? new Map<string, number>();
-    dayMap.set(label, roundCredits((dayMap.get(label) ?? 0) + event.credits));
-    byDay.set(date, dayMap);
-  }
-
-  const topLabels = Array.from(totals.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([label]) => label);
-  const hasOther = Array.from(totals.keys()).some((label) => !topLabels.includes(label));
-  const legend = [...topLabels, ...(hasOther ? ["Other"] : [])].map((label, index) => ({
-    label,
-    color: chartColors[index % chartColors.length],
-  }));
-
+  const rows = breakdown[groupBy] ?? [];
   return {
-    legend,
-    rows: days.map((day) => {
-      const dayMap = byDay.get(day.date);
-      const segments = topLabels
-        .map((label, index) => ({
-          label,
-          credits: dayMap?.get(label) ?? 0,
-          color: chartColors[index % chartColors.length],
+    legend: rows.map((row, index) => ({ label: row.label, color: breakdownColor(row, index) })),
+    rows: buckets.map((bucket, bucketIndex) => ({
+      key: bucket.key,
+      label: bucket.label,
+      total: bucket.credits,
+      segments: rows
+        .map((row, index) => ({
+          label: row.label,
+          credits: row.perBucket[bucketIndex] ?? 0,
+          color: breakdownColor(row, index),
         }))
-        .filter((segment) => segment.credits > 0);
-      const knownCredits = segments.reduce((sum, segment) => sum + segment.credits, 0);
-      const otherCredits = Math.max(0, roundCredits(day.credits - knownCredits));
-      if (otherCredits > 0) {
-        segments.push({
-          label: "Other",
-          credits: otherCredits,
-          color: chartColors[topLabels.length % chartColors.length],
-        });
-      }
-      return { date: day.date, total: day.credits, segments };
-    }),
+        .filter((segment) => segment.credits > 0),
+    })),
   };
 }
 
-function chartLabel(event: BackendCreditDashboardRecentJob, groupBy: ChartGroupBy) {
-  if (groupBy === "project") return cleanLabel(event.projectName, "Unknown project");
-  if (groupBy === "user") return cleanLabel(event.userName, "Unknown user");
-  return cleanLabel(event.modelName, "Unknown workflow");
+// Tint strength for a pivot cell, scaled against the largest cell in the table
+// so one spike does not flatten every other cell to white.
+export function pivotCellTint(credits: number, maxCellCredits: number) {
+  if (!Number.isFinite(credits) || credits <= 0 || maxCellCredits <= 0) return 0;
+  return Math.min(1, Math.max(0.06, credits / maxCellCredits));
 }
 
-function cleanLabel(value: unknown, fallback: string) {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+export function maxPivotCell(rows: BackendCreditDashboardBreakdownRow[]) {
+  let max = 0;
+  for (const row of rows) {
+    for (const credits of row.perBucket) if (credits > max) max = credits;
+  }
+  return max;
 }
 
-function isValidTimestamp(value: unknown) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) && Number.isFinite(new Date(value).getTime());
+export function bucketTotals(buckets: BackendCreditDashboardBucket[]) {
+  return {
+    credits: roundCredits(buckets.reduce((sum, bucket) => sum + bucket.credits, 0)),
+    usd: buckets.reduce((sum, bucket) => sum + bucket.usd, 0),
+    jobs: buckets.reduce((sum, bucket) => sum + bucket.jobs, 0),
+  };
+}
+
+export const pivotDimensionLabels: Record<PivotDimension, string> = {
+  model: "Model",
+  project: "Project",
+  user: "User",
+};
+
+export const granularityLabels: Record<BackendCreditDashboardGranularity, string> = {
+  day: "Day",
+  week: "Week",
+  month: "Month",
+};
+
+// Does the event belong to the cell the user clicked? The bucket window comes
+// from the server so week boundaries match the column exactly.
+export function matchesPivotCell(
+  job: BackendCreditDashboardRecentJob,
+  dimension: PivotDimension,
+  rowId: string,
+  bucket: BackendCreditDashboardBucket,
+) {
+  const field = dimension === "project" ? job.projectId : dimension === "user" ? job.userId : job.modelId;
+  if (field !== rowId) return false;
+  const timestamp = new Date(job.timestamp).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  return timestamp >= new Date(bucket.startAt).getTime() && timestamp < new Date(bucket.endAt).getTime();
 }
 
 export function filterRecentJobs(rows: BackendCreditDashboardRecentJob[], search: string, statusFilter: string) {
@@ -208,12 +273,44 @@ export function recentJobsCsv(rows: BackendCreditDashboardRecentJob[]) {
   return [headers, ...body].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+// One row per entity, one column per bucket -- the same grid that is on screen,
+// so a spreadsheet pivot does not have to be rebuilt from the raw event export.
+export function pivotCsv(
+  buckets: BackendCreditDashboardBucket[],
+  rows: BackendCreditDashboardBreakdownRow[],
+  dimension: PivotDimension,
+) {
+  const headers = [pivotDimensionLabels[dimension], ...buckets.map((bucket) => bucket.label), "Total", "Share %", "Cost"];
+  const body = rows.map((row) => [row.label, ...row.perBucket, row.credits, row.percentage, row.usd]);
+  const totals = bucketTotals(buckets);
+  const footer = [
+    "Total",
+    ...buckets.map((bucket) => bucket.credits),
+    totals.credits,
+    rows.length ? 100 : 0,
+    Math.round(totals.usd * 10000) / 10000,
+  ];
+  return [headers, ...body, footer].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function exportPivotCsv(
+  buckets: BackendCreditDashboardBucket[],
+  rows: BackendCreditDashboardBreakdownRow[],
+  dimension: PivotDimension,
+) {
+  downloadCsv(pivotCsv(buckets, rows, dimension), `credit-spend-by-${dimension}-${toDateInput(new Date())}.csv`);
+}
+
 export function exportRecentCsv(rows: BackendCreditDashboardRecentJob[]) {
-  const blob = new Blob([recentJobsCsv(rows)], { type: "text/csv;charset=utf-8" });
+  downloadCsv(recentJobsCsv(rows), `credit-events-${toDateInput(new Date())}.csv`);
+}
+
+function downloadCsv(content: string, filename: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `credit-events-${toDateInput(new Date())}.csv`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();

@@ -3,6 +3,7 @@ import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 
 import { addDays, formatDateTime, toDateInput, type TimePreset } from "../../features/credits/creditUsageDashboardUtils";
 import { useCreditDashboard } from "../../features/credits/useCreditDashboard";
+import type { BackendCreditDashboardGranularity } from "../../services/backendApi";
 import { CreditUsageDashboardContent } from "./CreditUsageDashboardContent";
 
 const timeFilters: Array<{ value: TimePreset; label: string }> = [
@@ -23,7 +24,20 @@ export function CreditUsageDashboardDialog({ creditsRemaining, onOpenChange }: C
   const [rangePreset, setRangePreset] = useState<TimePreset>("last30");
   const [customFrom, setCustomFrom] = useState(() => toDateInput(addDays(new Date(), -29)));
   const [customTo, setCustomTo] = useState(() => toDateInput(new Date()));
-  const { dashboard, loading, error, reload: loadDashboard } = useCreditDashboard(true, rangePreset, customFrom, customTo);
+  // null lets the server pick from the range width. Changing the range clears an
+  // override, so Last 30 does not stay stuck on the Day bucket a Today view set.
+  const [granularity, setGranularity] = useState<BackendCreditDashboardGranularity | null>(null);
+  const {
+    dashboard,
+    loading,
+    error,
+    reload: loadDashboard,
+  } = useCreditDashboard(true, rangePreset, customFrom, customTo, granularity);
+
+  function handleRangeChange(next: TimePreset) {
+    setRangePreset(next);
+    setGranularity(null);
+  }
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -85,7 +99,7 @@ export function CreditUsageDashboardDialog({ creditsRemaining, onOpenChange }: C
               <button
                 key={filter.value}
                 type="button"
-                onClick={() => setRangePreset(filter.value)}
+                onClick={() => handleRangeChange(filter.value)}
                 className={`rounded-md border px-3 py-2 text-xs font-bold transition ${
                   rangePreset === filter.value
                     ? "border-accent bg-accent text-white"
@@ -138,7 +152,13 @@ export function CreditUsageDashboardDialog({ creditsRemaining, onOpenChange }: C
             </p>
           ) : null}
 
-          {dashboard ? <CreditUsageDashboardContent dashboard={dashboard} creditsRemaining={creditsRemaining} /> : null}
+          {dashboard ? (
+            <CreditUsageDashboardContent
+              dashboard={dashboard}
+              creditsRemaining={creditsRemaining}
+              onGranularityChange={setGranularity}
+            />
+          ) : null}
         </div>
       </div>
     </div>

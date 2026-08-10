@@ -583,6 +583,37 @@ test("the credit dashboard answers for an admin", async () => {
   assert.equal(typeof response.body, "object");
 });
 
+test("the credit dashboard buckets spend at the requested granularity", async () => {
+  const weekly = await asAdmin("GET", "/api/credits/dashboard?range=last30&granularity=week");
+  assert.equal(weekly.status, 200, weekly.text);
+  const dashboard = (weekly.body as { dashboard: Record<string, unknown> }).dashboard;
+  assert.equal(dashboard.granularity, "week");
+
+  const buckets = dashboard.buckets as Array<{ key: string; label: string; credits: number }>;
+  assert.ok(Array.isArray(buckets) && buckets.length > 0, "a 30-day range must produce week buckets");
+  assert.ok(
+    buckets.every((bucket) => /^\d{4}-W\d{2}$/.test(bucket.key) && bucket.label),
+    "every bucket carries an ISO week key and a display label",
+  );
+
+  // perBucket is index-aligned with buckets; the frontend pivot renders one
+  // column per bucket and would silently misalign if a row were a different length.
+  const breakdown = dashboard.breakdown as Record<string, Array<{ perBucket: number[] }>>;
+  for (const dimension of ["project", "user", "model"]) {
+    assert.ok(Array.isArray(breakdown[dimension]), `breakdown.${dimension} must be present`);
+    for (const row of breakdown[dimension]) {
+      assert.equal(row.perBucket.length, buckets.length, `breakdown.${dimension} row must span every bucket`);
+    }
+  }
+
+  // last30 defaults to week, so an explicit day override has to actually change
+  // the bucketing rather than fall through to the range-derived default.
+  const daily = await asAdmin("GET", "/api/credits/dashboard?range=last30&granularity=day");
+  const dailyDashboard = (daily.body as { dashboard: Record<string, unknown> }).dashboard;
+  assert.equal(dailyDashboard.granularity, "day");
+  assert.equal((dailyDashboard.buckets as unknown[]).length, 30);
+});
+
 test("reading the workspace roster is open to any signed-in user", async () => {
   const artist = await authService.createUser({
     email: "artist@example.com",

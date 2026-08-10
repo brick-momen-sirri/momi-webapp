@@ -45,6 +45,34 @@ export type CreditDashboardDay = {
   jobs: number;
 };
 
+export type CreditDashboardGranularity = "day" | "week" | "month";
+
+export type CreditDashboardBucket = {
+  key: string;
+  label: string;
+  startAt: string;
+  endAt: string;
+  credits: number;
+  usd: number;
+  jobs: number;
+};
+
+export type CreditDashboardBreakdownRow = {
+  id: string;
+  label: string;
+  credits: number;
+  usd: number;
+  jobs: number;
+  percentage: number;
+  perBucket: number[];
+};
+
+export type CreditDashboardBreakdown = {
+  project: CreditDashboardBreakdownRow[];
+  user: CreditDashboardBreakdownRow[];
+  model: CreditDashboardBreakdownRow[];
+};
+
 export type CreditDashboardRecentJob = {
   jobId: string;
   projectId: string;
@@ -191,6 +219,196 @@ export function fillDailyRange(startAt: Date, endAt: Date, rows: Map<string, Cre
     output.push(rows.get(key) ?? { date: key, credits: 0, usd: 0, jobs: 0 });
   }
   return output;
+}
+
+// Day/week/month bucketing for the spend pivot. byDay above stays as-is for the
+// daily chart; these build the same period totals at a chosen granularity and,
+// unlike the old client-side grouping over the capped `recent` list, they see
+// every usage event in the range.
+
+const MAX_BUCKETS = 120;
+const MAX_BREAKDOWN_ROWS = 8;
+const OTHER_ROW_ID = "__other__";
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function creditDashboardGranularity(
+  query: Record<string, unknown>,
+  startAt: Date,
+  endAt: Date,
+): CreditDashboardGranularity {
+  const requested = getQueryValue(query.granularity);
+  if (requested === "day" || requested === "week" || requested === "month") return requested;
+  return defaultGranularity(startAt, endAt);
+}
+
+// A 30-day range at day granularity is 30 columns nobody can read. Widen the
+// bucket as the range grows; an explicit ?granularity= always wins.
+export function defaultGranularity(startAt: Date, endAt: Date): CreditDashboardGranularity {
+  const days = daysBetween(startAt, endAt);
+  if (days <= 14) return "day";
+  if (days <= 92) return "week";
+  return "month";
+}
+
+// Weeks are ISO: Monday start.
+export function bucketStart(date: Date, granularity: CreditDashboardGranularity) {
+  const day = startOfDay(date);
+  if (granularity === "day") return day;
+  if (granularity === "week") return addDays(day, -((day.getDay() + 6) % 7));
+  return new Date(day.getFullYear(), day.getMonth(), 1);
+}
+
+export function nextBucketStart(date: Date, granularity: CreditDashboardGranularity) {
+  if (granularity === "day") return addDays(date, 1);
+  if (granularity === "week") return addDays(date, 7);
+  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+}
+
+export function previousBucketStart(date: Date, granularity: CreditDashboardGranularity) {
+  if (granularity === "day") return addDays(date, -1);
+  if (granularity === "week") return addDays(date, -7);
+  return new Date(date.getFullYear(), date.getMonth() - 1, 1);
+}
+
+export function bucketKey(date: Date, granularity: CreditDashboardGranularity) {
+  const start = bucketStart(date, granularity);
+  if (granularity === "day") return dayKey(start);
+  if (granularity === "week") return isoWeekKey(start);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function bucketLabel(start: Date, granularity: CreditDashboardGranularity) {
+  if (granularity === "day") return `${MONTH_LABELS[start.getMonth()]} ${String(start.getDate()).padStart(2, "0")}`;
+  if (granularity === "week") {
+    const end = addDays(start, 6);
+    return `${MONTH_LABELS[start.getMonth()]} ${start.getDate()} - ${MONTH_LABELS[end.getMonth()]} ${end.getDate()}`;
+  }
+  return `${MONTH_LABELS[start.getMonth()]} ${start.getFullYear()}`;
+}
+
+// The ISO week-numbering year is the year of that week's Thursday, which is why
+// early January can belong to the previous year's week 52/53.
+export function isoWeekKey(date: Date) {
+  const thursday = addDays(bucketStart(date, "week"), 3);
+  const isoYear = thursday.getFullYear();
+  const firstThursday = addDays(bucketStart(new Date(isoYear, 0, 4), "week"), 3);
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000));
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+}
+
+// Walks back from the end of the range so a wide custom range costs at most
+// MAX_BUCKETS iterations, and keeps the most recent buckets when it truncates
+// -- same trade fillDailyRange makes.
+export function buildCreditBuckets(startAt: Date, endAt: Date, granularity: CreditDashboardGranularity) {
+  const floor = bucketStart(startAt, granularity);
+  const starts: Date[] = [];
+  for (
+    let cursor = bucketStart(addDays(endAt, -1), granularity);
+    cursor >= floor && starts.length < MAX_BUCKETS;
+    cursor = previousBucketStart(cursor, granularity)
+  ) {
+    starts.push(cursor);
+  }
+  return starts.reverse().map((start) => ({
+    key: bucketKey(start, granularity),
+    label: bucketLabel(start, granularity),
+    startAt: start.toISOString(),
+    endAt: nextBucketStart(start, granularity).toISOString(),
+    credits: 0,
+    usd: 0,
+    jobs: 0,
+  }));
+}
+
+// One pass over every usage event in the range produces both the bucket totals
+// and the per-dimension rows, so the chart and the pivot cannot disagree.
+export function buildCreditPivot(
+  events: CreditDashboardRecentJob[],
+  startAt: Date,
+  endAt: Date,
+  granularity: CreditDashboardGranularity,
+) {
+  const buckets = buildCreditBuckets(startAt, endAt, granularity);
+  const indexByKey = new Map(buckets.map((bucket, index) => [bucket.key, index]));
+  const project = new Map<string, CreditDashboardBreakdownRow>();
+  const user = new Map<string, CreditDashboardBreakdownRow>();
+  const model = new Map<string, CreditDashboardBreakdownRow>();
+
+  for (const event of events) {
+    const timestamp = new Date(event.timestamp).getTime();
+    if (!Number.isFinite(timestamp)) continue;
+    const index = indexByKey.get(bucketKey(new Date(timestamp), granularity));
+    if (index === undefined) continue;
+    const bucket = buckets[index];
+    bucket.credits = roundCredits(bucket.credits + event.credits);
+    bucket.usd = roundUsd(bucket.usd + event.usd);
+    bucket.jobs += 1;
+    addBreakdownRow(project, event.projectId, event.projectName, index, buckets.length, event);
+    addBreakdownRow(user, event.userId, event.userName, index, buckets.length, event);
+    addBreakdownRow(model, event.modelId, event.modelName, index, buckets.length, event);
+  }
+
+  return {
+    buckets,
+    breakdown: {
+      project: collapseBreakdown(project, buckets.length),
+      user: collapseBreakdown(user, buckets.length),
+      model: collapseBreakdown(model, buckets.length),
+    },
+  };
+}
+
+function addBreakdownRow(
+  map: Map<string, CreditDashboardBreakdownRow>,
+  id: string,
+  label: string,
+  index: number,
+  bucketCount: number,
+  event: CreditDashboardRecentJob,
+) {
+  const key = id || label;
+  const current = map.get(key) ?? {
+    id: key,
+    label,
+    credits: 0,
+    usd: 0,
+    jobs: 0,
+    percentage: 0,
+    perBucket: new Array<number>(bucketCount).fill(0),
+  };
+  current.credits = roundCredits(current.credits + event.credits);
+  current.usd = roundUsd(current.usd + event.usd);
+  current.jobs += 1;
+  current.perBucket[index] = roundCredits(current.perBucket[index] + event.credits);
+  map.set(key, current);
+}
+
+// Bounded payload: the top rows by spend, everything else folded into one
+// "Other" row that still carries its own per-bucket series so column totals add up.
+function collapseBreakdown(map: Map<string, CreditDashboardBreakdownRow>, bucketCount: number) {
+  const rows = Array.from(map.values()).sort((a, b) => b.credits - a.credits || a.label.localeCompare(b.label));
+  const total = rows.reduce((sum, row) => sum + row.credits, 0);
+  const visible = rows.slice(0, MAX_BREAKDOWN_ROWS);
+  const rest = rows.slice(MAX_BREAKDOWN_ROWS);
+
+  if (rest.length) {
+    visible.push({
+      id: OTHER_ROW_ID,
+      label: `Other (${rest.length})`,
+      credits: roundCredits(rest.reduce((sum, row) => sum + row.credits, 0)),
+      usd: roundUsd(rest.reduce((sum, row) => sum + row.usd, 0)),
+      jobs: rest.reduce((sum, row) => sum + row.jobs, 0),
+      percentage: 0,
+      perBucket: Array.from({ length: bucketCount }, (_, index) =>
+        roundCredits(rest.reduce((sum, row) => sum + row.perBucket[index], 0)),
+      ),
+    });
+  }
+
+  return visible.map((row) => ({
+    ...row,
+    percentage: total > 0 ? Math.round((row.credits / total) * 1000) / 10 : 0,
+  }));
 }
 
 export function creditAnomalies(
