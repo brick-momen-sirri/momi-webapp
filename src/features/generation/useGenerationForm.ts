@@ -14,12 +14,12 @@ import {
   getDisabledReason,
   imageSlotCountForModel,
   isDemoAccount,
-  isImageToVideoModel,
   minimumImageCountForModel,
   normalizeDurationSeconds,
   normalizeNanoBananaAspectRatio,
   normalizeResolutionForModel,
   normalizeSaveNumber,
+  supports16By9CropToggle,
   supportsImageOutputCount,
 } from "./generationUtils";
 
@@ -69,8 +69,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
-  const selectedModelIsImageToVideo = isImageToVideoModel(selectedModel);
-  const use16By9Cropping = !selectedModelIsImageToVideo || enableImageToVideo16By9Cropping;
+  const selectedModelSupportsCropToggle = supports16By9CropToggle(selectedModel);
+  const use16By9Cropping = !selectedModelSupportsCropToggle || enableImageToVideo16By9Cropping;
   const disabledReason = getDisabledReason({
     isDemoAccount: Boolean(account && isDemoAccount(account)),
     insufficientCredits: creditsRemaining < selectedModel.cost,
@@ -162,7 +162,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     video,
     setVideo,
     selectedModel,
-    selectedModelIsImageToVideo,
+    selectedModelSupportsCropToggle,
     requiredImages,
     use16By9Cropping,
     disabledReason,

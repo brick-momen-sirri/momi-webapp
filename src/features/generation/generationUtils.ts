@@ -188,6 +188,21 @@ export function isImageToVideoModel(model: Pick<ModelType, "id" | "label" | "cat
   );
 }
 
+export function isFirstLastFrameToVideoModel(
+  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">,
+) {
+  if (model.backendCategory) return model.backendCategory === "first_last_frame_to_video";
+  if (model.category !== "video") return false;
+  const key = `${model.id} ${model.label ?? ""} ${model.workflowPath ?? ""}`.toLowerCase().replaceAll("\\", "/");
+  return key.includes("/flf2v/") || key.includes("flf2v") || key.includes("first_last_frame") || key.includes("frame to video");
+}
+
+export function supports16By9CropToggle(
+  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">,
+) {
+  return isImageToVideoModel(model) || isFirstLastFrameToVideoModel(model);
+}
+
 export function workflowOptionsForJob(
   model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">,
   archVizGrid: ArchVizGridOptions,

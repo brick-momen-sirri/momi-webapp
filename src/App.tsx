@@ -129,7 +129,7 @@ function App() {
     video,
     setVideo,
     selectedModel,
-    selectedModelIsImageToVideo,
+    selectedModelSupportsCropToggle,
     requiredImages,
     use16By9Cropping,
     disabledReason,
@@ -372,7 +372,7 @@ function App() {
             saveNumber={saveNumber}
             imageOutputCount={imageOutputCount}
             enable16By9Cropping={enableImageToVideo16By9Cropping}
-            show16By9CropToggle={selectedModelIsImageToVideo}
+            show16By9CropToggle={selectedModelSupportsCropToggle}
             images={images}
             video={video}
             creditsRemaining={creditsRemaining}
