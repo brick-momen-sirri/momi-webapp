@@ -8,6 +8,8 @@ import express from "express";
 import type { AuthenticatedRequest } from "./authMiddleware.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { createJobSubmissionHandler } from "./jobSubmissionRoute.js";
+import { isStillImageCategoryId } from "./stillImageCategories.js";
+import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
 
 const users = {
@@ -53,22 +55,10 @@ const model: WorkflowModel = {
   estimatedCredits: 42,
 };
 
-// Stands in for whatever graph a Still Images preset will resolve to once the
-// ComfyUI workflows land. Deliberately permissive -- no required prompt, one
-// nominal image slot -- so these tests exercise the preset rules rather than the
-// generic model rules that happen to sit alongside them.
-const stillModel: WorkflowModel = {
-  id: "safe_still",
-  name: "Safe Still",
-  category: "image_upscaling",
-  workflowPath: "safe_still.json",
-  requiredInputs: ["single_image"],
-  requiresPrompt: false,
-  requiresImage: true,
-  requiresStartEndFrames: false,
-  outputType: "image",
-  estimatedCredits: 8,
-};
+// The real preset models, so these tests exercise the ids the client actually
+// sends and the modelId/categoryId consistency check that guards them.
+const stillModelFor = (categoryId: string) =>
+  isStillImageCategoryId(categoryId) ? stillImageModelId(categoryId) : stillImageModelId("pro-upscaler");
 
 const repository: Job[] = [];
 const queue: Job[] = [];
@@ -87,7 +77,7 @@ let replayCreation = false;
 
 const handler = createJobSubmissionHandler({
   getProject: (id) => (id === project.id ? project : undefined),
-  getWorkflowModel: (id) => [model, stillModel].find((candidate) => candidate.id === id),
+  getWorkflowModel: (id) => (id === model.id ? model : stillImageWorkflowModel(id)),
   canViewProject: (candidate, target) =>
     candidate.role === "admin" ||
     target.ownerId === candidate.id ||
@@ -105,7 +95,7 @@ const handler = createJobSubmissionHandler({
   createJob: async (request) => {
     createRequests.push(request);
     if (creationError) throw creationError;
-    const jobModel = request.modelId === stillModel.id ? stillModel : model;
+    const jobModel = stillImageWorkflowModel(request.modelId) ?? model;
     const job: Job = {
       id: `job_fake_${createRequests.length}`,
       projectId: request.projectId,
@@ -304,9 +294,13 @@ function validBody() {
 }
 
 function stillBody(stillImage: unknown, overrides: Record<string, unknown> = {}) {
+  // The client derives modelId from the preset, so the fixture does too. Requests
+  // carrying an unknown categoryId fall back to a valid model id, so the rejection
+  // under test is the normalizer's rather than "unknown workflow model".
+  const categoryId = String((stillImage as { categoryId?: string } | null)?.categoryId ?? "");
   return {
     projectId: project.id,
-    modelId: stillModel.id,
+    modelId: stillModelFor(categoryId),
     inputImages: ["https://media.example/source.png"],
     workflowOptions: { stillImage },
     ...overrides,
@@ -431,6 +425,46 @@ test("stillImage is still governed by the workflowOptions allowlist", async () =
   );
   assert.equal(response.status, 400);
   assert.match(response.body.error, /Unsupported provider-specific workflow option: sneaky/);
+});
+
+test("modelId and the still image preset must agree", async () => {
+  // The endpoint is resolved from categoryId and the graph comes from modelId, so a
+  // mismatch would run one preset's graph on another preset's pod.
+  const mismatched = await call({
+    projectId: project.id,
+    modelId: stillImageModelId("qwen-edit"),
+    inputImages: ["https://media.example/source.png"],
+    workflowOptions: { stillImage: { categoryId: "pro-upscaler" } },
+  });
+
+  assert.equal(mismatched.status, 400);
+  assert.match(mismatched.body.error, /does not match the pro-upscaler still image preset/);
+  assert.match(mismatched.body.error, /Expected still_pro-upscaler/);
+  assert.equal(createRequests.length, 0);
+});
+
+test("a preset model id without still image options is rejected", async () => {
+  // Otherwise the job would dispatch through the Animation materializer against a
+  // preset graph, which is exactly the unsafe combination.
+  const response = await call({
+    projectId: project.id,
+    modelId: stillImageModelId("pro-upscaler"),
+    inputImages: ["https://media.example/source.png"],
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /is a still image preset and requires workflowOptions\.stillImage/);
+  assert.equal(createRequests.length, 0);
+});
+
+test("a still image submission records the preset model on the job", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler" }));
+
+  assert.equal(response.status, 201);
+  assert.equal(repository[0].modelId, "still_pro-upscaler");
+  assert.equal(repository[0].modelName, "Pro Upscaler");
+  assert.equal(repository[0].category, "image_upscaling");
+  assert.equal(repository[0].outputType, "image");
 });
 
 test("an animation submission is unaffected by the still image path", async () => {

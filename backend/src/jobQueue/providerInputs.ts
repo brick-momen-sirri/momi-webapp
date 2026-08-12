@@ -274,7 +274,9 @@ function formatBytes(value: number) {
   return `${mib.toFixed(mib >= 10 ? 1 : 2)}MiB`;
 }
 
-function mimeTypeFromMediaPath(filePath: string, kind: "image" | "video") {
+// Exported for the Still Images materializer, which resolves its own slots but
+// should not carry a second copy of this table.
+export function mimeTypeFromMediaPath(filePath: string, kind: "image" | "video") {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
   if (extension === ".png") return "image/png";

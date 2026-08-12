@@ -16,9 +16,13 @@ import {
   RunpodComfyError,
   resumeComfyWorkflowOnRunpod,
   runComfyWorkflowOnRunpod,
+  type RunpodComfyImageInput,
   type RunpodMediaResult,
 } from "../runpodComfyService.js";
 import { resolveRunpodEndpoint } from "../runpodEndpoints.js";
+import { getStillImageCategory, stillImageSlotCount, type StillImageOptions } from "../stillImageCategories.js";
+import { buildStillImageWorkflow } from "../stillImageWorkflow.js";
+import { materializeStillImageInputs } from "./stillImageInputMaterializer.js";
 import {
   beginRunpodBillableOperation,
   hasExclusiveRunpodActivityWindow,
@@ -28,7 +32,7 @@ import {
 import { persistServerlessArtifacts } from "../serverlessArtifactService.js";
 import { validateRunpodImageRequirements } from "../runpodImagePreflight.js";
 import { ensureJobFolders, saveJobMetadata } from "../storageService.js";
-import type { CreditBalanceSnapshot, Job } from "../types.js";
+import type { CreditBalanceSnapshot, Job, WorkflowModel } from "../types.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
 import type { ExecutionClaim } from "./executionRegistry.js";
 import { jobRemoteMediaEntries, materializeRunpodInputImages, materializeRunpodInputVideo } from "./index.js";
@@ -81,29 +85,25 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
 
     const folders = await ensureJobFolders(project, job.id);
     const projectFolder = projectFolderName(project.folderPath);
-    const runpodImages = await materializeRunpodInputImages(job, model);
-    const runpodVideo = await materializeRunpodInputVideo(job, model, folders.input);
-    const workflow = await loadWorkflowForRunpod(
-      model,
-      {
-        projectId: job.projectId,
-        modelId: job.modelId,
-        prompt: job.prompt,
-        resolution: job.resolution,
-        durationSeconds: job.durationSeconds,
-        inputImages: runpodImages.imageNames,
-        startFrame: model.requiresStartEndFrames ? runpodImages.imageNames[0] : undefined,
-        endFrame: model.requiresStartEndFrames ? runpodImages.imageNames[1] : undefined,
-        inputVideo: runpodVideo?.videoName,
-        workflowOptions: job.workflowOptions,
-        userId: job.userId,
-      },
-      projectFolder,
-      runpodImages.imageNames,
-    );
+
+    // Still image presets take a different route to the same place: their own
+    // materializer and graph builder, because the generic ones are unsafe for
+    // these exports (duplicate LoadImage filenames, a dead LoadImage node, and
+    // base64 nodes that must never receive a URL). Everything after this point --
+    // preflight, snapshot, submission-state persistence, the resume path -- is the
+    // shared lifecycle, unchanged.
+    const stillImage = job.workflowOptions?.stillImage;
+    const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input);
+    const workflow = prepared.workflow;
+    const runpodImages = prepared.runpodImages;
+    const runpodVideo = prepared.runpodVideo;
+
     // A resumed async job has already crossed the provider boundary. Preflight
     // only new submissions so a deploy cannot strand an acknowledged RunPod job.
-    if (!job.runpodJobId) await validateRunpodImageRequirements(workflow, job.inputImages);
+    // Skipped for still images: that check counts LoadImage nodes by class name,
+    // which miscounts these graphs, and the binding pass in the builder is the
+    // stronger equivalent -- every slot is written or the build fails.
+    if (!job.runpodJobId && !stillImage) await validateRunpodImageRequirements(workflow, job.inputImages);
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
     if (await deps.settleRequestedCancellation(job, execution)) return;
@@ -261,4 +261,91 @@ function applyAccountingCreditsToJob(job: Job) {
 export function preferredResultMedia(media: RunpodMediaResult[]) {
   const videos = media.filter((item) => item.isVideo);
   return videos.length ? videos : media;
+}
+
+export type PreparedSubmission = {
+  workflow: unknown;
+  runpodImages: { images: RunpodComfyImageInput[]; imageNames: string[] };
+  runpodVideo: { videos: RunpodComfyImageInput[]; videoName: string } | undefined;
+};
+
+/**
+ * Build everything the provider call needs, choosing the route by job kind.
+ *
+ * Exported so the two routes can be tested against each other directly: the point
+ * of the split is that Animation behaviour is untouched, and that is only worth
+ * asserting side by side.
+ */
+export async function prepareRunpodSubmission(
+  job: Job,
+  model: WorkflowModel,
+  projectFolder: string,
+  inputFolder: string,
+): Promise<PreparedSubmission> {
+  const stillImage = job.workflowOptions?.stillImage;
+  return stillImage
+    ? prepareStillImageSubmission(job, stillImage)
+    : prepareAnimationSubmission(job, model, projectFolder, inputFolder);
+}
+
+/** The existing path, moved verbatim so the still image branch sits beside it. */
+async function prepareAnimationSubmission(
+  job: Job,
+  model: WorkflowModel,
+  projectFolder: string,
+  inputFolder: string,
+): Promise<PreparedSubmission> {
+  const runpodImages = await materializeRunpodInputImages(job, model);
+  const runpodVideo = await materializeRunpodInputVideo(job, model, inputFolder);
+  const workflow = await loadWorkflowForRunpod(
+    model,
+    {
+      projectId: job.projectId,
+      modelId: job.modelId,
+      prompt: job.prompt,
+      resolution: job.resolution,
+      durationSeconds: job.durationSeconds,
+      inputImages: runpodImages.imageNames,
+      startFrame: model.requiresStartEndFrames ? runpodImages.imageNames[0] : undefined,
+      endFrame: model.requiresStartEndFrames ? runpodImages.imageNames[1] : undefined,
+      inputVideo: runpodVideo?.videoName,
+      workflowOptions: job.workflowOptions,
+      userId: job.userId,
+    },
+    projectFolder,
+    runpodImages.imageNames,
+  );
+  return { workflow, runpodImages, runpodVideo };
+}
+
+/**
+ * Materialize explicit slots, then wire the preset's graph.
+ *
+ * Ordered materialize-then-build because the graph value for a load-image slot is
+ * the payload filename, and compression can change its extension. Building first
+ * would bake in a name the worker never writes.
+ *
+ * Any failure here throws before the caller reaches submission, so an oversized
+ * inline image costs nothing and cannot produce a paid RunPod call.
+ */
+async function prepareStillImageSubmission(job: Job, stillImage: StillImageOptions): Promise<PreparedSubmission> {
+  const category = getStillImageCategory(stillImage.categoryId);
+  const imageCount = stillImageSlotCount(category, stillImage.settings);
+  const materialized = await materializeStillImageInputs({
+    categoryId: stillImage.categoryId,
+    imageCount,
+    inputImages: job.inputImages,
+  });
+
+  const workflow = await buildStillImageWorkflow({
+    options: stillImage,
+    prompt: job.prompt,
+    images: materialized.graphValues,
+  });
+
+  return {
+    workflow,
+    runpodImages: { images: materialized.payloadImages, imageNames: materialized.payloadImages.map((image) => image.name) },
+    runpodVideo: undefined,
+  };
 }

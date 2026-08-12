@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 
 import { getRequestUser } from "./authMiddleware.js";
+import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImageModels.js";
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
 
@@ -79,6 +80,20 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   // static imageSlotCount cannot express. Run them first so the preset-specific
   // message is what the artist sees rather than the generic slot-count error.
   const stillImage = workflowOptions?.stillImage;
+  const stillImageModelCategory = stillImageCategoryIdFromModelId(modelId);
+
+  // modelId and stillImage.categoryId both name the preset, and the endpoint is
+  // resolved from the categoryId while the graph comes from the model. Letting them
+  // disagree would run one preset's graph on another preset's pod.
+  if (stillImage && modelId !== stillImageModelId(stillImage.categoryId)) {
+    throw new JobSubmissionError(
+      `modelId ${modelId} does not match the ${stillImage.categoryId} still image preset. Expected ${stillImageModelId(stillImage.categoryId)}.`,
+    );
+  }
+  if (stillImageModelCategory && !stillImage) {
+    throw new JobSubmissionError(`modelId ${modelId} is a still image preset and requires workflowOptions.stillImage.`);
+  }
+
   if (stillImage) {
     try {
       assertStillImageInputs(stillImage, { prompt, inputImages, startFrame, endFrame, inputVideo });

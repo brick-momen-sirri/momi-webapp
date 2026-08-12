@@ -5,6 +5,7 @@ import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { isPathWithinRoot } from "./pathContainment.js";
+import { stillImageWorkflowModel } from "./stillImageModels.js";
 import { assertNoEmbeddedMedia, readJsonFile } from "./storageService.js";
 import type {
   ArchVizGridOptions,
@@ -42,8 +43,16 @@ export function getWorkflowModels() {
   return modelsCache;
 }
 
+/**
+ * Resolve a model id, including the Still Images presets.
+ *
+ * The presets are not in modelsCache on purpose -- see stillImageModels.ts -- so
+ * they are resolved as a fallback here. That keeps getWorkflowModels() (and with
+ * it GET /api/models and the Animation picker) Animation-only, while the job
+ * pipeline can still look up a preset by id.
+ */
 export function getWorkflowModel(id: string) {
-  return modelsCache.find((model) => model.id === id);
+  return modelsCache.find((model) => model.id === id) ?? stillImageWorkflowModel(id);
 }
 
 export async function loadWorkflowPrompt(

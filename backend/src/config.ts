@@ -40,6 +40,13 @@ export const workflowRoots = process.env.WORKFLOW_ROOTS
     ? legacyComfyWorkflowRoots
     : [serverlessWorkflowRoot];
 
+// Still image graphs live outside the scanned workflow roots on purpose.
+// loadWorkflowModels recurses whatever is under workflowRoots and turns every
+// JSON into a selectable model, so a subfolder of workflow/ would put four
+// local-GPU preset graphs in the Animation model picker. Presets are addressed by
+// name from the registry instead of being discovered.
+export const stillImageWorkflowRoot = process.env.STILL_IMAGE_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-still-images");
+
 export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(comfyRoot, "output", "projects");
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");
 export const uploadedMediaRoot = process.env.UPLOADED_MEDIA_ROOT ?? path.join(localProjectsRoot, "_uploads");
