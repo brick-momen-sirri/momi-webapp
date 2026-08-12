@@ -85,6 +85,88 @@ test("submission, polling and cancellation all address the endpoint they were gi
   assert.deepEqual(cancelCalls, ["https://api.runpod.ai/v2/pod-pro-upscaler/cancel/job-still"]);
 });
 
+test("a Still Images pod result arrives under output.message", async () => {
+  // The real envelope from a live pro-upscaler run. These workers return
+  // { message: [url], status: "success" }, not the images/videos arrays the
+  // Animation worker uses. Before this was handled the job reported COMPLETED with
+  // zero media and the render was silently thrown away.
+  const s3Url =
+    "https://momi-ai.s3.eu-north-1.amazonaws.com/08-26/sync-0eacbf29/52dd60c5.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=604800";
+  const fetchImpl = async () =>
+    jsonResponse({
+      id: "sync-live",
+      status: "COMPLETED",
+      output: { message: [s3Url], status: "success" },
+    });
+
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.media.length, 1, "the message url is the result");
+  assert.equal(result.media[0].url, s3Url);
+  assert.equal(result.media[0].isVideo, false);
+  assert.equal(result.media[0].filename, "52dd60c5.png");
+});
+
+test("a single message string is accepted as well as a list", async () => {
+  const fetchImpl = async () =>
+    jsonResponse({ id: "j", status: "COMPLETED", output: { message: "https://cdn.example/out.png", status: "success" } });
+
+  const result = await service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch });
+  assert.equal(result.media.length, 1);
+  assert.equal(result.media[0].url, "https://cdn.example/out.png");
+});
+
+test("a prose message is not mistaken for a result", async () => {
+  // output.message also carries human text on some responses. Turning that into a
+  // media entry would show a broken image where an explanation belongs.
+  const fetchImpl = async () =>
+    jsonResponse({ id: "j", status: "COMPLETED", output: { message: ["Upscale finished in 28s"], status: "success" } });
+
+  const result = await service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch });
+  assert.equal(result.media.length, 0);
+});
+
+test("a worker failure inside a COMPLETED envelope is an error, not an empty success", async () => {
+  // RunPod ran the job fine; the graph did not. Reporting this as success with no
+  // media is what made the first live failure unreadable.
+  const fetchImpl = async () =>
+    jsonResponse({
+      id: "j",
+      status: "COMPLETED",
+      output: { status: "error", message: ["CUDA out of memory on tile 3"] },
+    });
+
+  await assert.rejects(
+    service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch }),
+    (error) => {
+      assert.ok(error instanceof service.RunpodComfyError);
+      assert.match(error.message, /reported status "error"/);
+      assert.match(error.message, /CUDA out of memory on tile 3/);
+      return true;
+    },
+  );
+});
+
+test("an animation worker with no output.status is unaffected", async () => {
+  // The Animation worker never sets output.status, so the failure check above must
+  // not fire for it.
+  const fetchImpl = async () =>
+    jsonResponse({
+      id: "j",
+      status: "COMPLETED",
+      output: { images: [{ filename: "a.png", url: "https://cdn.example/a.png" }] },
+    });
+
+  const result = await service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch });
+  assert.equal(result.media.length, 1);
+  assert.equal(result.media[0].source, "images");
+});
+
 test("omitting the endpoint keeps using the shared animation endpoint", async () => {
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {

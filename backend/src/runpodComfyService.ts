@@ -188,12 +188,49 @@ export function extractRunpodMedia(output: unknown): RunpodMediaResult[] {
     }
   }
 
+  // "message" is the Still Images pods' output key: those workers return
+  // { message: [url], status: "success" } instead of the images/videos arrays the
+  // Animation worker uses.
+  //
+  // It gets its own strict reader rather than joining the loop above, for two
+  // reasons found by testing the first live run: the generic reader drops a bare
+  // string because arrayFromUnknown only unwraps arrays and objects, and it would
+  // happily turn a prose message into a media entry, because the text-artifact
+  // check only recognises text by extension, content type or URL -- not by a
+  // sentence. So only things that actually look like media are accepted here.
+  for (const entry of messageEntries(record.message)) {
+    const parsed = mediaFromMessageEntry(entry);
+    if (parsed) media.push(parsed);
+  }
+
   const byKey = new Map<string, RunpodMediaResult>();
   for (let index = 0; index < media.length; index += 1) {
     const item = media[index];
     byKey.set(mediaDedupKey(item, index), item);
   }
   return Array.from(byKey.values());
+}
+
+/**
+ * Did the worker declare its own failure inside an otherwise fine response?
+ *
+ * Only acts on an explicit non-success `output.status`. The Animation worker does
+ * not set that field at all, so its behaviour is unchanged; the Still Images pods
+ * set "success" on the happy path.
+ */
+function workerReportedFailure(output: unknown): string | undefined {
+  if (!output || typeof output !== "object") return undefined;
+  const record = output as Record<string, unknown>;
+  const status = typeof record.status === "string" ? record.status.trim().toLowerCase() : undefined;
+  if (!status || status === "success" || status === "ok" || status === "completed") return undefined;
+
+  const detail = [record.error, record.message]
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ")
+    .slice(0, 500);
+
+  return `RunPod worker reported status "${record.status}"${detail ? `: ${detail}` : " with no detail."}`;
 }
 
 export function normalizeRunpodCreditUsage(raw: unknown): CreditUsageSummary | undefined {
@@ -281,6 +318,20 @@ async function resolveRunpodResponse(
         shouldCancel,
       );
       continue;
+    }
+
+    // A worker can report its own failure inside a COMPLETED envelope: RunPod ran
+    // the job fine, but the graph did not. Without this the job would be recorded
+    // as succeeding with no media, which is what made the first live Still Images
+    // failure so hard to read.
+    const workerFailure = workerReportedFailure(current.output);
+    if (workerFailure) {
+      throw new RunpodComfyError(workerFailure, {
+        response: current,
+        status,
+        jobId: runpodJobId(current),
+        creditUsage: creditUsageFromRunpodOutput(current.output),
+      });
     }
 
     if (!terminalStatuses.has(status) && current.output && !current.error) {
@@ -514,6 +565,60 @@ function mediaDedupKey(media: RunpodMediaResult, index: number) {
   const prefix = media.url.slice(0, 80);
   const suffix = media.url.slice(-80);
   return `data|${index}|${media.url.length}|${media.filename ?? ""}|${media.source}|${media.type ?? ""}|${prefix}|${suffix}`;
+}
+
+/** output.message is a single string on some responses and a list on others. */
+function messageEntries(value: unknown): unknown[] {
+  if (typeof value === "string") return [value];
+  return arrayFromUnknown(value);
+}
+
+function mediaFromMessageEntry(value: unknown): RunpodMediaResult | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  if (/^https?:\/\//i.test(trimmed) || /^data:(image|video)\//i.test(trimmed)) {
+    const filename = filenameFromValue(trimmed);
+    return {
+      url: trimmed,
+      filename,
+      source: "message",
+      isVideo: hasVideoExtension(filename) || hasVideoExtension(trimmed),
+    };
+  }
+
+  // Bare base64, which forge's reader also accepts. Sniffed by magic bytes rather
+  // than guessed at, so prose cannot be mistaken for an image, and wrapped into a
+  // data URL because that is the shape the rest of the result pipeline handles.
+  const mimeType = base64MediaMimeType(trimmed);
+  if (!mimeType) return undefined;
+  return {
+    url: `data:${mimeType};base64,${trimmed}`,
+    filename: `output${extensionFromMime(mimeType) ?? ".bin"}`,
+    source: "message",
+    isVideo: mimeType.startsWith("video/"),
+  };
+}
+
+function base64MediaMimeType(value: string) {
+  // Long enough to be media, and only base64 characters.
+  if (value.length < 64 || /[^A-Za-z0-9+/=\s]/.test(value)) return undefined;
+
+  let head: Buffer;
+  try {
+    head = Buffer.from(value.slice(0, 64).replace(/\s/g, ""), "base64");
+  } catch {
+    return undefined;
+  }
+  if (head.byteLength < 12) return undefined;
+
+  if (head.subarray(0, 4).toString("hex") === "89504e47") return "image/png";
+  if (head.subarray(0, 3).toString("hex") === "ffd8ff") return "image/jpeg";
+  if (head.subarray(0, 4).toString("ascii") === "GIF8") return "image/gif";
+  if (head.subarray(0, 4).toString("ascii") === "RIFF" && head.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (head.subarray(4, 8).toString("ascii") === "ftyp") return "video/mp4";
+  return undefined;
 }
 
 function arrayFromUnknown(value: unknown) {
