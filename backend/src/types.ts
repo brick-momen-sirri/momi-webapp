@@ -1,3 +1,5 @@
+import type { StillImageOptions } from "./stillImageCategories.js";
+
 export type ComfyServerStatus = "offline" | "idle" | "busy" | "error";
 
 export type JobStatus = "queued" | "sending" | "running" | "completed" | "failed" | "canceled";
@@ -201,6 +203,10 @@ export type WorkflowOptions = {
     cameraNumber?: string;
     shotNumber?: string;
   };
+  // Present exactly on jobs submitted from the Still Images workspace. Its
+  // presence is what jobSection() reads to tell the two workspaces apart, so it
+  // must never be set on an Animation job.
+  stillImage?: StillImageOptions;
 };
 
 export type CreateJobRequest = {

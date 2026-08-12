@@ -53,6 +53,23 @@ const model: WorkflowModel = {
   estimatedCredits: 42,
 };
 
+// Stands in for whatever graph a Still Images preset will resolve to once the
+// ComfyUI workflows land. Deliberately permissive -- no required prompt, one
+// nominal image slot -- so these tests exercise the preset rules rather than the
+// generic model rules that happen to sit alongside them.
+const stillModel: WorkflowModel = {
+  id: "safe_still",
+  name: "Safe Still",
+  category: "image_upscaling",
+  workflowPath: "safe_still.json",
+  requiredInputs: ["single_image"],
+  requiresPrompt: false,
+  requiresImage: true,
+  requiresStartEndFrames: false,
+  outputType: "image",
+  estimatedCredits: 8,
+};
+
 const repository: Job[] = [];
 const queue: Job[] = [];
 const createRequests: CreateJobRequest[] = [];
@@ -70,7 +87,7 @@ let replayCreation = false;
 
 const handler = createJobSubmissionHandler({
   getProject: (id) => (id === project.id ? project : undefined),
-  getWorkflowModel: (id) => (id === model.id ? model : undefined),
+  getWorkflowModel: (id) => [model, stillModel].find((candidate) => candidate.id === id),
   canViewProject: (candidate, target) =>
     candidate.role === "admin" ||
     target.ownerId === candidate.id ||
@@ -88,14 +105,15 @@ const handler = createJobSubmissionHandler({
   createJob: async (request) => {
     createRequests.push(request);
     if (creationError) throw creationError;
+    const jobModel = request.modelId === stillModel.id ? stillModel : model;
     const job: Job = {
       id: `job_fake_${createRequests.length}`,
       projectId: request.projectId,
       folderId: request.targetFolderId ?? null,
       userId: request.userId,
-      modelId: model.id,
-      modelName: model.name,
-      category: model.category,
+      modelId: jobModel.id,
+      modelName: jobModel.name,
+      category: jobModel.category,
       inputType: "single_image",
       prompt: request.prompt,
       resolution: request.resolution,
@@ -106,10 +124,10 @@ const handler = createJobSubmissionHandler({
       inputVideo: request.inputVideo,
       resultUrls: [],
       thumbnailUrls: [],
-      outputType: model.outputType,
+      outputType: jobModel.outputType,
       projectFolderPath: project.folderPath,
-      workflowPath: model.workflowPath,
-      creditsEstimated: estimateWorkflowCredits(model, request.durationSeconds, request.resolution, request.workflowOptions),
+      workflowPath: jobModel.workflowPath,
+      creditsEstimated: estimateWorkflowCredits(jobModel, request.durationSeconds, request.resolution, request.workflowOptions),
       source: "backend_job",
       createdAt: "2026-08-04T12:00:00.000Z",
     };
@@ -284,6 +302,142 @@ function validBody() {
     inputImages: ["https://media.example/reference.png"],
   };
 }
+
+function stillBody(stillImage: unknown, overrides: Record<string, unknown> = {}) {
+  return {
+    projectId: project.id,
+    modelId: stillModel.id,
+    inputImages: ["https://media.example/source.png"],
+    workflowOptions: { stillImage },
+    ...overrides,
+  };
+}
+
+// -- still images ------------------------------------------------------------
+//
+// The end-to-end half of the preset rules. stillImageRequest.test.ts covers the
+// normalizer case by case; these assert that the route actually runs it, that the
+// normalized options are what reach createJob, and that a rejection is a 400 with
+// the preset's own message rather than a generic one.
+
+test("a still image submission persists the normalized options, not the caller's", async () => {
+  const response = await call(
+    stillBody({ categoryId: "pro-upscaler", settings: { upscale: "x4", enhancement: false, creativity: 40 } }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(createRequests.length, 1);
+  // creativity is hidden while enhancement is off, so it must not have survived;
+  // engine was never sent, so its default must have been filled in.
+  assert.deepEqual(createRequests[0].workflowOptions?.stillImage, {
+    categoryId: "pro-upscaler",
+    settings: { engine: "normal", upscale: "x4", enhancement: false },
+  });
+  assert.equal(providerTripwire.calls, 0);
+});
+
+test("still image options survive onto the created job", async () => {
+  await call(stillBody({ categoryId: "general-enhancement", settings: { details: 1.5 } }, { prompt: "keep the brickwork" }));
+
+  assert.equal(repository.length, 1);
+  assert.equal(repository[0].workflowOptions?.stillImage?.categoryId, "general-enhancement");
+  assert.equal(repository[0].workflowOptions?.stillImage?.settings.details, 1.5);
+});
+
+test("still image options coexist with the save numbers", async () => {
+  // Normalizing stillImage must not drop the sibling keys it travels with -- the
+  // camera number is what names the file on disk.
+  const response = await call(
+    stillBody(
+      { categoryId: "pro-upscaler" },
+      {
+        workflowOptions: { stillImage: { categoryId: "pro-upscaler" }, save: { cameraNumber: "0012" } },
+      },
+    ),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(createRequests[0].workflowOptions?.save?.cameraNumber, "0012");
+  assert.equal(createRequests[0].workflowOptions?.stillImage?.categoryId, "pro-upscaler");
+});
+
+test("an out-of-range setting is a 400 carrying the catalogue bounds", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler", settings: { creativity: 99 } }));
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /must be between 10 and 40/);
+  assert.equal(createRequests.length, 0, "a rejected request must never reach createJob");
+  assert.equal(mediaChecks.length, 0, "and must be rejected before the media check");
+});
+
+test("an unknown preset and an unknown setting are both rejected", async () => {
+  const badPreset = await call(stillBody({ categoryId: "super-upscaler" }));
+  assert.equal(badPreset.status, 400);
+  assert.match(badPreset.body.error, /not a known still image preset/);
+
+  const badSetting = await call(stillBody({ categoryId: "pro-upscaler", settings: { upscaleee: "x4" } }));
+  assert.equal(badSetting.status, 400);
+  assert.match(badSetting.body.error, /Unsupported pro-upscaler setting/);
+  assert.equal(createRequests.length, 0);
+});
+
+test("the preset's slot rule beats the model's static slot count", async () => {
+  // Reference Generator needs two images. The model behind it declares no
+  // imageSlotCount at all, so this rejection can only come from the preset.
+  const short = await call(stillBody({ categoryId: "reference-generator" }));
+  assert.equal(short.status, 400);
+  assert.match(short.body.error, /needs exactly 2 input images; received 1/);
+
+  const paired = await call(
+    stillBody(
+      { categoryId: "reference-generator" },
+      { inputImages: ["https://media.example/a.png", "https://media.example/b.png"] },
+    ),
+  );
+  assert.equal(paired.status, 201);
+});
+
+test("qwen edit's slot count follows the mode it was submitted with", async () => {
+  const twoUp = { categoryId: "qwen-edit", settings: { mode: "edit", imageCount: "2" } };
+  const short = await call(stillBody(twoUp, { prompt: "swap the cladding" }));
+  assert.equal(short.status, 400);
+  assert.match(short.body.error, /needs exactly 2 input images; received 1/);
+
+  const paired = await call(
+    stillBody(twoUp, {
+      prompt: "swap the cladding",
+      inputImages: ["https://media.example/a.png", "https://media.example/b.png"],
+    }),
+  );
+  assert.equal(paired.status, 201);
+});
+
+test("a prompt sent to a promptless preset is rejected", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler" }, { prompt: "make it dramatic" }));
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /does not take a prompt/);
+});
+
+test("animation media on a still image request is rejected", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler" }, { inputVideo: "https://media.example/clip.mp4" }));
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /do not take an input video/);
+  assert.equal(mediaChecks.length, 0);
+});
+
+test("stillImage is still governed by the workflowOptions allowlist", async () => {
+  const response = await call(
+    stillBody({ categoryId: "pro-upscaler" }, { workflowOptions: { stillImage: { categoryId: "pro-upscaler" }, sneaky: {} } }),
+  );
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /Unsupported provider-specific workflow option: sneaky/);
+});
+
+test("an animation submission is unaffected by the still image path", async () => {
+  const response = await call(validBody());
+  assert.equal(response.status, 201);
+  assert.equal(createRequests[0].workflowOptions, undefined);
+});
 
 async function call(body: unknown) {
   return rawCall(JSON.stringify(body));

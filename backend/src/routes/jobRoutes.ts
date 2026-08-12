@@ -49,6 +49,7 @@ jobRouter.get("/api/jobs", async (req, res) => {
       folderId: getQueryValue(req.query.folderId),
       q: getQueryValue(req.query.q),
       dateDays: parseOptionalNumber(req.query.dateDays),
+      section: getQueryValue(req.query.section),
     });
     const jobs = filteredJobs.slice(offset, offset + limit);
 

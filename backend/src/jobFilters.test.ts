@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { filterJobs, getJobSaveSearchValue, isVideoSaveJob, normalizeJobSaveNumber } from "./jobFilters.js";
+import { filterJobs, getJobSaveSearchValue, isVideoSaveJob, jobSection, normalizeJobSaveNumber } from "./jobFilters.js";
 import type { Job } from "./types.js";
 
 // This is what GET /api/jobs narrows on. A filter that drops a job the caller
@@ -59,6 +59,52 @@ test("folderId 'root' means jobs with no folder", () => {
 test("a specific folderId matches only that folder", () => {
   const jobs = [job({ id: "a", folderId: null }), job({ id: "b", folderId: "fld_1" }), job({ id: "c", folderId: "fld_2" })];
   assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, folderId: "fld_1" })), ["b"]);
+});
+
+const stillImage = { categoryId: "pro-upscaler", settings: { engine: "normal" } } as const;
+
+test("a job's section is derived from its still image options", () => {
+  assert.equal(jobSection(job()), "animation");
+  assert.equal(jobSection(job({ workflowOptions: {} })), "animation");
+  assert.equal(jobSection(job({ workflowOptions: { save: { cameraNumber: "12" } } })), "animation");
+  assert.equal(jobSection(job({ workflowOptions: { stillImage } })), "still_images");
+});
+
+test("media scanned off disk stays in the animation list", () => {
+  // Existing project media has no workflowOptions at all. It has always listed
+  // under Animation and must keep doing so -- the section split is about where a
+  // job was submitted from, and these were not submitted at all.
+  assert.equal(jobSection(job({ source: "existing_project_media" })), "animation");
+});
+
+test("the section filter separates the two workspaces", () => {
+  const jobs = [
+    job({ id: "anim", workflowOptions: { save: { shotNumber: "0010" } } }),
+    job({ id: "still", workflowOptions: { stillImage } }),
+    job({ id: "scanned", source: "existing_project_media" }),
+  ];
+
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, section: "animation" })), ["anim", "scanned"]);
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, section: "still_images" })), ["still"]);
+  // Unset means both, the same as every other filter here.
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, section: "" })), ["anim", "still", "scanned"]);
+  assert.deepEqual(ids(filterJobs(jobs, noFilters)), ["anim", "still", "scanned"]);
+});
+
+test("an unknown section narrows to nothing rather than defaulting", () => {
+  // A typo in the query parameter should read as an empty list, not as the
+  // animation list quietly standing in for what was asked for.
+  const jobs = [job({ id: "anim" }), job({ id: "still", workflowOptions: { stillImage } })];
+  assert.deepEqual(filterJobs(jobs, { ...noFilters, section: "stillimages" }), []);
+});
+
+test("the section filter combines with the other filters", () => {
+  const jobs = [
+    job({ id: "a", projectId: "proj_1", workflowOptions: { stillImage } }),
+    job({ id: "b", projectId: "proj_2", workflowOptions: { stillImage } }),
+    job({ id: "c", projectId: "proj_1" }),
+  ];
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, section: "still_images", projectId: "proj_1" })), ["a"]);
 });
 
 test("dateDays keeps only jobs newer than the cutoff", () => {

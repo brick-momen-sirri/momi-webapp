@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 
 import { getRequestUser } from "./authMiddleware.js";
+import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
 
 export type JobSubmissionDependencies = {
@@ -72,6 +73,19 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   const durationSeconds = optionalDuration(body.durationSeconds, model);
   const workflowOptions = optionalWorkflowOptions(body.workflowOptions);
   const targetFolderId = optionalFolderId(body.targetFolderId);
+
+  // Still image presets carry their own input rules, and they are the stricter
+  // ones: how many images Qwen Edit takes depends on its mode, which the model's
+  // static imageSlotCount cannot express. Run them first so the preset-specific
+  // message is what the artist sees rather than the generic slot-count error.
+  const stillImage = workflowOptions?.stillImage;
+  if (stillImage) {
+    try {
+      assertStillImageInputs(stillImage, { prompt, inputImages, startFrame, endFrame, inputVideo });
+    } catch (error) {
+      throw new JobSubmissionError(error instanceof Error ? error.message : "Invalid still image request.");
+    }
+  }
 
   if (model.requiresPrompt && !prompt?.trim()) {
     throw new JobSubmissionError("A prompt is required for this workflow.");
@@ -243,7 +257,7 @@ function normalizeResolution(value: string) {
 function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   if (value == null) return undefined;
   const options = plainRecord(value, "workflowOptions");
-  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "save"]);
+  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "save", "stillImage"]);
   const unknown = Object.keys(options).find((key) => !allowedKeys.has(key));
   if (unknown) throw new JobSubmissionError(`Unsupported provider-specific workflow option: ${unknown}.`);
 
@@ -264,7 +278,17 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   }
   if (options.archVizGrid != null) plainRecord(options.archVizGrid, "ArchViz grid options");
   if (options.save != null) plainRecord(options.save, "save options");
-  return options as WorkflowOptions;
+
+  if (options.stillImage == null) return options as WorkflowOptions;
+
+  // Replace the caller's bag with the normalized one: defaults filled in, hidden
+  // settings dropped. This is the object that gets persisted on the job and later
+  // drives the graph, so nothing unvalidated may survive past this point.
+  try {
+    return { ...options, stillImage: normalizeStillImageOptions(options.stillImage) } as WorkflowOptions;
+  } catch (error) {
+    throw new JobSubmissionError(error instanceof Error ? error.message : "Invalid still image options.");
+  }
 }
 
 function plainRecord(value: unknown, label: string) {

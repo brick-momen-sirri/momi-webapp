@@ -38,6 +38,24 @@ export function isVideoSaveJob(job: Pick<Job, "category" | "inputType" | "modelN
   );
 }
 
+export type JobSection = "animation" | "still_images";
+
+/**
+ * Which workspace a job belongs to.
+ *
+ * Derived from workflowOptions.stillImage rather than stored as its own column,
+ * for three reasons: the two can never disagree; every job already on disk reads
+ * back as "animation", which is what it is; and the retry path in jobRoutes
+ * forwards workflowOptions wholesale, so a retried still image job keeps its
+ * section without anyone remembering to thread a second field through.
+ *
+ * Media scanned off disk (source "existing_project_media") has no workflowOptions
+ * and so lands in "animation" -- unchanged from how it lists today.
+ */
+export function jobSection(job: Pick<Job, "workflowOptions">): JobSection {
+  return job.workflowOptions?.stillImage ? "still_images" : "animation";
+}
+
 export function getJobSaveSearchValue(job: Job) {
   if (job.source === "existing_project_media") return "";
 
@@ -57,6 +75,7 @@ export function filterJobs(
     outputType: string;
     q: string;
     dateDays?: number;
+    section?: string;
   },
 ) {
   const query = filters.q.toLowerCase();
@@ -69,6 +88,10 @@ export function filterJobs(
     if (filters.source && job.source !== filters.source) return false;
     if (filters.status && job.status !== filters.status) return false;
     if (filters.outputType && job.outputType !== filters.outputType) return false;
+    // Unset means both workspaces, matching every other filter here. An unknown
+    // value narrows to nothing rather than falling back to "animation", so a typo
+    // shows up as an empty list instead of quietly wrong results.
+    if (filters.section && jobSection(job) !== filters.section) return false;
     if (cutoff && new Date(job.createdAt).getTime() < cutoff) return false;
 
     if (query) {
