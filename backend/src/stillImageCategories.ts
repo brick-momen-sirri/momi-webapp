@@ -57,6 +57,27 @@ export const STILL_IMAGE_CATEGORY_IDS: readonly StillImageCategoryId[] = [
 
 export const STILL_IMAGE_CATEGORIES: readonly StillImageCategoryDefinition[] = [
   {
+    // Ports the General Enhancement controls from momi-forge (General_Enhancement_v04.py,
+    // graph workflow_api_flux_dev_1.19). Field names differ; the graph wiring will
+    // need the correspondence:
+    //   generalEnhance   -> general_enhance          (routing)
+    //   details          -> details                  -> 37.strength_model
+    //   generalDenoise   -> general_denoise          -> 32.denoise
+    //   advancedDetails  -> advance_details          (routing)
+    //   detailPass       -> additional_detail_pass   -> 23.denoise
+    //   sharpen          -> sharpen                  -> 74.blend_factor
+    //   bodyEnhance      -> body_enhance             (routing)
+    //   bodyDenoise      -> body_enhancement_denoise -> 52.denoise
+    //   faceDenoise      -> face_enhancement_denoise -> 54.denoise
+    //
+    // The three checkboxes are not graph booleans -- each rewires which branch feeds
+    // the save node, over an 8-case matrix. See GENERAL_ENHANCEMENT_WORKFLOW_README.md
+    // in momi-forge.
+    //
+    // Deliberately not ported: the mask editor. forge exposes mask_b64 and
+    // has_drawn_mask, which route 13.mask between nodes 85 and 88. This UI has no
+    // mask surface, so the wiring must always take the generated-mask route
+    // (13.mask <- 85), the same as forge's has_drawn_mask = false.
     id: "general-enhancement",
     imageSlots: 1,
     acceptsPrompt: true,
@@ -90,6 +111,25 @@ export const STILL_IMAGE_CATEGORIES: readonly StillImageCategoryDefinition[] = [
         maximum: 1,
         step: 0.01,
         visibleWhen: { settingId: "advancedDetails", equals: true },
+      },
+      { id: "bodyEnhance", kind: "checkbox", defaultValue: false },
+      {
+        id: "bodyDenoise",
+        kind: "range",
+        defaultValue: 0.2,
+        minimum: 0,
+        maximum: 0.3,
+        step: 0.01,
+        visibleWhen: { settingId: "bodyEnhance", equals: true },
+      },
+      {
+        id: "faceDenoise",
+        kind: "range",
+        defaultValue: 0.2,
+        minimum: 0,
+        maximum: 0.3,
+        step: 0.01,
+        visibleWhen: { settingId: "bodyEnhance", equals: true },
       },
     ],
   },

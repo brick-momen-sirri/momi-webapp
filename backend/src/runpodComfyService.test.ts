@@ -40,6 +40,64 @@ test("runsync returns COMPLETED", async () => {
   assert.equal(payload.input.comfy_org_api_key, "comfy-key-test");
 });
 
+test("submission, polling and cancellation all address the endpoint they were given", async () => {
+  // Still image presets each run on their own pod. If the endpoint were honoured
+  // on submit but not on the status poll or the cancel, a job would be created on
+  // one worker and then tracked against another -- polling 404s, and a cancel
+  // silently leaves the real work running and billing.
+  const pod = {
+    id: "pod-pro-upscaler",
+    submitUrl: "https://api.runpod.ai/v2/pod-pro-upscaler/runsync",
+    statusUrl: (jobId: string) => `https://api.runpod.ai/v2/pod-pro-upscaler/status/${jobId}`,
+    cancelUrl: (jobId: string) => `https://api.runpod.ai/v2/pod-pro-upscaler/cancel/${jobId}`,
+    healthUrl: "https://api.runpod.ai/v2/pod-pro-upscaler/health",
+  };
+
+  const calls: string[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    calls.push(String(url));
+    if (calls.length === 1) return jsonResponse({ id: "job-still", status: "IN_PROGRESS" });
+    return jsonResponse({ id: "job-still", status: "COMPLETED", output: { files: [] } });
+  };
+
+  await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: fetchImpl as typeof fetch,
+    endpoint: pod,
+  });
+
+  assert.deepEqual(calls, [
+    "https://api.runpod.ai/v2/pod-pro-upscaler/runsync",
+    "https://api.runpod.ai/v2/pod-pro-upscaler/status/job-still",
+  ]);
+  assert.ok(!calls.some((url) => url.includes("endpoint-test")), "no request may reach the shared Animation endpoint");
+
+  const cancelCalls: string[] = [];
+  await service.cancelComfyWorkflowOnRunpod(
+    "job-still",
+    (async (url: string | URL | Request) => {
+      cancelCalls.push(String(url));
+      return jsonResponse({ id: "job-still", status: "CANCELLED" });
+    }) as unknown as typeof fetch,
+    pod,
+  );
+  assert.deepEqual(cancelCalls, ["https://api.runpod.ai/v2/pod-pro-upscaler/cancel/job-still"]);
+});
+
+test("omitting the endpoint keeps using the shared animation endpoint", async () => {
+  const calls: string[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    calls.push(String(url));
+    return jsonResponse({ id: "job-default", status: "COMPLETED", output: { files: [] } });
+  };
+
+  await service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/v2\/endpoint-test\/runsync$/);
+});
+
 test("runsync returns IN_PROGRESS then status COMPLETED", async () => {
   const calls: string[] = [];
   const submissions: Array<{ jobId: string; status: string }> = [];

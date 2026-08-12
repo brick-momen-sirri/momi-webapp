@@ -232,6 +232,10 @@ export type Job = {
   comfyPromptId?: string;
   comfyServerUrl?: string;
   runpodJobId?: string;
+  // The endpoint this job was submitted to, recorded because still image presets
+  // each run on their own pod. Polling, resuming and cancelling must address the
+  // endpoint that acknowledged the work, not whatever the config now resolves to.
+  runpodEndpointId?: string;
   runpodStatus?: string;
   runpodSubmissionState?: "preparing" | "submitting" | "submitted";
   projectId: string;

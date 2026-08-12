@@ -54,14 +54,39 @@ const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
 const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
   [
     "general-enhancement",
-    { generalEnhance: true, advancedDetails: false },
-    ["generalEnhance", "details", "generalDenoise", "advancedDetails"],
+    { generalEnhance: true, advancedDetails: false, bodyEnhance: false },
+    ["generalEnhance", "details", "generalDenoise", "advancedDetails", "bodyEnhance"],
   ],
-  ["general-enhancement", { generalEnhance: false, advancedDetails: false }, ["generalEnhance", "details", "advancedDetails"]],
   [
     "general-enhancement",
-    { generalEnhance: true, advancedDetails: true },
-    ["generalEnhance", "details", "generalDenoise", "advancedDetails", "detailPass", "sharpen"],
+    { generalEnhance: false, advancedDetails: false, bodyEnhance: false },
+    ["generalEnhance", "details", "advancedDetails", "bodyEnhance"],
+  ],
+  [
+    "general-enhancement",
+    { generalEnhance: true, advancedDetails: true, bodyEnhance: false },
+    ["generalEnhance", "details", "generalDenoise", "advancedDetails", "detailPass", "sharpen", "bodyEnhance"],
+  ],
+  [
+    "general-enhancement",
+    { generalEnhance: false, advancedDetails: false, bodyEnhance: true },
+    ["generalEnhance", "details", "advancedDetails", "bodyEnhance", "bodyDenoise", "faceDenoise"],
+  ],
+  [
+    // All three branches on: the case 7 row of forge's routing matrix.
+    "general-enhancement",
+    { generalEnhance: true, advancedDetails: true, bodyEnhance: true },
+    [
+      "generalEnhance",
+      "details",
+      "generalDenoise",
+      "advancedDetails",
+      "detailPass",
+      "sharpen",
+      "bodyEnhance",
+      "bodyDenoise",
+      "faceDenoise",
+    ],
   ],
   ["pro-upscaler", { enhancement: true }, ["engine", "upscale", "enhancement", "creativity"]],
   ["pro-upscaler", { enhancement: false }, ["engine", "upscale", "enhancement"]],

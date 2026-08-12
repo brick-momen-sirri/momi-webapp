@@ -64,6 +64,52 @@ test("advanced detail settings appear only once advancedDetails is on", () => {
   assert.equal(on.settings.detailPass, 0.35);
 });
 
+test("body enhancement settings appear only once bodyEnhance is on", () => {
+  const off = normalizeStillImageOptions({ categoryId: "general-enhancement", settings: { bodyEnhance: false } });
+  assert.equal("bodyDenoise" in off.settings, false);
+  assert.equal("faceDenoise" in off.settings, false);
+
+  const on = normalizeStillImageOptions({ categoryId: "general-enhancement", settings: { bodyEnhance: true } });
+  assert.equal(on.settings.bodyDenoise, 0.2);
+  assert.equal(on.settings.faceDenoise, 0.2);
+});
+
+test("body and face denoise are bounded to the forge range", () => {
+  // forge clamps both to 0.0-0.3. A value past that drives the FaceDetailerPipe
+  // nodes harder than the workflow was tuned for.
+  const at = (bodyDenoise: unknown) => () =>
+    normalizeStillImageOptions({ categoryId: "general-enhancement", settings: { bodyEnhance: true, bodyDenoise } });
+
+  assert.throws(at(0.31), /must be between 0 and 0.3/);
+  assert.throws(at(-0.01), /must be between 0 and 0.3/);
+  assert.equal(
+    normalizeStillImageOptions({
+      categoryId: "general-enhancement",
+      settings: { bodyEnhance: true, bodyDenoise: 0.3, faceDenoise: 0 },
+    }).settings.bodyDenoise,
+    0.3,
+  );
+});
+
+test("all three general enhancement branches can be on at once", () => {
+  // Case 7 of forge's routing matrix -- the combination that exercises every knob.
+  const options = normalizeStillImageOptions({
+    categoryId: "general-enhancement",
+    settings: { generalEnhance: true, advancedDetails: true, bodyEnhance: true },
+  });
+  assert.deepEqual(Object.keys(options.settings).sort(), [
+    "advancedDetails",
+    "bodyDenoise",
+    "bodyEnhance",
+    "detailPass",
+    "details",
+    "faceDenoise",
+    "generalDenoise",
+    "generalEnhance",
+    "sharpen",
+  ]);
+});
+
 test("rejects an unknown preset", () => {
   assert.throws(() => normalizeStillImageOptions({ categoryId: "image_editing" }), /not a known still image preset/);
   assert.throws(() => normalizeStillImageOptions({}), /not a known still image preset/);

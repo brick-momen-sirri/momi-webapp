@@ -1,14 +1,12 @@
 import {
   assertRunpodConfig,
   comfyOrgApiKey,
-  runpodCancelUrl,
   runpodApiKey,
-  runpodEndpointUrl,
   runpodPollIntervalMs,
   runpodRequestBodyMaxBytes,
-  runpodStatusUrl,
   runpodTimeoutMs,
 } from "./config.js";
+import { defaultRunpodEndpoint, type RunpodEndpoint } from "./runpodEndpoints.js";
 import {
   combinedTextArtifactContent,
   extractRunpodTextArtifacts,
@@ -48,12 +46,16 @@ type RunpodComfyInput = {
   fetchImpl?: typeof fetch;
   shouldCancel?: () => boolean;
   onSubmitted?: (submission: { jobId: string; status: string }) => void | Promise<void>;
+  // Omitted means the shared Animation endpoint. Still image jobs pass their
+  // preset's own pod -- see runpodEndpoints.ts.
+  endpoint?: RunpodEndpoint;
 };
 
 type ResumeRunpodComfyInput = {
   jobId: string;
   fetchImpl?: typeof fetch;
   shouldCancel?: () => boolean;
+  endpoint?: RunpodEndpoint;
 };
 
 type RunpodResponse = {
@@ -103,6 +105,7 @@ export async function runComfyWorkflowOnRunpod({
   fetchImpl = fetch,
   shouldCancel,
   onSubmitted,
+  endpoint = defaultRunpodEndpoint(),
 }: RunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
   throwIfCancellationRequested(shouldCancel);
@@ -120,7 +123,7 @@ export async function runComfyWorkflowOnRunpod({
 
   const firstResponse = await runpodFetch(
     fetchImpl,
-    runpodEndpointUrl,
+    endpoint.submitUrl,
     {
       method: "POST",
       headers: runpodHeaders(),
@@ -138,24 +141,29 @@ export async function runComfyWorkflowOnRunpod({
     });
   }
 
-  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt, shouldCancel);
+  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt, endpoint, shouldCancel);
 }
 
 export async function resumeComfyWorkflowOnRunpod({
   jobId,
   fetchImpl = fetch,
   shouldCancel,
+  endpoint = defaultRunpodEndpoint(),
 }: ResumeRunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
   throwIfCancellationRequested(shouldCancel);
-  return resolveRunpodResponse({ id: jobId, status: "IN_PROGRESS" }, fetchImpl, Date.now(), shouldCancel);
+  return resolveRunpodResponse({ id: jobId, status: "IN_PROGRESS" }, fetchImpl, Date.now(), endpoint, shouldCancel);
 }
 
-export async function cancelComfyWorkflowOnRunpod(jobId: string, fetchImpl: typeof fetch = fetch) {
+export async function cancelComfyWorkflowOnRunpod(
+  jobId: string,
+  fetchImpl: typeof fetch = fetch,
+  endpoint: RunpodEndpoint = defaultRunpodEndpoint(),
+) {
   assertRunpodConfig();
   const response = await runpodFetch(
     fetchImpl,
-    runpodCancelUrl(jobId),
+    endpoint.cancelUrl(jobId),
     {
       method: "POST",
       headers: runpodHeaders(),
@@ -246,6 +254,7 @@ async function resolveRunpodResponse(
   response: RunpodResponse,
   fetchImpl: typeof fetch,
   startedAt: number,
+  endpoint: RunpodEndpoint,
   shouldCancel?: () => boolean,
 ): Promise<RunpodComfyResult> {
   let current = response;
@@ -263,7 +272,7 @@ async function resolveRunpodResponse(
       await waitBeforePoll(startedAt, shouldCancel);
       current = await runpodFetch(
         fetchImpl,
-        runpodStatusUrl(jobId),
+        endpoint.statusUrl(jobId),
         {
           method: "GET",
           headers: runpodHeaders(),

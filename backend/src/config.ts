@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { BackendHttpError } from "./httpError.js";
 import { backendProcessRole } from "./processRole.js";
+import { STILL_IMAGE_CATEGORY_IDS } from "./stillImageCategories.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const backendRoot = path.resolve(here, "..");
@@ -126,6 +127,23 @@ export const corsAllowPrivateOrigins = !["0", "false", "no", "off"].includes(
 );
 
 export const runpodEndpointId = process.env.RUNPOD_ENDPOINT_ID?.trim() ?? "";
+// Root for endpoints addressed by id alone (the still image pods below). The
+// default endpoint keeps its own RUNPOD_ENDPOINT_BASE_URL/RUNPOD_ENDPOINT_URL
+// overrides, which topologyLoadTest.ts points at a mock server.
+export const runpodApiRoot = (process.env.RUNPOD_API_ROOT ?? "https://api.runpod.ai/v2").replace(/\/$/, "");
+// Still image presets each run on their own RunPod endpoint, because unlike every
+// Animation workflow -- which only relays to an external provider API and so needs
+// nothing installed on the worker -- these execute locally on the GPU and need
+// their own model weights and custom nodes present. One shared generic worker
+// cannot serve them. Unset presets are refused at dispatch rather than falling
+// back to the default endpoint, where the graph would fail on its first loader
+// node with an error that says nothing about the real cause.
+export const runpodStillImageEndpointIds: Readonly<Record<string, string>> = Object.fromEntries(
+  STILL_IMAGE_CATEGORY_IDS.map((categoryId) => [
+    categoryId,
+    process.env[`RUNPOD_ENDPOINT_ID_${categoryId.replaceAll("-", "_").toUpperCase()}`]?.trim() ?? "",
+  ]).filter(([, endpoint]) => endpoint),
+);
 export const runpodSubmissionMode: "sync" | "async" =
   (process.env.RUNPOD_SUBMISSION_MODE ?? "").trim().toLowerCase() === "async" ? "async" : "sync";
 export const runpodEndpointBaseUrl =

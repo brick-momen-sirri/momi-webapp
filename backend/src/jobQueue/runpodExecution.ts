@@ -18,6 +18,7 @@ import {
   runComfyWorkflowOnRunpod,
   type RunpodMediaResult,
 } from "../runpodComfyService.js";
+import { resolveRunpodEndpoint } from "../runpodEndpoints.js";
 import {
   beginRunpodBillableOperation,
   hasExclusiveRunpodActivityWindow,
@@ -25,6 +26,7 @@ import {
   type RunpodActivityBaseline,
 } from "../runpodActivityTracker.js";
 import { persistServerlessArtifacts } from "../serverlessArtifactService.js";
+import { validateRunpodImageRequirements } from "../runpodImagePreflight.js";
 import { ensureJobFolders, saveJobMetadata } from "../storageService.js";
 import type { CreditBalanceSnapshot, Job } from "../types.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
@@ -69,6 +71,14 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     job.creditBalanceBefore = job.creditBalanceBefore ?? (await captureCreditBalanceSnapshot());
     if (job.creditBalanceBefore) await deps.persistJob(job);
 
+    // Resolved before any file or upload work so a preset with no configured pod
+    // fails immediately, rather than after materializing inputs. Recorded on the
+    // job so a resume or cancel after a dispatcher restart addresses the endpoint
+    // that actually holds the work. Left unset when only a base URL override is
+    // configured (the topology load test), where there is no id to remember.
+    const endpoint = resolveRunpodEndpoint(job);
+    if (endpoint.id) job.runpodEndpointId = endpoint.id;
+
     const folders = await ensureJobFolders(project, job.id);
     const projectFolder = projectFolderName(project.folderPath);
     const runpodImages = await materializeRunpodInputImages(job, model);
@@ -91,6 +101,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       projectFolder,
       runpodImages.imageNames,
     );
+    // A resumed async job has already crossed the provider boundary. Preflight
+    // only new submissions so a deploy cannot strand an acknowledged RunPod job.
+    if (!job.runpodJobId) await validateRunpodImageRequirements(workflow, job.inputImages);
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
     if (await deps.settleRequestedCancellation(job, execution)) return;
@@ -102,12 +115,13 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     const shouldStopRunpodWork = () =>
       deps.isCancellationRequested(job) || !deps.isExecutionCurrent(execution) || !deps.ownsDispatcherWork();
     const result = job.runpodJobId
-      ? await resumeComfyWorkflowOnRunpod({ jobId: job.runpodJobId, shouldCancel: shouldStopRunpodWork })
+      ? await resumeComfyWorkflowOnRunpod({ jobId: job.runpodJobId, shouldCancel: shouldStopRunpodWork, endpoint })
       : await runComfyWorkflowOnRunpod({
           workflow,
           images: runpodImages.images,
           videos: runpodVideo?.videos ?? [],
           shouldCancel: shouldStopRunpodWork,
+          endpoint,
           onSubmitted: async ({ jobId, status }) => {
             if (!deps.isExecutionCurrent(execution) || !deps.ownsDispatcherWork()) {
               throw new DispatcherLeaseLostError();

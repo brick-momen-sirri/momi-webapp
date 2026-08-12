@@ -27,6 +27,7 @@ import {
   withProjectMutationLock,
 } from "./projectMetadataService.js";
 import { cancelComfyWorkflowOnRunpod } from "./runpodComfyService.js";
+import { resolveRunpodEndpoint } from "./runpodEndpoints.js";
 import { isDispatcher } from "./processRole.js";
 import { IdempotencyConflictError, openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
 import { readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
@@ -573,7 +574,10 @@ async function settleRequestedCancellation(job: Job, execution?: ExecutionClaim)
   let canceledRunpodStatus: string | undefined;
   if (generationBackend === "runpod" && job.runpodJobId && ownsDispatcherWork()) {
     try {
-      const canceled = await cancelComfyWorkflowOnRunpod(job.runpodJobId);
+      // Must address the endpoint that acknowledged this job. A still image job
+      // cancelled against the shared Animation endpoint would 404 while the real
+      // work kept running -- and billing -- on its own pod.
+      const canceled = await cancelComfyWorkflowOnRunpod(job.runpodJobId, fetch, resolveRunpodEndpoint(job));
       canceledRunpodStatus = canceled.status;
     } catch (error) {
       // The remote job may still be running (and billing) on RunPod. Leave
