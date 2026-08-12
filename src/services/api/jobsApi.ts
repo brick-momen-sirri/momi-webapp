@@ -35,7 +35,10 @@ export async function createBackendJob(
     targetFolderId?: string | null;
     modelId: string;
     prompt?: string;
-    resolution: { width: number; height: number; label?: string };
+    // Optional because Still Images presets take their output size from the input
+    // image. The backend already treats resolution as optional and those presets
+    // advertise no supportedResolutions, so sending one would be silently ignored.
+    resolution?: { width: number; height: number; label?: string };
     durationSeconds?: number;
     inputImages?: string[];
     startFrame?: string;

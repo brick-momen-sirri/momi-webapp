@@ -182,6 +182,13 @@ export type WorkflowOptions = {
     cameraNumber?: string;
     shotNumber?: string;
   };
+  // Present only on jobs submitted from the Still Images workspace. Its presence is
+  // what the backend reads to route the job to that preset's own pod, so it must
+  // never be set on an Animation job.
+  stillImage?: {
+    categoryId: string;
+    settings: Record<string, string | number | boolean>;
+  };
 };
 
 export type ModelType = {

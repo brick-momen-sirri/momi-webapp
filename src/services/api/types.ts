@@ -93,6 +93,12 @@ export type FetchBackendJobsParams = {
   status?: Job["status"];
   outputType?: Job["outputType"];
   archived?: boolean;
+  /**
+   * Narrows to one workspace. Unset returns both, which is what the shared job
+   * list loads today -- StillImagesWorkspace filters that window client-side via
+   * jobSection. Pass this to page a single section server-side instead.
+   */
+  section?: "animation" | "still_images";
 };
 
 export type BackendMonthlyUsage = {
