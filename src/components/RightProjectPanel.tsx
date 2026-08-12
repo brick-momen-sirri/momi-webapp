@@ -1,4 +1,4 @@
-import { FolderPlus, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
+import { FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Project, ProjectMember, ProjectRole, User } from "../types";
@@ -18,6 +18,8 @@ type RightProjectPanelProps = {
   onToggleProjectPin: (projectId: string) => void;
   onCreateProject: (project: Project) => void;
   onUpdateProject: (project: Project) => void;
+  onAddProjectMember: (projectId: string, userId: string, role: ProjectRole) => Promise<boolean>;
+  onRemoveProjectMember: (projectId: string, userId: string) => Promise<boolean>;
   onCreateProjectFolder: (projectId: string, name: string, parentId?: string | null) => void;
   onRenameProjectFolder: (projectId: string, folderId: string, name: string) => void;
   onDeleteProjectFolder: (projectId: string, folderId: string) => void;
@@ -36,6 +38,8 @@ export function RightProjectPanel({
   onToggleProjectPin,
   onCreateProject,
   onUpdateProject,
+  onAddProjectMember,
+  onRemoveProjectMember,
   onCreateProjectFolder,
   onRenameProjectFolder,
   onDeleteProjectFolder,
@@ -147,7 +151,17 @@ export function RightProjectPanel({
       </section>
 
       {modalOpen ? (
-        <CreateProjectModal users={users} ownerId={ownerId} onCreate={createProject} onClose={() => setModalOpen(false)} />
+        <CreateProjectModal
+          users={users}
+          projects={projects}
+          ownerId={ownerId}
+          onCreate={createProject}
+          onOpenExisting={(projectId) => {
+            onSelectProject(projectId);
+            setModalOpen(false);
+          }}
+          onClose={() => setModalOpen(false)}
+        />
       ) : null}
       {settingsProject ? (
         <ManageMembersModal
@@ -156,6 +170,8 @@ export function RightProjectPanel({
           currentUserId={ownerId}
           currentUserRole={currentUserRole}
           onUpdateProject={onUpdateProject}
+          onAddMember={onAddProjectMember}
+          onRemoveMember={onRemoveProjectMember}
           onClose={() => setSettingsProjectId(null)}
         />
       ) : null}
@@ -182,7 +198,7 @@ function ProjectDetails({
 }) {
   const currentRole = getProjectRole(project, currentUserId);
   const isAdmin = currentUserRole === "admin";
-  const canManage = isAdmin || currentRole === "owner";
+  const canManage = isAdmin || currentRole === "owner" || project.ownerId === currentUserId;
   const folderName = projectFolderName(project);
   const memberCount = project.members.length + (project.groupMembers?.length ?? 0);
 
@@ -201,8 +217,8 @@ function ProjectDetails({
           <h2 className="truncate text-sm font-bold">{project.name}</h2>
           <p className="mt-1 text-xs leading-5 text-stone-500">{project.description}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold capitalize text-stone-600">
-          {project.visibility}
+        <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
+          {visibilityLabel(project)}
         </span>
       </div>
       {isAdmin ? (
@@ -261,6 +277,11 @@ function ProjectDetails({
             Manage members
           </button>
         </div>
+        <p className="mb-2 text-xs leading-5 text-stone-500">
+          {project.visibility === "private"
+            ? "Only these people can open this project."
+            : "Everyone in the workspace can generate here. This list only records owners and view-only exceptions."}
+        </p>
         {!canManage ? (
           <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
             You do not have permission to manage members for this project.
@@ -293,6 +314,8 @@ function ManageMembersModal({
   currentUserId,
   currentUserRole,
   onUpdateProject,
+  onAddMember,
+  onRemoveMember,
   onClose,
 }: {
   project: Project;
@@ -300,16 +323,25 @@ function ManageMembersModal({
   currentUserId: string;
   currentUserRole: "admin" | "user";
   onUpdateProject: (project: Project) => void;
+  onAddMember: (projectId: string, userId: string, role: ProjectRole) => Promise<boolean>;
+  onRemoveMember: (projectId: string, userId: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [userRole, setUserRole] = useState<Exclude<ProjectRole, "owner">>("viewer");
-  const [message, setMessage] = useState("");
+  // Editor by default, matching the create dialog: adding someone means letting
+  // them work here.
+  const [userRole, setUserRole] = useState<Exclude<ProjectRole, "owner">>("editor");
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const currentRole = getProjectRole(project, currentUserId);
   const isAdmin = currentUserRole === "admin";
   const isOwner = currentRole === "owner";
-  const canManage = isAdmin || isOwner;
+  // ownerId counts as well, matching the server's canManageProject. Projects
+  // discovered on disk carry a placeholder owner and no owner row, so reading the
+  // members list alone locked admins out of their own dialog.
+  const canManage = isAdmin || isOwner || project.ownerId === currentUserId;
+  const openToWorkspace = project.visibility !== "private";
   const ownerCount = project.members.filter((member) => member.role === "owner").length;
   const memberCount = project.members.length + (project.groupMembers?.length ?? 0);
   const folderName = projectFolderName(project);
@@ -340,64 +372,91 @@ function ManageMembersModal({
     }
   }
 
-  function save(nextProject: Project, confirmation: string) {
-    const updated = normalizeProjectMemberCount(nextProject);
-    onUpdateProject(updated);
-    setMessage(confirmation);
+  function nameFor(userId: string) {
+    return users.find((user) => user.id === userId)?.name ?? userId;
   }
 
-  function addUser(event: FormEvent) {
+  // Every mutation waits for the server and reports what actually happened. The
+  // previous version printed "User added to project." before the request was
+  // even sent, so a rejected change still read as a success while the list
+  // quietly reverted underneath it.
+  async function addUser(event: FormEvent) {
     event.preventDefault();
 
     if (!canManage) {
-      setMessage("You do not have permission to manage members for this project.");
+      setFeedback({ tone: "bad", text: "You do not have permission to manage members for this project." });
       return;
     }
 
     if (!effectiveUserId) {
-      setMessage("Select a user to add.");
+      setFeedback({ tone: "bad", text: "Select a user to add." });
       return;
     }
 
-    const member: ProjectMember = {
-      userId: effectiveUserId,
-      role: userRole,
-      addedAt: new Date().toISOString(),
-      addedBy: currentUserId,
-    };
-
-    save({ ...project, members: [...project.members, member] }, "User added to project.");
+    setBusy(true);
+    const added = await onAddMember(project.id, effectiveUserId, userRole);
+    setBusy(false);
+    setFeedback(
+      added
+        ? { tone: "ok", text: `${nameFor(effectiveUserId)} added as ${userRole}.` }
+        : { tone: "bad", text: "Nothing was changed -- the server refused that member." },
+    );
+    if (!added) return;
     setSelectedUserId("");
     setSearch("");
   }
 
-  function removeMember(member: ProjectMember) {
-    if (!canRemoveMember(project, currentRole, member, isAdmin)) {
-      setMessage("This member cannot be removed with your current permission.");
+  async function removeMember(member: ProjectMember) {
+    if (!canRemoveMember(project, currentRole, member, canManage)) {
+      setFeedback({ tone: "bad", text: "This member cannot be removed with your current permission." });
       return;
     }
 
-    save({ ...project, members: project.members.filter((item) => item.userId !== member.userId) }, "Member removed.");
+    setBusy(true);
+    const removed = await onRemoveMember(project.id, member.userId);
+    setBusy(false);
+    setFeedback(
+      removed
+        ? { tone: "ok", text: `${nameFor(member.userId)} removed.` }
+        : { tone: "bad", text: "Nothing was changed -- the server refused that removal." },
+    );
   }
 
-  function updateRole(member: ProjectMember, role: ProjectRole) {
-    if (!isAdmin && !isOwner) {
-      setMessage("Only owners can change member roles.");
+  async function updateRole(member: ProjectMember, role: ProjectRole) {
+    if (!canManage) {
+      setFeedback({ tone: "bad", text: "Only owners and admins can change member roles." });
       return;
     }
 
     if (member.role === "owner" && role !== "owner" && ownerCount <= 1) {
-      setMessage("Every project must keep at least one owner.");
+      setFeedback({ tone: "bad", text: "Every project must keep at least one owner." });
       return;
     }
 
-    save(
-      {
-        ...project,
-        members: project.members.map((item) => (item.userId === member.userId ? { ...item, role } : item)),
-      },
-      "Member role updated.",
+    setBusy(true);
+    // Adding an existing member is how the server records a role change.
+    const saved = await onAddMember(project.id, member.userId, role);
+    setBusy(false);
+    setFeedback(
+      saved
+        ? { tone: "ok", text: `${nameFor(member.userId)} is now ${role}.` }
+        : { tone: "bad", text: "The role was not changed." },
     );
+  }
+
+  function updateVisibility(visibility: Project["visibility"]) {
+    if (!canManage) {
+      setFeedback({ tone: "bad", text: "You do not have permission to change this project." });
+      return;
+    }
+    onUpdateProject(normalizeProjectMemberCount({ ...project, visibility }));
+    setFeedback({
+      tone: "ok",
+      text:
+        visibility === "private"
+          ? "Now private: only the members below can open this project."
+          : "Now open to the workspace: everyone signed in can generate here.",
+    });
   }
 
   return createPortal(
@@ -439,8 +498,8 @@ function ManageMembersModal({
                 <p className="truncate text-sm font-bold">{project.name}</p>
                 <p className="mt-1 text-xs leading-5 text-stone-500">{project.description}</p>
               </div>
-              <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold capitalize text-stone-600">
-                {project.visibility}
+              <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
+                {visibilityLabel(project)}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2 text-center text-xs md:grid-cols-5">
@@ -477,6 +536,28 @@ function ManageMembersModal({
             </div>
           </section>
 
+          <section className="rounded-lg border border-line bg-white p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
+              <Globe className="h-3.5 w-3.5" />
+              Who can work in it
+            </div>
+            <select
+              aria-label="Project access"
+              value={openToWorkspace ? "team" : "private"}
+              disabled={!canManage || busy}
+              onChange={(event) => updateVisibility(event.target.value as Project["visibility"])}
+              className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none disabled:opacity-60 md:w-72"
+            >
+              <option value="team">Whole workspace</option>
+              <option value="private">Only the people listed below</option>
+            </select>
+            <p className="mt-2 text-xs leading-5 text-stone-500">
+              {openToWorkspace
+                ? "Everyone signed in can open this project and generate into its folder. You only need the list below to add another owner, or to hold someone to view-only."
+                : "Only the people listed below can open this project. Editors can generate, viewers can only look."}
+            </p>
+          </section>
+
           <section className="rounded-lg border border-line bg-mist/40 p-3">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
               <UsersRound className="h-3.5 w-3.5" />
@@ -485,7 +566,7 @@ function ManageMembersModal({
             <div className="space-y-2">
               {project.members.map((member) => {
                 const user = users.find((item) => item.id === member.userId);
-                const removable = canRemoveMember(project, currentRole, member, isAdmin);
+                const removable = canRemoveMember(project, currentRole, member, canManage);
                 return (
                   <div
                     key={member.userId}
@@ -499,9 +580,10 @@ function ManageMembersModal({
                       </div>
                     </div>
                     <select
+                      aria-label={`Role for ${user?.name ?? member.userId}`}
                       value={member.role}
-                      disabled={!isOwner}
-                      onChange={(event) => updateRole(member, event.target.value as ProjectRole)}
+                      disabled={!canManage || busy}
+                      onChange={(event) => void updateRole(member, event.target.value as ProjectRole)}
                       className="h-8 rounded-md border border-line bg-white px-2 text-xs font-semibold capitalize outline-none disabled:opacity-60"
                     >
                       <option value="owner">Owner</option>
@@ -510,8 +592,8 @@ function ManageMembersModal({
                     </select>
                     <button
                       type="button"
-                      onClick={() => removeMember(member)}
-                      disabled={!removable}
+                      onClick={() => void removeMember(member)}
+                      disabled={!removable || busy}
                       className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-line px-2 text-xs font-semibold text-stone-600 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <UserMinus className="h-3.5 w-3.5" />
@@ -523,7 +605,7 @@ function ManageMembersModal({
             </div>
           </section>
 
-          <form onSubmit={addUser} className="rounded-lg border border-line bg-white p-3">
+          <form onSubmit={(event) => void addUser(event)} className="rounded-lg border border-line bg-white p-3">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
               <UserPlus className="h-3.5 w-3.5" />
               Invite users
@@ -537,6 +619,7 @@ function ManageMembersModal({
                   className="h-9 w-full rounded-md border border-line px-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
                 <select
+                  aria-label="User to add"
                   value={effectiveUserId}
                   onChange={(event) => setSelectedUserId(event.target.value)}
                   className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none"
@@ -553,17 +636,18 @@ function ManageMembersModal({
                 </select>
               </div>
               <select
+                aria-label="Role for the new member"
                 value={userRole}
-                disabled={!canManage}
+                disabled={!canManage || busy}
                 onChange={(event) => setUserRole(event.target.value as Exclude<ProjectRole, "owner">)}
                 className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none disabled:opacity-60"
               >
-                <option value="viewer">Viewer</option>
                 <option value="editor">Editor</option>
+                <option value="viewer">Viewer</option>
               </select>
               <button
                 type="submit"
-                disabled={!canManage}
+                disabled={!canManage || busy}
                 className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-xs font-bold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:bg-stone-300"
               >
                 <UserPlus className="h-3.5 w-3.5" />
@@ -572,7 +656,18 @@ function ManageMembersModal({
             </div>
           </form>
 
-          {message ? <p className="rounded-md bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800">{message}</p> : null}
+          {feedback ? (
+            <p
+              role="status"
+              className={
+                feedback.tone === "ok"
+                  ? "rounded-md bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800"
+                  : "rounded-md bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
+              }
+            >
+              {feedback.text}
+            </p>
+          ) : null}
         </div>
 
         <div className="sticky bottom-0 flex justify-end border-t border-line bg-white px-4 py-3">
@@ -592,6 +687,10 @@ function ManageMembersModal({
 
 function getProjectRole(project: Project, userId: string): ProjectRole | undefined {
   return project.members.find((member) => member.userId === userId)?.role;
+}
+
+function visibilityLabel(project: Project) {
+  return project.visibility === "private" ? "Private" : "Whole workspace";
 }
 
 function projectFolderName(project: Project) {

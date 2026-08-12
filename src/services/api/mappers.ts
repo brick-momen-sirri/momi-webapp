@@ -29,6 +29,7 @@ export function mapModel(model: BackendWorkflowModel): ModelType {
 
 function supportedResolutionsForModel(model: BackendWorkflowModel) {
   const key = modelKey(model);
+  if (key.includes("flux3") || key.includes("flux 3")) return ["720p", "1080p"];
   if (key.includes("nano") && key.includes("banana")) return ["1K", "2K", "4K"];
   if ((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid")) {
     return ["auto", "1024x1024", "1024x1536", "1536x1024", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840"];
@@ -49,6 +50,9 @@ function inferImageSlotCount(model: BackendWorkflowModel) {
 
 function durationConfigForModel(model: BackendWorkflowModel) {
   const key = modelKey(model);
+  if (key.includes("flux3") || key.includes("flux 3")) {
+    return { supportedDurations: range(5, 20), defaultDurationSeconds: 5 };
+  }
   if (key.includes("kling_v3_flf2v")) return { supportedDurations: range(3, 15), defaultDurationSeconds: 5 };
   if (key.includes("seedance") && key.includes("flf2v")) return { supportedDurations: range(4, 15), defaultDurationSeconds: 5 };
   if (key.includes("veo3") && key.includes("flf2v")) return { supportedDurations: [4, 6, 8], defaultDurationSeconds: 6 };

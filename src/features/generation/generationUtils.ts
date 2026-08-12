@@ -6,6 +6,7 @@ import { ALL_PROJECTS_ID } from "../workspace/workspaceUtils";
 
 type DisabledReasonInput = {
   isDemoAccount: boolean;
+  hasViewOnlyProjectAccess: boolean;
   insufficientCredits: boolean;
   selectedProjectId: string;
   selectedProject?: Project;
@@ -19,6 +20,7 @@ type DisabledReasonInput = {
 
 export function getDisabledReason({
   isDemoAccount,
+  hasViewOnlyProjectAccess,
   insufficientCredits,
   selectedProjectId,
   selectedProject,
@@ -30,6 +32,9 @@ export function getDisabledReason({
   requiredImages,
 }: DisabledReasonInput) {
   if (isDemoAccount) return "Demo accounts are view-only and cannot generate tasks.";
+  // Grouped with the demo check rather than ordered by form completeness: both
+  // are refusals the server will make regardless of what else the artist fixes.
+  if (hasViewOnlyProjectAccess) return "You have view-only access to this project. Ask a project owner for editor access.";
   if (insufficientCredits) return "Insufficient credits.";
   if (selectedProjectId === ALL_PROJECTS_ID || !selectedProject) return "Please select a specific project before generating.";
   if (hasMissingPrompt) return "Add a prompt before generating.";

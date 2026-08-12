@@ -18,6 +18,12 @@ type ImageUploaderProps = {
   show16By9CropToggle: boolean;
   onEnable16By9CroppingChange: (enabled: boolean) => void;
   textOnly: boolean;
+  frontendOnly?: boolean;
+  slotLabels?: string[];
+  // Read-only mode (no write access to the selected project). A disabled
+  // fieldset around this component covers the buttons and file inputs; drop and
+  // paste land on plain elements, so they are refused here instead.
+  disabled?: boolean;
 };
 
 type Slot = {
@@ -41,6 +47,9 @@ export function ImageUploader({
   show16By9CropToggle,
   onEnable16By9CroppingChange,
   textOnly,
+  frontendOnly = false,
+  slotLabels,
+  disabled = false,
 }: ImageUploaderProps) {
   const [activeCropIndex, setActiveCropIndex] = useState<number | null>(null);
   const [pasteMessage, setPasteMessage] = useState("");
@@ -48,7 +57,7 @@ export function ImageUploader({
   const mountedRef = useRef(false);
   const imageProbeControllerRef = useRef<AbortController | null>(null);
   const pasteMessageTimerRef = useRef<number | null>(null);
-  const slots = textOnly ? [] : imageSlots(requiresTwoImages, imageSlotCount);
+  const slots = textOnly ? [] : imageSlots(requiresTwoImages, imageSlotCount, slotLabels);
   const cropOutputSize = outputSizeForResolution(selectedResolution);
   const use16By9Cropping = requiresLandscape && (!show16By9CropToggle || enable16By9Cropping);
 
@@ -151,7 +160,7 @@ export function ImageUploader({
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLElement>) {
-    if (textOnly || isEditablePasteTarget(event.target)) {
+    if (disabled || textOnly || isEditablePasteTarget(event.target)) {
       return;
     }
 
@@ -166,7 +175,7 @@ export function ImageUploader({
   async function pasteFilesFromClipboardData(data: DataTransfer) {
     setIsPasting(true);
     showPasteMessage("Pasting image...");
-    const result = await clipboardImageFiles(data);
+    const result = await clipboardImageFiles(data, frontendOnly);
     await applyPastedFiles(result.files, noImageMessage(result.details));
   }
 
@@ -179,7 +188,9 @@ export function ImageUploader({
       return;
     }
 
-    const backendResult = await backendClipboardImageFiles();
+    const backendResult = frontendOnly
+      ? { files: [], details: ["Backend clipboard access disabled."] }
+      : await backendClipboardImageFiles();
     await applyPastedFiles(
       dedupeFiles(backendResult.files),
       noImageMessage([...browserResult.details, ...backendResult.details]),
@@ -278,7 +289,7 @@ export function ImageUploader({
             <button
               type="button"
               onClick={() => void handlePasteButton()}
-              disabled={isPasting}
+              disabled={disabled || isPasting}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-stone-50 disabled:cursor-wait disabled:opacity-60"
               title="Paste image from clipboard"
             >
@@ -299,6 +310,7 @@ export function ImageUploader({
             type="checkbox"
             checked={enable16By9Cropping}
             onChange={(event) => handle16By9CroppingChange(event.target.checked)}
+            disabled={disabled}
             className="h-4 w-4 accent-accent"
           />
           Enable 16:9 Cropping
@@ -322,8 +334,9 @@ export function ImageUploader({
                 requiresLandscape={use16By9Cropping}
                 useCroppedImage={use16By9Cropping}
                 cropOutputSize={cropOutputSize}
+                disabled={disabled}
                 onFile={(file) => void applyFile(slot.index, file)}
-                onResultImage={(dragData) => void applyDraggedResult(slot.index, dragData)}
+                onResultImage={frontendOnly ? undefined : (dragData) => void applyDraggedResult(slot.index, dragData)}
                 onRemove={() => removeImage(slot.index)}
                 onCrop={() => setActiveCropIndex(slot.index)}
               />
@@ -350,7 +363,7 @@ export function ImageUploader({
   );
 }
 
-async function clipboardImageFiles(data: DataTransfer): Promise<ClipboardFileResult> {
+async function clipboardImageFiles(data: DataTransfer, frontendOnly = false): Promise<ClipboardFileResult> {
   const files: File[] = [];
   const details: string[] = [];
   const pastedFiles = Array.from(data.files);
@@ -387,7 +400,9 @@ async function clipboardImageFiles(data: DataTransfer): Promise<ClipboardFileRes
     return { files: dedupeFiles(browserResult.files), details: [...details, ...dataUrlResult.details, ...browserResult.details] };
   }
 
-  const backendResult = await backendClipboardImageFiles();
+  const backendResult = frontendOnly
+    ? { files: [], details: ["Backend clipboard access disabled."] }
+    : await backendClipboardImageFiles();
   return {
     files: dedupeFiles(backendResult.files),
     details: [...details, ...dataUrlResult.details, ...browserResult.details, ...backendResult.details],
@@ -619,18 +634,18 @@ function isEditablePasteTarget(target: EventTarget | null) {
   return target.isContentEditable || tagName === "textarea" || tagName === "input";
 }
 
-function imageSlots(requiresTwoImages: boolean, imageSlotCount: number): Slot[] {
+function imageSlots(requiresTwoImages: boolean, imageSlotCount: number, slotLabels?: string[]): Slot[] {
   if (requiresTwoImages) {
     return [
-      { index: 0, label: "Start frame" },
-      { index: 1, label: "End frame" },
+      { index: 0, label: slotLabels?.[0] ?? "Start frame" },
+      { index: 1, label: slotLabels?.[1] ?? "End frame" },
     ];
   }
 
   const count = Math.max(0, Math.min(9, imageSlotCount || 0));
   return Array.from({ length: count }, (_, index) => ({
     index,
-    label: count === 1 ? "Input image" : `Input image ${index + 1}`,
+    label: slotLabels?.[index] ?? (count === 1 ? "Input image" : `Input image ${index + 1}`),
   }));
 }
 
@@ -652,8 +667,9 @@ type UploadSlotProps = {
   requiresLandscape: boolean;
   useCroppedImage: boolean;
   cropOutputSize: { width: number; height: number };
+  disabled: boolean;
   onFile: (file: File) => void;
-  onResultImage: (dragData: ResultImageDragData) => void;
+  onResultImage?: (dragData: ResultImageDragData) => void;
   onRemove: () => void;
   onCrop: () => void;
 };
@@ -664,6 +680,7 @@ function UploadSlot({
   requiresLandscape,
   useCroppedImage,
   cropOutputSize,
+  disabled,
   onFile,
   onResultImage,
   onRemove,
@@ -702,16 +719,18 @@ function UploadSlot({
   }
 
   function handleDragOver(event: DragEvent<HTMLElement>) {
+    if (disabled) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setIsDragging(true);
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
+    if (disabled) return;
     event.preventDefault();
     setIsDragging(false);
     const resultDragData = getResultImageDragData(event.dataTransfer);
-    if (resultDragData) {
+    if (resultDragData && onResultImage) {
       onResultImage(resultDragData);
       return;
     }
@@ -755,7 +774,8 @@ function UploadSlot({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex h-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-stone-50"
+            disabled={disabled}
+            className="flex h-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
             title="Replace image"
           >
             <Replace className="h-3.5 w-3.5" />
@@ -763,7 +783,7 @@ function UploadSlot({
           <button
             type="button"
             onClick={onCrop}
-            disabled={!requiresLandscape}
+            disabled={disabled || !requiresLandscape}
             className="flex h-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
             title="Open crop tool"
           >
@@ -772,7 +792,8 @@ function UploadSlot({
           <button
             type="button"
             onClick={onRemove}
-            className="flex h-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-red-50 hover:text-red-600"
+            disabled={disabled}
+            className="flex h-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
             title="Remove image"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -783,6 +804,7 @@ function UploadSlot({
           type="file"
           accept="image/*"
           aria-label={`Upload ${slot.label}`}
+          disabled={disabled}
           className="hidden"
           onChange={handleFileInput}
         />
@@ -798,19 +820,23 @@ function UploadSlot({
         onDragOver={handleDragOver}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        className={`flex h-32 min-w-0 flex-col items-center justify-center rounded-md border border-dashed px-2 text-center transition ${
+        disabled={disabled}
+        className={`flex h-32 min-w-0 flex-col items-center justify-center rounded-md border border-dashed px-2 text-center transition disabled:cursor-not-allowed ${
           isDragging ? "border-accent bg-accent/10" : "border-line bg-mist/60 hover:bg-white"
         }`}
       >
         <ImagePlus className="h-6 w-6 text-stone-400" />
         <span className="mt-2 text-xs font-semibold">{slot.label}</span>
-        <span className="mt-1 text-[11px] leading-4 text-stone-500">Drop image, result, or browse</span>
+        <span className="mt-1 text-[11px] leading-4 text-stone-500">
+          {disabled ? "View-only access" : onResultImage ? "Drop image, result, or browse" : "Drop image or browse"}
+        </span>
       </button>
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
         aria-label={`Upload ${slot.label}`}
+        disabled={disabled}
         className="hidden"
         onChange={handleFileInput}
       />

@@ -164,6 +164,51 @@ describe("resilience", () => {
   });
 });
 
+describe("main workspace sections", () => {
+  it("defaults to Animation and keeps its inputs when visiting Still Images", async () => {
+    const user = userEvent.setup();
+    await bootSignedIn();
+
+    const animationPrompt = await screen.findByRole("textbox", { name: "Generation prompt" });
+    await user.type(animationPrompt, "keep this animation prompt");
+
+    expect(screen.getByRole("button", { name: /^Animation/ })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: /^Still Images/ }));
+
+    expect(screen.getByRole("heading", { name: "Still image results" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+    expect(screen.queryByRole("heading", { name: "Generation Settings" })).not.toBeInTheDocument();
+    const cameraNumber = screen.getByRole("textbox", { name: "Camera number" });
+    await user.clear(cameraNumber);
+    await user.type(cameraNumber, "0042");
+    expect(screen.getByText(/General_Enhancement_CAM0042\.png$/)).toBeInTheDocument();
+    expect(harness.callsTo("/api/jobs").filter((call) => call.method === "POST")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: /^Animation/ }));
+    expect(screen.getByRole("textbox", { name: "Generation prompt" })).toHaveValue("keep this animation prompt");
+    expect(screen.getByText(/AI generation jobs/i)).toBeInTheDocument();
+  });
+
+  it("shows all Still Images categories without submitting a job", async () => {
+    const user = userEvent.setup();
+    await bootSignedIn();
+    // bootSignedIn only settles the session; the workspace shell arrives one
+    // fetch later. Clicking before it does finds the loading screen instead,
+    // which only shows up when the suite is under enough load to lose the race.
+    await user.click(await screen.findByRole("button", { name: /^Still Images/ }));
+
+    for (const category of ["General Enhancement", "Pro Upscaler", "Reference Generator", "Qwen Edit"]) {
+      expect(screen.getByRole("button", { name: category })).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.selectOptions(screen.getByLabelText("Image count"), "3");
+    expect(screen.getByLabelText("Upload Image 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+    expect(harness.callsTo("/api/jobs").filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+});
+
 describe("session teardown", () => {
   it("signing out returns to the sign-in screen and drops the token", async () => {
     const user = userEvent.setup();
@@ -203,5 +248,51 @@ describe("role-gated surfaces", () => {
       state.users = [state.user];
     });
     await waitFor(() => expect(screen.getByText(/AI generation jobs/i)).toBeInTheDocument());
+  });
+
+  // A viewer used to get a fully live form and learn about the refusal only from
+  // one "Project editor access required." toast per Generate attempt, after the
+  // upload had already been sent.
+  it("presents a view-only form to a project viewer", async () => {
+    window.localStorage.setItem("momi_generation_settings_v1", JSON.stringify({ selectedProjectId: "proj_1" }));
+    await bootSignedIn((state) => {
+      state.user = backendUser({ id: "usr_artist", name: "artist", role: "user" });
+      state.users = [state.user];
+      state.projects = [
+        backendProject({
+          members: [
+            { userId: "usr_momen", role: "owner" },
+            { userId: "usr_artist", role: "viewer" },
+          ],
+        }),
+      ];
+    });
+
+    await waitFor(() => expect(screen.getByText(/View-only access to Glass Tower/i)).toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Generation prompt" })).toBeDisabled();
+    expect(screen.getByLabelText("Upload Input image")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Generate/ })).toBeDisabled();
+    expect(screen.getByText(/Ask a project owner for editor access\./i)).toBeInTheDocument();
+  });
+
+  it("leaves the form live for a project editor", async () => {
+    window.localStorage.setItem("momi_generation_settings_v1", JSON.stringify({ selectedProjectId: "proj_1" }));
+    await bootSignedIn((state) => {
+      state.user = backendUser({ id: "usr_artist", name: "artist", role: "user" });
+      state.users = [state.user];
+      state.projects = [
+        backendProject({
+          members: [
+            { userId: "usr_momen", role: "owner" },
+            { userId: "usr_artist", role: "editor" },
+          ],
+        }),
+      ];
+    });
+
+    await waitFor(() => expect(screen.getByText(/AI generation jobs/i)).toBeInTheDocument());
+    expect(screen.queryByText(/View-only access/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Generation prompt" })).toBeEnabled();
+    expect(screen.getByLabelText("Upload Input image")).toBeEnabled();
   });
 });

@@ -1,5 +1,6 @@
 import { FileText, Layers } from "lucide-react";
 import type { ReactNode } from "react";
+import { sortFoldersByName } from "../features/projects/folderSort";
 import type { Project, ProjectFolder } from "../types";
 import { ProjectCard, ProjectRowMenuButton } from "./ProjectCard";
 
@@ -69,7 +70,7 @@ export function ProjectList({
           foldersByParent.set(key, [...(foldersByParent.get(key) ?? []), folder]);
         }
         const renderFolderRows = (parentId: string | null, depth = 0): ReactNode[] =>
-          (foldersByParent.get(parentId ?? "") ?? []).flatMap((folder) => [
+          sortFoldersByName(foldersByParent.get(parentId ?? "") ?? []).flatMap((folder) => [
             <FolderListRow
               key={folder.folderId}
               label={folder.name}

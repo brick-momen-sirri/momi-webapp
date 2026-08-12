@@ -18,7 +18,10 @@ export function TeamSelector({ users, ownerId, members, onMembersChange }: TeamS
     onMembersChange(
       exists
         ? members.filter((member) => member.userId !== userId)
-        : [...members, { userId, role: "viewer", addedAt: new Date().toISOString(), addedBy: ownerId }],
+        // Editor, not viewer: ticking someone means "let them work here". The old
+        // viewer default is what produced "added them, they still cannot
+        // generate" -- viewer is now something you pick on purpose.
+        : [...members, { userId, role: "editor", addedAt: new Date().toISOString(), addedBy: ownerId }],
     );
   }
 
@@ -29,10 +32,11 @@ export function TeamSelector({ users, ownerId, members, onMembersChange }: TeamS
   return (
     <div className="space-y-4">
       <div>
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
+        <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
           <UsersRound className="h-3.5 w-3.5" />
           Invited users
         </div>
+        <p className="mb-2 text-xs leading-5 text-stone-500">Editors can generate. Viewers can only look at results.</p>
         <div className="space-y-2">
           {users.map((user) => {
             const member = members.find((item) => item.userId === user.id);
@@ -57,7 +61,7 @@ export function TeamSelector({ users, ownerId, members, onMembersChange }: TeamS
                   {owner ? <span className="ml-1 text-xs font-normal text-stone-500">(owner)</span> : null}
                 </span>
                 <select
-                  value={member?.role ?? "viewer"}
+                  value={member?.role ?? "editor"}
                   disabled={!checked || owner}
                   onChange={(event) => updateRole(user.id, event.target.value as ProjectMember["role"])}
                   className="h-8 rounded-md border border-line bg-white px-2 text-xs outline-none disabled:opacity-50"

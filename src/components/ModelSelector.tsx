@@ -11,6 +11,7 @@ import {
   Video,
 } from "lucide-react";
 import type { DragEvent } from "react";
+import bflSymbolIcon from "../assets/model-icons/bfl-symbol-black.png";
 import klingIcon from "../assets/model-icons/kling.png";
 import openAiIcon from "../assets/model-icons/openai.png";
 import seedanceIcon from "../assets/model-icons/seedance.png";
@@ -74,6 +75,12 @@ const providerOptions = [
     label: "Veo 3",
     iconSrc: veo3Icon,
     aliases: ["veo3", "veo 3"],
+  },
+  {
+    id: "flux",
+    label: "Flux 3",
+    iconSrc: bflSymbolIcon,
+    aliases: ["flux3", "flux 3"],
   },
 ] as const;
 
@@ -192,7 +199,8 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
                     src={iconSrc}
                     alt=""
                     className={cn(
-                      "workflow-icon-img h-4 w-4 object-contain",
+                      "workflow-icon-img object-contain",
+                      option.id === "flux" ? "h-4 w-5" : "h-4 w-4",
                       selected ? "workflow-icon-selected brightness-0 invert" : "",
                     )}
                   />
@@ -291,7 +299,7 @@ function workflowCards(categoryModels: ModelType[]) {
     return providerCards;
   }
 
-  return orderedModels.map((model) => ({
+  const modelCards = orderedModels.map((model) => ({
     id: model.id,
     label: cleanModelLabel(model.label),
     icon: ImageIcon,
@@ -299,6 +307,8 @@ function workflowCards(categoryModels: ModelType[]) {
     aliases: [model.id],
     model,
   }));
+  const pendingFluxCard = providerCards.find((card) => card.id === "flux");
+  return pendingFluxCard ? [...modelCards, pendingFluxCard] : modelCards;
 }
 
 function orderWorkflowModels(models: ModelType[]) {
@@ -345,6 +355,7 @@ function workflowFileName(workflowPath: string) {
 function iconSrcForModel(model: ModelType) {
   const text = `${model.id} ${model.label} ${model.workflowPath ?? ""}`.toLowerCase();
   if (text.includes("openai") || text.includes("gpt")) return openAiIcon;
+  if (text.includes("flux")) return bflSymbolIcon;
   if (text.includes("kling")) return klingIcon;
   if (text.includes("seedance")) return seedanceIcon;
   if (text.includes("veo") || text.includes("gemini") || text.includes("nano")) return veo3Icon;

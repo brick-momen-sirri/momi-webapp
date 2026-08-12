@@ -1,4 +1,4 @@
-import { AlertCircle, FolderCheck } from "lucide-react";
+import { Eye } from "lucide-react";
 import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
 import { ArchVizGridControls } from "./ArchVizGridControls";
@@ -8,6 +8,7 @@ import { ImageUploader } from "./ImageUploader";
 import { ModelSelector } from "./ModelSelector";
 import { PromptBox } from "./PromptBox";
 import { ResolutionSelector } from "./ResolutionSelector";
+import { ResultDestinationControl } from "./ResultDestinationControl";
 import { SaveNumberControl } from "./SaveNumberControl";
 import { VideoUploader } from "./VideoUploader";
 
@@ -30,6 +31,7 @@ type LeftSettingsPanelProps = {
   video?: UploadedVideo;
   creditsRemaining: number;
   disabledReason?: string;
+  viewOnly?: boolean;
   isSubmitting: boolean;
   submissionPhase: SubmissionPhase;
   hasRecoverableSubmission: boolean;
@@ -68,6 +70,7 @@ export function LeftSettingsPanel({
   video,
   creditsRemaining,
   disabledReason,
+  viewOnly = false,
   isSubmitting,
   submissionPhase,
   hasRecoverableSubmission,
@@ -90,8 +93,6 @@ export function LeftSettingsPanel({
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
   const use16By9Cropping = !show16By9CropToggle || enable16By9Cropping;
   const promptImages = use16By9Cropping ? images : images.map((image) => (image ? { ...image, croppedUrl: undefined } : image));
-  const activeFolders = (selectedProject?.folders ?? []).filter((folder) => !folder.archived);
-  const targetFolder = activeFolders.find((folder) => folder.folderId === targetFolderId);
 
   return (
     <div className="space-y-3 pb-3">
@@ -109,79 +110,64 @@ export function LeftSettingsPanel({
         />
       ) : null}
       <DurationSelector selectedModel={selectedModel} value={selectedDurationSeconds} onChange={onDurationChange} />
-      <ImageUploader
-        images={images}
-        onChange={onImagesChange}
-        selectedResolution={selectedResolution}
-        requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
-        imageSlotCount={
-          selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)
-        }
-        requiresLandscape={Boolean(selectedModel.requiresLandscape)}
-        enable16By9Cropping={enable16By9Cropping}
-        show16By9CropToggle={show16By9CropToggle}
-        onEnable16By9CroppingChange={onEnable16By9CroppingChange}
-        textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
-      />
-      {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
-      {showArchVizGridControls ? (
-        <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
-      ) : (
-        <PromptBox value={prompt} onChange={onPromptChange} images={promptImages} selectedModel={selectedModel} />
-      )}
-
-      <SaveNumberControl selectedModel={selectedModel} value={saveNumber} onChange={onSaveNumberChange} />
-
-      {selectedProject ? (
-        <label className="block rounded-lg border border-line bg-white p-3 shadow-panel">
-          <span className="text-xs font-semibold uppercase tracking-wide text-stone-500">Save result to</span>
-          <select
-            value={targetFolderId}
-            onChange={(event) => onTargetFolderChange(event.target.value)}
-            className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-          >
-            <option value="">Root</option>
-            {activeFolders.map((folder) => (
-              <option key={folder.folderId} value={folder.folderId}>
-                {folder.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {viewOnly ? (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800"
+        >
+          <Eye className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            View-only access to {selectedProject?.name ?? "this project"}. Ask a project owner for editor access before preparing
+            a job here.
+          </span>
+        </p>
       ) : null}
+      {/* One disabled fieldset rather than a `disabled` prop threaded through every
+          control: the browser disables all descendant form controls, so a new input
+          added inside is covered without being remembered. ImageUploader still needs
+          its own flag for drop and paste, which are not form-control events. */}
+      <fieldset disabled={viewOnly} className="min-w-0 space-y-3 disabled:opacity-60">
+        <ImageUploader
+          images={images}
+          onChange={onImagesChange}
+          disabled={viewOnly}
+          selectedResolution={selectedResolution}
+          requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
+          imageSlotCount={
+            selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)
+          }
+          requiresLandscape={Boolean(selectedModel.requiresLandscape)}
+          enable16By9Cropping={enable16By9Cropping}
+          show16By9CropToggle={show16By9CropToggle}
+          onEnable16By9CroppingChange={onEnable16By9CroppingChange}
+          textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
+        />
+        {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
+        {showArchVizGridControls ? (
+          <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
+        ) : (
+          <PromptBox value={prompt} onChange={onPromptChange} images={promptImages} selectedModel={selectedModel} />
+        )}
 
-      <div
-        className={`rounded-lg border p-3 shadow-panel ${selectedProject ? "border-teal-100 bg-teal-50" : "border-amber-200 bg-amber-50"}`}
-      >
-        <div className="flex items-start gap-2">
-          {selectedProject ? (
-            <FolderCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
-          ) : (
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-800" />
-          )}
-          <div>
-            <p className={`text-xs font-semibold ${selectedProject ? "text-teal-800" : "text-amber-900"}`}>
-              {selectedProject
-                ? `Saving to ${selectedProject.shortName}_${selectedProject.name.replaceAll(" ", "_")}${targetFolder ? ` / ${targetFolder.name}` : ""}`
-                : "Please select a specific project before generating."}
-            </p>
-            <p className={`mt-1 text-xs leading-5 ${selectedProject ? "text-teal-700" : "text-amber-800"}`}>
-              Every result is stored with jobs, inputs, results, thumbnails, and metadata in the selected project folder.
-            </p>
-          </div>
-        </div>
-      </div>
+        <SaveNumberControl selectedModel={selectedModel} value={saveNumber} onChange={onSaveNumberChange} />
 
-      <GenerateButton
-        selectedModel={selectedModel}
-        creditsRemaining={creditsRemaining}
-        disabledReason={disabledReason}
-        isSubmitting={isSubmitting}
-        submissionPhase={submissionPhase}
-        hasRecoverableSubmission={hasRecoverableSubmission}
-        onGenerate={onGenerate}
-        onCancelSubmission={onCancelSubmission}
-      />
+        <ResultDestinationControl
+          selectedProject={selectedProject}
+          targetFolderId={targetFolderId}
+          onTargetFolderChange={onTargetFolderChange}
+        />
+
+        <GenerateButton
+          selectedModel={selectedModel}
+          creditsRemaining={creditsRemaining}
+          disabledReason={disabledReason}
+          isSubmitting={isSubmitting}
+          submissionPhase={submissionPhase}
+          hasRecoverableSubmission={hasRecoverableSubmission}
+          onGenerate={onGenerate}
+          onCancelSubmission={onCancelSubmission}
+        />
+      </fieldset>
     </div>
   );
 }

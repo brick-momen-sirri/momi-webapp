@@ -1,4 +1,4 @@
-import type { Project } from "../../types";
+import type { Project, ProjectRole } from "../../types";
 import { apiRequest } from "./client";
 import { mapProject } from "./mappers";
 
@@ -22,6 +22,27 @@ export async function updateBackendProject(project: Project) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(project),
   });
+  return mapProject(data.project);
+}
+
+// Membership is edited one member at a time rather than by PATCHing the whole
+// project. Sending the entire array meant two owners editing at once silently
+// overwrote each other, and it gave the UI no way to tell "the server accepted
+// this member" from "the server rejected the whole list".
+export async function addBackendProjectMember(projectId: string, userId: string, role: ProjectRole) {
+  const data = await apiRequest<{ project: Project }>(`/api/projects/${encodeURIComponent(projectId)}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, role }),
+  });
+  return mapProject(data.project);
+}
+
+export async function removeBackendProjectMember(projectId: string, userId: string) {
+  const data = await apiRequest<{ project: Project }>(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
   return mapProject(data.project);
 }
 

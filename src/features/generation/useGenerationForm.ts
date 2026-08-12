@@ -7,6 +7,7 @@ import { klingPromptOverflowCharacters } from "../../services/promptRules";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../../types";
 import { estimateModelCreditLabel, estimateModelCredits } from "../../utils/creditEstimator";
 import { useResetWhenChanged } from "../../utils/useResetWhenChanged";
+import { hasViewOnlyProjectAccess } from "../projects/projectAccess";
 import type { PersistedGenerationSettings } from "../preferences/appPreferences";
 import { writePersistedGenerationSettings } from "../preferences/appPreferences";
 import {
@@ -71,8 +72,10 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
   const selectedModelSupportsCropToggle = supports16By9CropToggle(selectedModel);
   const use16By9Cropping = !selectedModelSupportsCropToggle || enableImageToVideo16By9Cropping;
+  const viewOnlyProject = hasViewOnlyProjectAccess(account, selectedProject);
   const disabledReason = getDisabledReason({
     isDemoAccount: Boolean(account && isDemoAccount(account)),
+    hasViewOnlyProjectAccess: viewOnlyProject,
     insufficientCredits: creditsRemaining < selectedModel.cost,
     selectedProjectId,
     selectedProject,
@@ -166,6 +169,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     requiredImages,
     use16By9Cropping,
     disabledReason,
+    viewOnlyProject,
     allowSeedance4K,
     handleModelChange,
     handleResolutionChange,

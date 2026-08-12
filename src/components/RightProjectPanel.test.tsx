@@ -37,6 +37,8 @@ function renderPanel(overrides: Record<string, unknown> = {}) {
     onToggleProjectPin: vi.fn(),
     onCreateProject: vi.fn(),
     onUpdateProject: vi.fn(),
+    onAddProjectMember: vi.fn().mockResolvedValue(true),
+    onRemoveProjectMember: vi.fn().mockResolvedValue(true),
     onCreateProjectFolder: vi.fn(),
     onRenameProjectFolder: vi.fn(),
     onDeleteProjectFolder: vi.fn(),
@@ -204,16 +206,54 @@ describe("managing members", () => {
     expect(screen.queryByPlaceholderText(/search by name or email/i)).toBeNull();
   });
 
-  it("adds the chosen user as a viewer by default", async () => {
-    const onUpdateProject = vi.fn();
-    const { client } = await openMembers({ currentUserRole: "admin", onUpdateProject });
+  it("adds the chosen user as an editor by default, one member at a time", async () => {
+    const onAddProjectMember = vi.fn().mockResolvedValue(true);
+    const { client } = await openMembers({ currentUserRole: "admin", onAddProjectMember });
 
     await client.click(screen.getByRole("button", { name: /^add$/i }));
 
+    // Editor, not viewer: adding someone means letting them work in the project.
+    // A viewer default is what produced "I added them and they still cannot
+    // generate". And it goes through the per-member endpoint rather than a
+    // whole-project PATCH, so concurrent edits cannot overwrite each other.
+    expect(onAddProjectMember).toHaveBeenCalledWith("proj_1", "usr_momen", "editor");
+  });
+
+  it("reports the failure instead of claiming success when the server refuses", async () => {
+    const onAddProjectMember = vi.fn().mockResolvedValue(false);
+    const { client } = await openMembers({ currentUserRole: "admin", onAddProjectMember });
+
+    await client.click(screen.getByRole("button", { name: /^add$/i }));
+
+    // The old dialog printed "User added to project." before the request was even
+    // sent, which is how a rejected invite looked like a saved one.
+    expect(await screen.findByText(/nothing was changed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/added as editor/i)).toBeNull();
+  });
+
+  it("lets an admin who is not an owner change a member's role", async () => {
+    const onAddProjectMember = vi.fn().mockResolvedValue(true);
+    // The role dropdown used to be disabled unless the caller held an owner row,
+    // so an admin could add people but never fix the role they landed with.
+    const { client } = await openMembers({
+      currentUserRole: "admin",
+      onAddProjectMember,
+      projects: [project({ members: [{ userId: "usr_owner", role: "viewer" }] } as unknown as Partial<Project>)],
+    });
+
+    await client.selectOptions(screen.getByLabelText("Role for owner"), "editor");
+
+    expect(onAddProjectMember).toHaveBeenCalledWith("proj_1", "usr_owner", "editor");
+  });
+
+  it("lets an owner switch a project between workspace-wide and private", async () => {
+    const onUpdateProject = vi.fn();
+    const { client } = await openMembers({ currentUserRole: "admin", onUpdateProject });
+
+    await client.selectOptions(screen.getByLabelText("Project access"), "private");
+
     expect(onUpdateProject).toHaveBeenCalledTimes(1);
-    const updated = onUpdateProject.mock.calls[0][0] as Project;
-    // Least privilege: a newly added member gets read access, not write.
-    expect(updated.members).toEqual([expect.objectContaining({ userId: "usr_momen", role: "viewer" })]);
+    expect((onUpdateProject.mock.calls[0][0] as Project).visibility).toBe("private");
   });
 
   it("does not let a plain non-owner open the members dialog at all", async () => {
@@ -231,11 +271,11 @@ describe("managing members", () => {
   });
 
   it("says so when there is nobody left to add", async () => {
-    const onUpdateProject = vi.fn();
+    const onAddProjectMember = vi.fn().mockResolvedValue(true);
     // Every known user is already a member, so the picker has no candidates.
     const { client } = await openMembers({
       currentUserRole: "admin",
-      onUpdateProject,
+      onAddProjectMember,
       projects: [
         project({
           members: [
@@ -248,7 +288,7 @@ describe("managing members", () => {
 
     await client.click(screen.getByRole("button", { name: /^add$/i }));
 
-    expect(onUpdateProject).not.toHaveBeenCalled();
+    expect(onAddProjectMember).not.toHaveBeenCalled();
     expect(screen.getByText(/select a user to add/i)).toBeInTheDocument();
   });
 
@@ -257,9 +297,7 @@ describe("managing members", () => {
 
     await client.type(screen.getByPlaceholderText(/search by name or email/i), "owner");
 
-    // Two selects are present -- the candidate picker and the role picker. The
-    // candidate picker is the first, and it should be down to the one match.
-    const picker = screen.getAllByRole("combobox")[0];
+    const picker = screen.getByLabelText("User to add");
     expect(within(picker).getAllByRole("option")).toHaveLength(1);
     expect(within(picker).getByRole("option")).toHaveTextContent(/owner/i);
   });

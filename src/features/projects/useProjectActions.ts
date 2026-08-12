@@ -1,14 +1,16 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import {
+  addBackendProjectMember,
   createBackendProjectFolder,
   createBackendProject,
   deleteBackendProjectFolder,
+  removeBackendProjectMember,
   renameBackendProjectFolder,
   updateBackendProject,
   type AuthUser,
 } from "../../services/backendApi";
-import type { Project } from "../../types";
+import type { Project, ProjectRole } from "../../types";
 import { createClientId } from "../../utils/id";
 import { slugify } from "../workspace/workspaceUtils";
 
@@ -54,9 +56,51 @@ export function useProjectActions(options: ProjectActionsOptions) {
       const created = backendAvailable ? await createBackendProject(project) : project;
       setProjects((current) => [created, ...current]);
       setSelectedProjectId(created.id);
-      showToast("Project created.");
+      // Report what the server stored, not what was submitted: the create route
+      // used to drop the invite list, and a flat "Project created." was exactly
+      // what made that invisible.
+      const invited = created.members.filter((member) => member.userId !== created.ownerId).length;
+      const scope =
+        created.visibility === "private"
+          ? invited
+            ? `Private, ${invited} ${invited === 1 ? "person" : "people"} added.`
+            : "Private, only you so far."
+          : "Everyone in the workspace can generate in it.";
+      showToast(`Project created. ${scope}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not create project.", "error");
+    }
+  }
+
+  // Member edits go one at a time and return whether the server agreed, so the
+  // dialog can report the real outcome instead of an optimistic "added".
+  async function handleAddProjectMember(projectId: string, userId: string, role: ProjectRole) {
+    if (!backendAvailable) {
+      showToast("Backend unavailable, member not saved.", "error");
+      return false;
+    }
+    try {
+      const updated = await addBackendProjectMember(projectId, userId, role);
+      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not add project member.", "error");
+      return false;
+    }
+  }
+
+  async function handleRemoveProjectMember(projectId: string, userId: string) {
+    if (!backendAvailable) {
+      showToast("Backend unavailable, member not removed.", "error");
+      return false;
+    }
+    try {
+      const updated = await removeBackendProjectMember(projectId, userId);
+      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not remove project member.", "error");
+      return false;
     }
   }
 
@@ -65,8 +109,10 @@ export function useProjectActions(options: ProjectActionsOptions) {
       const updated = backendAvailable ? await updateBackendProject(project) : project;
       setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       showToast("Project saved.");
+      return true;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not update project.", "error");
+      return false;
     }
   }
 
@@ -198,6 +244,8 @@ export function useProjectActions(options: ProjectActionsOptions) {
   return {
     handleCreateProject,
     handleUpdateProject,
+    handleAddProjectMember,
+    handleRemoveProjectMember,
     handleCreateProjectFolder,
     handleRenameProjectFolder,
     handleDeleteProjectFolder,

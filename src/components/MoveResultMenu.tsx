@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Folder, FolderInput, FolderRoot, Loader2, Search, ShieldCheck, X } from "lucide-react";
+import { compareFolderNames } from "../features/projects/folderSort";
 import type { Job, Project, ProjectFolder } from "../types";
 
 type MoveResultMenuProps = {
@@ -193,7 +194,7 @@ function buildDestinations(project: Project | undefined, currentFolderId: string
         path: folderPathLabel(folder, folders),
         isRoot: false,
       }))
-      .sort((left, right) => left.path.localeCompare(right.path)),
+      .sort((left, right) => compareFolderNames(left.path, right.path)),
   );
   return destinations;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AccountPanel } from "./components/AccountPanel";
 import { ToastStack, WorkspaceLoadingScreen } from "./components/AppFeedback";
 import { AuthScreen } from "./components/AuthScreen";
@@ -9,8 +9,11 @@ import { DownloadImageChoiceModal } from "./components/DownloadImageChoiceModal"
 import { JobFeed } from "./components/JobFeed";
 import { Layout } from "./components/Layout";
 import { LeftSettingsPanel } from "./components/LeftSettingsPanel";
+import { MainSectionNavigation, type MainSection } from "./components/MainSectionNavigation";
 import { PodStatusIndicator } from "./components/PodStatusIndicator";
 import { RightProjectPanel } from "./components/RightProjectPanel";
+import { StillImagesSettingsPanel } from "./components/StillImagesSettingsPanel";
+import { StillImagesWorkspace } from "./components/StillImagesWorkspace";
 import type { Job } from "./types";
 import { useResetWhenChanged } from "./utils/useResetWhenChanged";
 import {
@@ -46,9 +49,15 @@ import { useNotifications } from "./features/notifications/useNotifications";
 import { useProjectActions, type ConfirmDialogState } from "./features/projects/useProjectActions";
 import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
 import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
+import { isStillImageJob } from "./features/still-images/jobSection";
+import { useStillImagesForm } from "./features/still-images/useStillImagesForm";
+import { useStillImagesSubmission } from "./features/still-images/useStillImagesSubmission";
+import { mergeJobs } from "./features/workspace/workspaceUtils";
 
 function App() {
   const [initialSettings] = useState(readPersistedGenerationSettings);
+  const [mainSection, setMainSection] = useState<MainSection>("animation");
+  const stillImagesForm = useStillImagesForm();
   const { toasts, showToast, dismissToast } = useNotifications();
   const { theme, toggleTheme: handleThemeToggle } = useTheme();
   const {
@@ -133,6 +142,7 @@ function App() {
     requiredImages,
     use16By9Cropping,
     disabledReason,
+    viewOnlyProject,
     allowSeedance4K,
     handleModelChange,
     handleResolutionChange,
@@ -153,6 +163,8 @@ function App() {
   const {
     handleCreateProject,
     handleUpdateProject,
+    handleAddProjectMember,
+    handleRemoveProjectMember,
     handleCreateProjectFolder,
     handleRenameProjectFolder,
     handleDeleteProjectFolder,
@@ -221,6 +233,38 @@ function App() {
     setBackendJobsOffset,
     showToast,
   });
+  const stillImagesSubmission = useStillImagesSubmission({
+    onJobCreated: (job) => {
+      setJobs((current) => mergeJobs([job], current));
+      setBackendJobsTotal((current) => current + 1);
+      setBackendJobsOffset((current) => current + 1);
+      showToast("Still image job queued.", "success");
+    },
+    onError: (message) => showToast(message, "error"),
+  });
+  const handleStillImagesGenerate = () => {
+    if (!selectedProjectId) return;
+    void stillImagesSubmission.submit({
+      projectId: selectedProjectId,
+      categoryId: stillImagesForm.selectedCategoryId,
+      categoryState: stillImagesForm.selectedState,
+      targetFolderId: stillImagesForm.targetFolderId,
+      saveNumber: stillImagesForm.saveNumber,
+    });
+  };
+  // The two workspaces list different jobs from the same loaded set. Without this
+  // split, still image jobs would also appear in the Animation feed -- they share
+  // the job store, and only workflowOptions.stillImage tells them apart.
+  const animationJobs = useMemo(() => jobs.filter((job) => !isStillImageJob(job)), [jobs]);
+  const stillImageJobs = useMemo(
+    () =>
+      jobs.filter(
+        (job) =>
+          isStillImageJob(job) &&
+          (!selectedProjectId || selectedProjectId === ALL_PROJECTS_ID || job.projectId === selectedProjectId),
+      ),
+    [jobs, selectedProjectId],
+  );
   const currentMonthUsage = account
     ? (monthlyUsageByUser[account.id] ?? getMonthlyUsageForUser(jobs, account.id))
     : { creditsSpent: 0, jobsCompleted: 0 };
@@ -234,6 +278,7 @@ function App() {
   useResetWhenChanged(selectedProjectId, () => {
     setSelectedFolderId("all");
     setTargetFolderId("");
+    stillImagesForm.setTargetFolderId("");
   });
 
   // Folders arrive from the backend and can be archived or deleted underneath a
@@ -244,15 +289,21 @@ function App() {
     .filter((folder) => !folder.archived)
     .map((folder) => folder.folderId)
     .join(",");
-  useResetWhenChanged(`${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}`, () => {
-    const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
-    if (targetFolderId && !folderIds.has(targetFolderId)) {
-      setTargetFolderId("");
-    }
-    if (selectedFolderId !== "all" && selectedFolderId !== "root" && !folderIds.has(selectedFolderId)) {
-      setSelectedFolderId("all");
-    }
-  });
+  useResetWhenChanged(
+    `${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}|${stillImagesForm.targetFolderId}`,
+    () => {
+      const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
+      if (targetFolderId && !folderIds.has(targetFolderId)) {
+        setTargetFolderId("");
+      }
+      if (selectedFolderId !== "all" && selectedFolderId !== "root" && !folderIds.has(selectedFolderId)) {
+        setSelectedFolderId("all");
+      }
+      if (stillImagesForm.targetFolderId && !folderIds.has(stillImagesForm.targetFolderId)) {
+        stillImagesForm.setTargetFolderId("");
+      }
+    },
+  );
 
   async function handleReuseJobSettings(job: Job) {
     if (!canReuseJobSettings(job, models)) {
@@ -358,72 +409,109 @@ function App() {
       ) : null}
       <Layout
         left={
-          <LeftSettingsPanel
-            models={models}
-            selectedModel={selectedModel}
-            selectedProject={selectedProject}
-            targetFolderId={targetFolderId}
-            selectedResolution={selectedResolution}
-            allowSeedance4K={allowSeedance4K}
-            selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
-            selectedDurationSeconds={selectedDurationSeconds}
-            prompt={prompt}
-            archVizGridOptions={archVizGridOptions}
-            saveNumber={saveNumber}
-            imageOutputCount={imageOutputCount}
-            enable16By9Cropping={enableImageToVideo16By9Cropping}
-            show16By9CropToggle={selectedModelSupportsCropToggle}
-            images={images}
-            video={video}
-            creditsRemaining={creditsRemaining}
-            disabledReason={disabledReason}
-            isSubmitting={isSubmitting}
-            submissionPhase={submissionPhase}
-            hasRecoverableSubmission={hasRecoverableSubmission}
-            onModelChange={handleModelChange}
-            onResolutionChange={handleResolutionChange}
-            onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
-            onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
-            onPromptChange={setPrompt}
-            onArchVizGridOptionsChange={setArchVizGridOptions}
-            onTargetFolderChange={setTargetFolderId}
-            onSaveNumberChange={(value) => setSaveNumber(value.replace(/\D/g, "").slice(0, 4))}
-            onImageOutputCountChange={setImageOutputCount}
-            onEnable16By9CroppingChange={setEnableImageToVideo16By9Cropping}
-            onImagesChange={setImages}
-            onVideoChange={setVideo}
-            onGenerate={handleGenerate}
-            onCancelSubmission={cancelSubmission}
-          />
+          <div className="space-y-3">
+            <MainSectionNavigation value={mainSection} onChange={setMainSection} />
+            {mainSection === "animation" ? (
+              <LeftSettingsPanel
+                models={models}
+                selectedModel={selectedModel}
+                selectedProject={selectedProject}
+                targetFolderId={targetFolderId}
+                selectedResolution={selectedResolution}
+                allowSeedance4K={allowSeedance4K}
+                selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
+                selectedDurationSeconds={selectedDurationSeconds}
+                prompt={prompt}
+                archVizGridOptions={archVizGridOptions}
+                saveNumber={saveNumber}
+                imageOutputCount={imageOutputCount}
+                enable16By9Cropping={enableImageToVideo16By9Cropping}
+                show16By9CropToggle={selectedModelSupportsCropToggle}
+                images={images}
+                video={video}
+                creditsRemaining={creditsRemaining}
+                disabledReason={disabledReason}
+                viewOnly={viewOnlyProject}
+                isSubmitting={isSubmitting}
+                submissionPhase={submissionPhase}
+                hasRecoverableSubmission={hasRecoverableSubmission}
+                onModelChange={handleModelChange}
+                onResolutionChange={handleResolutionChange}
+                onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
+                onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
+                onPromptChange={setPrompt}
+                onArchVizGridOptionsChange={setArchVizGridOptions}
+                onTargetFolderChange={setTargetFolderId}
+                onSaveNumberChange={(value) => setSaveNumber(value.replace(/\D/g, "").slice(0, 4))}
+                onImageOutputCountChange={setImageOutputCount}
+                onEnable16By9CroppingChange={setEnableImageToVideo16By9Cropping}
+                onImagesChange={setImages}
+                onVideoChange={setVideo}
+                onGenerate={handleGenerate}
+                onCancelSubmission={cancelSubmission}
+              />
+            ) : (
+              <StillImagesSettingsPanel
+                selectedCategoryId={stillImagesForm.selectedCategoryId}
+                category={stillImagesForm.selectedCategory}
+                state={stillImagesForm.selectedState}
+                selectedProject={selectedProject}
+                targetFolderId={stillImagesForm.targetFolderId}
+                saveNumber={stillImagesForm.saveNumber}
+                onCategoryChange={stillImagesForm.setSelectedCategoryId}
+                onImagesChange={stillImagesForm.setImages}
+                onPromptChange={stillImagesForm.setPrompt}
+                onSettingChange={stillImagesForm.setSetting}
+                onTargetFolderChange={stillImagesForm.setTargetFolderId}
+                onSaveNumberChange={stillImagesForm.setSaveNumber}
+                onGenerate={handleStillImagesGenerate}
+                submitting={stillImagesSubmission.submitting}
+                submitError={stillImagesSubmission.error}
+              />
+            )}
+          </div>
         }
         main={
-          <JobFeed
-            jobs={jobs}
-            projects={projects}
-            users={workspaceUsers}
-            currentUserId={account.id}
-            currentUserRole={account.role}
-            selectedProjectId={selectedProjectId}
-            selectedFolderId={selectedFolderId}
-            archiveView={showArchivedJobs}
-            favoriteJobIds={favoriteJobIds}
-            onDownload={handleDownloadJobResult}
-            onCopyImage={handleCopyJobImage}
-            onReuseSettings={handleReuseJobSettings}
-            onRetry={handleRetryJob}
-            canReuseSettings={(job) => canReuseJobSettings(job, models)}
-            onToggleFavorite={handleToggleFavorite}
-            onMove={handleMoveJobResult}
-            onArchive={handleArchiveJob}
-            onRestore={handleRestoreArchivedJob}
-            onDeletePermanently={handlePermanentlyDeleteJob}
-            onUpdateJobSaveNumber={handleUpdateJobSaveNumber}
-            onToggleArchiveView={handleToggleArchivedView}
-            totalJobs={backendAvailable ? backendJobsTotal : jobs.length}
-            hasMoreJobs={hasMoreBackendJobs}
-            isLoadingMoreJobs={isLoadingMoreJobs}
-            onLoadMoreJobs={handleLoadMoreJobs}
-          />
+          mainSection === "animation" ? (
+            <JobFeed
+              jobs={animationJobs}
+              projects={projects}
+              users={workspaceUsers}
+              currentUserId={account.id}
+              currentUserRole={account.role}
+              selectedProjectId={selectedProjectId}
+              selectedFolderId={selectedFolderId}
+              archiveView={showArchivedJobs}
+              favoriteJobIds={favoriteJobIds}
+              onDownload={handleDownloadJobResult}
+              onCopyImage={handleCopyJobImage}
+              onReuseSettings={handleReuseJobSettings}
+              onRetry={handleRetryJob}
+              canReuseSettings={(job) => canReuseJobSettings(job, models)}
+              onToggleFavorite={handleToggleFavorite}
+              onMove={handleMoveJobResult}
+              onArchive={handleArchiveJob}
+              onRestore={handleRestoreArchivedJob}
+              onDeletePermanently={handlePermanentlyDeleteJob}
+              onUpdateJobSaveNumber={handleUpdateJobSaveNumber}
+              onToggleArchiveView={handleToggleArchivedView}
+              totalJobs={backendAvailable ? backendJobsTotal : jobs.length}
+              hasMoreJobs={hasMoreBackendJobs}
+              isLoadingMoreJobs={isLoadingMoreJobs}
+              onLoadMoreJobs={handleLoadMoreJobs}
+            />
+          ) : (
+            <StillImagesWorkspace
+              category={stillImagesForm.selectedCategory}
+              state={stillImagesForm.selectedState}
+              selectedProject={selectedProject}
+              targetFolderId={stillImagesForm.targetFolderId}
+              saveNumber={stillImagesForm.saveNumber}
+              userName={account.name}
+              jobs={stillImageJobs}
+              users={workspaceUsers}
+            />
+          )
         }
         right={
           <div className="space-y-3">
@@ -463,6 +551,8 @@ function App() {
               onToggleProjectPin={handleToggleProjectPin}
               onCreateProject={handleCreateProject}
               onUpdateProject={handleUpdateProject}
+              onAddProjectMember={handleAddProjectMember}
+              onRemoveProjectMember={handleRemoveProjectMember}
               onCreateProjectFolder={handleCreateProjectFolder}
               onRenameProjectFolder={handleRenameProjectFolder}
               onDeleteProjectFolder={handleDeleteProjectFolder}
