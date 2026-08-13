@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 
 import type { BackendCreditDashboardGroup } from "../../services/backendApi";
 import { formatCredits, formatPercent, type DisplayAnomaly } from "../../features/credits/creditUsageDashboardUtils";
@@ -10,6 +10,36 @@ export function KpiCard({ label, value, sub }: { label: string; value: string; s
       <p className="mt-2 truncate text-xl font-bold text-ink">{value}</p>
       <p className="mt-1 truncate text-xs font-semibold text-stone-500">{sub}</p>
     </div>
+  );
+}
+
+/**
+ * Says out loud what the numbers above leave out.
+ *
+ * Still Images presets run on pods that report no usage, so they are excluded
+ * from every credit figure in this dialog -- but they still consume real
+ * provider balance. Without this the dashboard reads as a complete picture of
+ * spend when it is not, which is the kind of quiet under-reporting nobody
+ * catches until the bill does not match.
+ */
+export function UncostedRunsNote({ monthRuns, totalRuns }: { monthRuns: number; totalRuns: number }) {
+  if (totalRuns <= 0) return null;
+
+  return (
+    <section className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+      <div className="flex items-start gap-2">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-700" />
+        <p className="text-xs font-semibold leading-5 text-sky-900">
+          {monthRuns > 0
+            ? `${monthRuns} Still Images render${monthRuns === 1 ? "" : "s"} this month (${totalRuns} all time) are not counted above.`
+            : `${totalRuns} Still Images render${totalRuns === 1 ? "" : "s"} are not counted above.`}{" "}
+          <span className="font-medium text-sky-800">
+            Their pods return no usage figures, so there is no credit number to report -- but they do still draw on the
+            provider balance.
+          </span>
+        </p>
+      </div>
+    </section>
   );
 }
 

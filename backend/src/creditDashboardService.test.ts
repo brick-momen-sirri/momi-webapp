@@ -7,6 +7,7 @@ import {
   bucketStart,
   buildCreditBuckets,
   buildCreditPivot,
+  countUncostedRuns,
   creditDashboardGranularity,
   creditDashboardRange,
   dayKey,
@@ -483,4 +484,50 @@ test("buildCreditPivot folds everything past the top rows into one Other series"
     Math.round(breakdown.model.reduce((sum, row) => sum + row.percentage, 0)),
     100,
   );
+});
+
+// Still Images renders draw real provider balance but their pods report no
+// usage, so they are absent from every credit figure. The dashboard reports the
+// count so those numbers are not read as the whole story.
+
+test("countUncostedRuns counts only completed credit-exempt runs", () => {
+  const stillImage = { stillImage: { categoryId: "pro-upscaler", settings: {} } };
+  const monthStart = new Date("2026-08-01T00:00:00.000Z");
+  const monthEnd = new Date("2026-09-01T00:00:00.000Z");
+  const jobs = [
+    // In month, completed, exempt -- counts in both figures.
+    { workflowOptions: stillImage, status: "completed", completedAt: "2026-08-12T10:00:00.000Z" },
+    // Exempt and completed, but before the month -- all-time only.
+    { workflowOptions: stillImage, status: "completed", completedAt: "2026-07-30T10:00:00.000Z" },
+    // Exempt but never finished: nothing was spent worth reporting.
+    { workflowOptions: stillImage, status: "failed", completedAt: "2026-08-12T10:00:00.000Z" },
+    { workflowOptions: stillImage, status: "running", createdAt: "2026-08-12T10:00:00.000Z" },
+    // An animation job is costed normally and must not appear here.
+    { workflowOptions: { save: { shotNumber: "0007" } }, status: "completed", completedAt: "2026-08-12T10:00:00.000Z" },
+  ] as unknown as Parameters<typeof countUncostedRuns>[0];
+
+  assert.deepEqual(countUncostedRuns(jobs, monthStart, monthEnd), { uncostedRuns: 2, uncostedMonthRuns: 1 });
+});
+
+test("countUncostedRuns falls back through the job's timestamps", () => {
+  const stillImage = { stillImage: { categoryId: "qwen-edit", settings: {} } };
+  const monthStart = new Date("2026-08-01T00:00:00.000Z");
+  const monthEnd = new Date("2026-09-01T00:00:00.000Z");
+  // A completed job with no completedAt still happened; createdAt places it.
+  const jobs = [{ workflowOptions: stillImage, status: "completed", createdAt: "2026-08-05T10:00:00.000Z" }] as unknown as Parameters<
+    typeof countUncostedRuns
+  >[0];
+
+  assert.deepEqual(countUncostedRuns(jobs, monthStart, monthEnd), { uncostedRuns: 1, uncostedMonthRuns: 1 });
+});
+
+test("countUncostedRuns is zero when nothing is exempt", () => {
+  const jobs = [
+    { workflowOptions: { save: { shotNumber: "0007" } }, status: "completed", completedAt: "2026-08-12T10:00:00.000Z" },
+  ] as unknown as Parameters<typeof countUncostedRuns>[0];
+
+  assert.deepEqual(countUncostedRuns(jobs, new Date("2026-08-01T00:00:00.000Z"), new Date("2026-09-01T00:00:00.000Z")), {
+    uncostedRuns: 0,
+    uncostedMonthRuns: 0,
+  });
 });

@@ -227,6 +227,11 @@ export type BackendCreditDashboard = {
     burnRateCreditsPerDay: number;
     jobsWithUsage: number;
     totalJobs: number;
+    // Completed renders that consumed real provider balance but are absent from
+    // every figure above, because their pods report no usage. Optional so a web
+    // build that lands ahead of the API does not read undefined as a real zero.
+    uncostedRuns?: number;
+    uncostedMonthRuns?: number;
   };
   granularity: BackendCreditDashboardGranularity;
   byProject: BackendCreditDashboardGroup[];

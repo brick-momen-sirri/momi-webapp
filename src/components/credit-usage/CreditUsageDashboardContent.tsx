@@ -18,7 +18,7 @@ import {
   type SortKey,
 } from "../../features/credits/creditUsageDashboardUtils";
 import { CreditSpendPivot, type PivotCell } from "./CreditSpendPivot";
-import { AnomalyPanel, KpiCard, UserUsagePanel } from "./CreditUsageSummary";
+import { AnomalyPanel, KpiCard, UncostedRunsNote, UserUsagePanel } from "./CreditUsageSummary";
 import { NodeRowsTable, ProjectStatsTable, RecentJobsTable, SelectedRunBreakdown, WorkflowStatsTable } from "./CreditUsageTables";
 
 const chartGroups: Array<{ value: ChartGroupBy; label: string }> = [
@@ -95,6 +95,8 @@ export function CreditUsageDashboardContent({
     setSortDirection(nextKey === "project" || nextKey === "user" || nextKey === "workflow" ? "asc" : "desc");
   }
 
+  const uncostedMonthRuns = dashboard.summary.uncostedMonthRuns ?? 0;
+
   return (
     <div className="space-y-4">
       <div className="sticky top-0 z-20 -mx-4 border-b border-line bg-white/95 px-4 pb-3 pt-1 backdrop-blur">
@@ -107,7 +109,13 @@ export function CreditUsageDashboardContent({
           <KpiCard
             label="This month"
             value={`${formatCredits(dashboard.summary.monthCredits)} cr`}
-            sub={`${formatUsd(dashboard.summary.monthUsd)} cost`}
+            // Flagged on the tile itself, not only in the note below, so the
+            // number is never read in isolation as the whole month's activity.
+            sub={
+              uncostedMonthRuns > 0
+                ? `${formatUsd(dashboard.summary.monthUsd)} - ${uncostedMonthRuns} uncosted`
+                : `${formatUsd(dashboard.summary.monthUsd)} cost`
+            }
           />
           <KpiCard
             label="All time"
@@ -133,6 +141,8 @@ export function CreditUsageDashboardContent({
           />
         </div>
       </div>
+
+      <UncostedRunsNote monthRuns={uncostedMonthRuns} totalRuns={dashboard.summary.uncostedRuns ?? 0} />
 
       {visibleAnomalies.length ? <AnomalyPanel anomalies={visibleAnomalies} /> : null}
 

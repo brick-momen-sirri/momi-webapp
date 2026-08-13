@@ -3,7 +3,7 @@
 // ~330 lines of pure date/credit math wedged between route handlers, which made
 // both harder to read and left the math untested.
 
-import { creditsSpentForAccounting, isCountedCreditUsage } from "./creditUsageAccounting.js";
+import { creditsSpentForAccounting, isCountedCreditUsage, isCreditExemptJob } from "./creditUsageAccounting.js";
 import type { CreditTrackerProjectStats } from "./creditUsageService.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { currentMonthRange, getQueryValue } from "./httpQuery.js";
@@ -19,6 +19,29 @@ export function roundCredits(value: number) {
 
 export function creditsSpentForJob(job: Job) {
   return creditsSpentForAccounting(job);
+}
+
+/**
+ * Completed renders that drew real provider balance but appear in none of the
+ * credit figures, because their pods return no usage (see isCreditExemptJob).
+ *
+ * Reported as counts so the dashboard can say what its numbers leave out. Only
+ * completed runs count: a queued or failed one spent nothing worth reporting.
+ */
+export function countUncostedRuns(jobs: Job[], monthStart: Date, monthEnd: Date) {
+  let uncostedRuns = 0;
+  let uncostedMonthRuns = 0;
+
+  for (const job of jobs) {
+    if (!isCreditExemptJob(job) || job.status !== "completed") continue;
+    uncostedRuns += 1;
+    const timestamp = new Date(job.completedAt ?? job.startedAt ?? job.createdAt).getTime();
+    if (Number.isFinite(timestamp) && timestamp >= monthStart.getTime() && timestamp < monthEnd.getTime()) {
+      uncostedMonthRuns += 1;
+    }
+  }
+
+  return { uncostedRuns, uncostedMonthRuns };
 }
 
 export type CreditDashboardGroup = {

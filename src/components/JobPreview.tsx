@@ -25,6 +25,9 @@ export function JobPreview({ job }: JobPreviewProps) {
       previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
       name,
       downloadUrl: backendResultFileUrl(job.id, resultIndex),
+      // Un-downscaled, for the "View full resolution" button only. Nothing loads
+      // this unless the viewer asks for it.
+      originalUrl: url,
     });
   }
 

@@ -256,6 +256,8 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
               previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
               name,
               downloadUrl: backendResultFileUrl(job.id, 0),
+              // Un-downscaled, for the "View full resolution" button only.
+              originalUrl: url,
             })
           }
           className="flex items-center gap-1.5 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-bold text-ink shadow-card transition hover:border-accent hover:bg-cyan-50/50"

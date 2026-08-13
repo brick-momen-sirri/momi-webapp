@@ -16,6 +16,7 @@
     "start:web": "node dist/frontendServer.js",
     "test:gateway-smoke": "pnpm run build && node scripts/frontendGatewaySmoke.mjs",
     "test:topology": "pnpm run build && tsx src/topologyLoadTest.ts",
+    "warm:previews": "tsx src/warmResultPreviews.ts",
     "export:job-store": "tsx src/exportSqliteJobStore.ts",
     "export:app-state": "tsx src/exportSqliteAuthStore.ts",
     "test": "node scripts/runBackendTests.mjs",

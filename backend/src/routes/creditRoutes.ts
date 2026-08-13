@@ -14,6 +14,7 @@ import {
   addDays,
   addGroup,
   buildCreditPivot,
+  countUncostedRuns,
   creditAnomalies,
   creditDashboardGranularity,
   creditDashboardRange,
@@ -82,6 +83,10 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
     burnRateCreditsPerDay: 0,
     jobsWithUsage: 0,
     totalJobs: visibleJobs.length,
+    // What every figure above leaves out: renders that drew real provider
+    // balance but report no usage, so the dashboard can say so rather than
+    // quietly under-reporting.
+    ...countUncostedRuns(visibleJobs, monthStart, monthEnd),
   };
 
   for (const job of visibleJobs) {
