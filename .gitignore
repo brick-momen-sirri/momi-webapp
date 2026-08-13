@@ -6,6 +6,10 @@ node_modules/
 dist/
 backend/dist/
 .e2e-dist/
+# Snapshots of the two dist folders above, taken before each deploy and kept on
+# disk as rollback targets. No leading or interior slash, so this matches at any
+# depth and covers backend/ as well as the repo root.
+dist-prev-*/
 
 # Environment and local secrets
 .env
