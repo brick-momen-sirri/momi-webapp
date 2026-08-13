@@ -3,6 +3,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { ImageDownloadFormat } from "../../components/DownloadImageChoiceModal";
 import {
   archiveBackendJob,
+  backendResultFileUrl,
   moveBackendJobResult,
   permanentlyDeleteBackendJob,
   restoreBackendJob,
@@ -14,14 +15,7 @@ import { normalizeRequiredSaveNumber, workflowOptionsWithSaveNumber } from "../g
 import { readFavoriteJobIds, writeFavoriteJobIds } from "../preferences/appPreferences";
 import type { ConfirmDialogState } from "../projects/useProjectActions";
 import { matchesFolder, mergeJobs } from "../workspace/workspaceUtils";
-import {
-  clipboardCompatibleImageBlob,
-  convertImageBlobForDownload,
-  downloadBlob,
-  downloadNameForJob,
-  fetchResultBlob,
-  isImageResult,
-} from "./resultMedia";
+import { clipboardCompatibleImageBlob, downloadFromUrl, fetchResultBlob, isImageResult } from "./resultMedia";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
 
@@ -56,25 +50,24 @@ export function useJobActions(options: JobActionsOptions) {
     writeFavoriteJobIds(favoriteJobIds);
   }, [favoriteJobIds]);
 
-  async function handleDownloadJobResult(job: Job, resultIndex?: number, imageFormat?: ImageDownloadFormat) {
+  /**
+   * Downloads stream from the backend straight to disk. Nothing is buffered in
+   * the tab, so a 100+ MB still costs the page no memory at all, and with no
+   * `format` the user gets the generator's original bytes untouched.
+   */
+  function handleDownloadJobResult(job: Job, resultIndex?: number, imageFormat?: ImageDownloadFormat) {
     if (isImageResult(job) && imageFormat == null) {
       setDownloadChoiceJob(job);
       return;
     }
-    try {
-      const blob = await fetchResultBlob(job, resultIndex ?? 0);
-      const download = imageFormat ? await convertImageBlobForDownload(blob, imageFormat) : blob;
-      downloadBlob(download, downloadNameForJob(job, download, resultIndex));
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not download result.", "error");
-    }
+    downloadFromUrl(backendResultFileUrl(job.id, resultIndex ?? 0, imageFormat));
   }
 
   function handleDownloadChoice(index: number, format: ImageDownloadFormat) {
     if (!downloadChoiceJob) return;
     const job = downloadChoiceJob;
     setDownloadChoiceJob(null);
-    void handleDownloadJobResult(job, index, format);
+    handleDownloadJobResult(job, index, format);
   }
 
   async function handleCopyJobImage(job: Job) {

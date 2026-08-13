@@ -1,8 +1,10 @@
-import { AlertTriangle, ExternalLink, Loader2, Maximize2, PlayCircle, X } from "lucide-react";
-import { type DragEvent, useEffect, useRef, useState } from "react";
+import { AlertTriangle, ExternalLink, Loader2, Maximize2, PlayCircle } from "lucide-react";
+import { type DragEvent, useState } from "react";
 import type { Job } from "../types";
-import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
+import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
+import { useNearViewport } from "../features/jobs/useNearViewport";
 import { setResultImageDragData } from "../utils/resultDrag";
+import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
 import { ImageCompareSlider } from "./ImageCompareSlider";
 
 type JobPreviewProps = {
@@ -10,39 +12,21 @@ type JobPreviewProps = {
 };
 
 export function JobPreview({ job }: JobPreviewProps) {
-  // Whether the browser supports IntersectionObserver cannot change during a
-  // session, so it is an initial value rather than something to discover in an
-  // effect and then set state about. Without support there is no way to know when
-  // the card scrolls into view, so media loads immediately.
-  const [shouldLoadMedia, setShouldLoadMedia] = useState(() => !("IntersectionObserver" in window));
-  const [fullscreenImage, setFullscreenImage] = useState<{ url: string; name: string } | null>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewRef, shouldLoadMedia] = useNearViewport<HTMLDivElement>();
+  const [fullscreenImage, setFullscreenImage] = useState<FullscreenImage | null>(null);
 
-  useEffect(() => {
-    const node = previewRef.current;
-
-    if (!node) {
-      return;
-    }
-
-    // Handled by the initial state above.
-    if (!("IntersectionObserver" in window)) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldLoadMedia(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "600px 0px" },
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
+  /**
+   * The overlay shows a preview rendition; only the Download action reaches for
+   * the original. `resultIndex` maps to the backend's ?index=, so a two-image job
+   * downloads the image the user actually opened.
+   */
+  function openFullscreen(url: string, name: string, resultIndex: number) {
+    setFullscreenImage({
+      previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
+      name,
+      downloadUrl: backendResultFileUrl(job.id, resultIndex),
+    });
+  }
 
   if (job.status === "failed") {
     return (
@@ -126,7 +110,7 @@ export function JobPreview({ job }: JobPreviewProps) {
           afterImage={thumbnailMediaUrl(result, THUMBNAIL_WIDTH.preview)}
           onResultDragStart={(event) => handleResultDragStart(event, result, 0)}
         />
-        <FullscreenImageButton onClick={() => setFullscreenImage({ url: result, name: resultName })} />
+        <FullscreenImageButton onClick={() => openFullscreen(result, resultName, 0)} />
         {fullscreenImage ? <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} /> : null}
       </div>
     );
@@ -155,7 +139,7 @@ export function JobPreview({ job }: JobPreviewProps) {
                 <span className="absolute bottom-2 left-2 rounded-md bg-white/90 px-2 py-1 text-xs font-bold text-ink shadow-card">
                   {index + 1}
                 </span>
-                <FullscreenImageButton onClick={() => setFullscreenImage({ url, name })} />
+                <FullscreenImageButton onClick={() => openFullscreen(url, name, index)} />
               </div>
             );
           })}
@@ -231,7 +215,7 @@ export function JobPreview({ job }: JobPreviewProps) {
         </a>
       ) : null}
       {result && canFullscreenResultImage ? (
-        <FullscreenImageButton onClick={() => setFullscreenImage({ url: result, name: resultName })} />
+        <FullscreenImageButton onClick={() => openFullscreen(result, resultName, 0)} />
       ) : null}
       {fullscreenImage ? <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} /> : null}
     </div>
@@ -249,46 +233,6 @@ function FullscreenImageButton({ onClick }: { onClick: () => void }) {
     >
       <Maximize2 className="h-4 w-4" />
     </button>
-  );
-}
-
-function FullscreenImagePreview({ image, onClose }: { image: { url: string; name: string }; onClose: () => void }) {
-  useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[1200] flex items-center justify-center bg-stone-950/85 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Fullscreen image preview"
-      onClick={onClose}
-    >
-      <button
-        type="button"
-        onClick={onClose}
-        className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-md bg-white/90 text-ink shadow-card transition hover:bg-white"
-        title="Close fullscreen preview"
-        aria-label="Close fullscreen preview"
-      >
-        <X className="h-5 w-5" />
-      </button>
-      <img
-        src={image.url}
-        alt={image.name}
-        className="max-h-full max-w-full object-contain"
-        draggable={false}
-        onClick={(event) => event.stopPropagation()}
-      />
-    </div>
   );
 }
 

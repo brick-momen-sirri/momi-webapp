@@ -1,4 +1,3 @@
-import type { ImageDownloadFormat } from "../../components/DownloadImageChoiceModal";
 import { backendResultFileUrl, getStoredAuthToken } from "../../services/backendApi";
 import type { Job } from "../../types";
 
@@ -10,9 +9,24 @@ export function isImageResult(job: Job) {
   return job.outputType === "image" || (!job.outputType && !job.videoLength);
 }
 
-export function hasTwoImageDownloadChoices(job: Job) {
-  const resultCount = job.resultUrls?.length ?? 0;
-  return job.status === "completed" && isImageResult(job) && resultCount === 2;
+/**
+ * Hands a URL to the browser's download manager.
+ *
+ * Deliberately a bare anchor rather than fetch + Blob + createObjectURL. The
+ * backend answers the result routes with Content-Disposition: attachment, so the
+ * browser streams straight to disk; buffering it into a Blob first would put the
+ * whole file -- up to 100+ MB for a 10K still -- into this tab's memory for no
+ * benefit. The filename comes from the response header, which is why no `download`
+ * value is set here: the server already knows the result's real name.
+ */
+export function downloadFromUrl(url: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "";
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export async function fetchResultBlob(job: Job, resultIndex = 0) {
@@ -35,42 +49,6 @@ export async function fetchResultBlob(job: Job, resultIndex = 0) {
   throw lastError instanceof Error ? lastError : new Error("Could not read result file.");
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-export function downloadNameForJob(job: Job, blob: Blob, resultIndex = 0) {
-  const extension = extensionFromBlob(blob);
-  const baseName = `${job.modelType || "result"}-${job.id}`.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "");
-  const imageSuffix = hasTwoImageDownloadChoices(job) ? `_image-${resultIndex + 1}` : "";
-  return `${baseName}${imageSuffix}${extension}`;
-}
-
-function extensionFromBlob(blob: Blob) {
-  if (blob.type.includes("jpeg")) return ".jpg";
-  if (blob.type.includes("png")) return ".png";
-  if (blob.type.includes("webp")) return ".webp";
-  if (blob.type.includes("gif")) return ".gif";
-  if (blob.type.includes("mp4")) return ".mp4";
-  if (blob.type.includes("quicktime")) return ".mov";
-  if (blob.type.includes("webm")) return ".webm";
-  return ".bin";
-}
-
-export async function convertImageBlobForDownload(blob: Blob, format: ImageDownloadFormat) {
-  const mimeType = format === "png" ? "image/png" : "image/jpeg";
-  if (format === "png" && blob.type === mimeType) return blob;
-
-  return convertImageBlob(blob, mimeType, format === "jpg" ? 1 : undefined, format === "jpg");
-}
-
 export async function clipboardCompatibleImageBlob(blob: Blob) {
   const clipboardTypeSupported =
     typeof ClipboardItem.supports === "function" ? ClipboardItem.supports(blob.type) : blob.type === "image/png";
@@ -78,17 +56,17 @@ export async function clipboardCompatibleImageBlob(blob: Blob) {
   return convertImageBlobToPng(blob);
 }
 
+/**
+ * Canvas re-encode, for the clipboard only.
+ *
+ * This holds the image's full decoded bitmap in memory -- roughly width x height
+ * x 4 bytes, which is several hundred MB for a 10K still -- so it is reserved for
+ * the one path that genuinely needs the pixels inside the page. Download format
+ * conversion used to come through here too; it now happens on the backend, where
+ * libvips streams the work instead of materialising the whole bitmap.
+ */
 function convertImageBlobToPng(blob: Blob) {
-  return convertImageBlob(blob, "image/png", undefined, false, "Could not prepare image for clipboard.");
-}
-
-function convertImageBlob(
-  blob: Blob,
-  mimeType: "image/png" | "image/jpeg",
-  quality?: number,
-  fillWhite = false,
-  errorMessage = "Could not prepare image download.",
-) {
+  const errorMessage = "Could not prepare image for clipboard.";
   return new Promise<Blob>((resolve, reject) => {
     const image = new Image();
     const url = URL.createObjectURL(blob);
@@ -102,23 +80,15 @@ function convertImageBlob(
         reject(new Error(errorMessage));
         return;
       }
-      if (fillWhite) {
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
       context.drawImage(image, 0, 0);
-      canvas.toBlob(
-        (convertedBlob) => {
-          URL.revokeObjectURL(url);
-          if (!convertedBlob) {
-            reject(new Error(errorMessage));
-            return;
-          }
-          resolve(convertedBlob);
-        },
-        mimeType,
-        quality,
-      );
+      canvas.toBlob((convertedBlob) => {
+        URL.revokeObjectURL(url);
+        if (!convertedBlob) {
+          reject(new Error(errorMessage));
+          return;
+        }
+        resolve(convertedBlob);
+      }, "image/png");
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);

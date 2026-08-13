@@ -49,6 +49,18 @@ test("a query token cannot override a header or cookie session", () => {
   assert.equal(extractAuthToken(withCookie), "sess_real");
 });
 
+test("the media cookie is not accepted as a session", () => {
+  // momi_media carries the deliberately weak media token: minutes-long, accepted
+  // only on the media read paths, identity-only. Letting it satisfy session auth
+  // would promote it to a full-account credential and undo the entire reason the
+  // two are separate.
+  assert.equal(extractAuthToken(fakeRequest({ headers: { cookie: "momi_media=mt_abc123" } })), undefined);
+  assert.equal(
+    extractAuthToken(fakeRequest({ headers: { cookie: "momi_media=mt_abc123; momi_session=sess_real" } })),
+    "sess_real",
+  );
+});
+
 test("no credential at all yields undefined rather than an empty string", () => {
   assert.equal(extractAuthToken(fakeRequest({})), undefined);
   assert.equal(extractAuthToken(fakeRequest({ headers: { authorization: "" } })), undefined);

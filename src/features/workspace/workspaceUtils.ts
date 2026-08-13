@@ -1,8 +1,25 @@
 import type { AuthUser } from "../../services/backendApi";
 import type { Job, Project } from "../../types";
+import { isStillImageJob } from "../still-images/jobSection";
 
 export const JOB_PAGE_SIZE = 30;
 export const ALL_PROJECTS_ID = "all";
+
+/**
+ * What a job contributes to a credit total.
+ *
+ * Still Images presets contribute nothing: their pods report no usage, so the
+ * only figure they ever carried was a flat estimate, and counting an estimate as
+ * spend inflates the total with something nobody measured. Mirrors
+ * isCreditExemptJob on the backend.
+ *
+ * Checked here rather than trusting the absence of creditsUsed, because jobs
+ * that ran before the exemption still have a number persisted on them and would
+ * otherwise keep counting forever.
+ */
+function creditsCountedFor(job: Job) {
+  return isStillImageJob(job) ? 0 : (job.creditsUsed ?? 0);
+}
 
 export function getMonthlyUsageForUser(jobs: Job[], userId?: string) {
   if (!userId) return { creditsSpent: 0, jobsCompleted: 0 };
@@ -15,7 +32,7 @@ export function getMonthlyUsageForUser(jobs: Job[], userId?: string) {
       const timestamp = new Date(job.completedAt ?? job.createdAt).getTime();
       if (!Number.isFinite(timestamp) || timestamp < start || timestamp >= end) return stats;
       return {
-        creditsSpent: roundCredits(stats.creditsSpent + (job.creditsUsed ?? 0)),
+        creditsSpent: roundCredits(stats.creditsSpent + creditsCountedFor(job)),
         jobsCompleted: stats.jobsCompleted + 1,
       };
     },
@@ -51,7 +68,7 @@ function getMonthlyUsageForJobs(jobs: Job[]) {
       const timestamp = new Date(job.completedAt ?? job.createdAt).getTime();
       if (!Number.isFinite(timestamp) || timestamp < start || timestamp >= end) return stats;
       return {
-        creditsSpent: roundCredits(stats.creditsSpent + (job.creditsUsed ?? 0)),
+        creditsSpent: roundCredits(stats.creditsSpent + creditsCountedFor(job)),
         jobsCompleted: stats.jobsCompleted + 1,
       };
     },

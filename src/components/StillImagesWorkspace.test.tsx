@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
 import { createInitialStillImagesState, getStillImageCategory } from "../features/still-images/stillImageCategories";
@@ -80,6 +80,47 @@ describe("StillImagesWorkspace", () => {
     const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
     expect(result.src).toContain("out.png");
     expect(screen.getByAltText("Still image input 1")).toBeInTheDocument();
+  });
+
+  // Still image results are the largest media this app produces -- 4K to 10K PNGs
+  // that routinely pass 100 MB. This panel lists every result in a project, so
+  // rendering originals here means a project with 50 results pulls several GB and
+  // decodes each one to a several-hundred-MB bitmap. It used to do exactly that.
+  it("shows a downscaled rendition on the card, never the original", () => {
+    renderPanel([stillJob()]);
+
+    const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
+    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=480");
+    // Nothing on the card may point at the un-resized media route.
+    expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
+    // jsdom does not reflect these as IDL properties, so read the attributes.
+    expect(result.getAttribute("loading")).toBe("lazy");
+    expect(result.getAttribute("decoding")).toBe("async");
+  });
+
+  it("previews an input as a chip-sized rendition too", () => {
+    renderPanel([stillJob()]);
+    const input = screen.getByAltText("Still image input 1") as HTMLImageElement;
+    expect(input.getAttribute("src")).toBe("/api/media/thumbnail?path=in.png&w=240");
+  });
+
+  it("opens the preview at preview size, and downloads the original separately", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    renderPanel([stillJob()]);
+
+    // Download goes straight at the result-file route, which answers with
+    // Content-Disposition: attachment -- so the untouched original streams to
+    // disk without the page ever holding it.
+    const download = screen.getByRole("link", { name: /download original/i });
+    expect(download.getAttribute("href")).toBe("/api/jobs/job_still_1/result-file");
+    expect(download).toHaveAttribute("download");
+
+    await userEvent.click(screen.getByRole("button", { name: /open preview/i }));
+
+    const fullscreen = screen.getByRole("dialog", { name: /fullscreen image preview/i });
+    const preview = within(fullscreen).getByRole("img") as HTMLImageElement;
+    // Fullscreen is a bigger rendition, still not the original.
+    expect(preview.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=1440");
   });
 
   it("pluralizes the count", () => {

@@ -18,7 +18,16 @@ export async function uploadBackendMedia(
   return data.url;
 }
 
-export const THUMBNAIL_WIDTH = { chip: 240, grid: 480, preview: 960 } as const;
+/**
+ * Rendition widths the UI asks for. Every value must exist in the backend's
+ * THUMBNAIL_WIDTHS, or the request snaps up to the next allowed width and the
+ * rendition warmed at save time is not the one served.
+ *
+ * `fullscreen` is deliberately not the original: at screen size a 1440px WebP is
+ * indistinguishable from a 10K PNG, transfers ~300 KB instead of ~100 MB, and
+ * decodes to ~14 MB instead of ~420 MB.
+ */
+export const THUMBNAIL_WIDTH = { chip: 240, grid: 480, preview: 960, fullscreen: 1440 } as const;
 
 export function thumbnailMediaUrl(url: string, width: number): string;
 export function thumbnailMediaUrl(url: string | undefined, width: number): string | undefined;

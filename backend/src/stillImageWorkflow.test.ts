@@ -226,6 +226,23 @@ test("general enhancement randomizes all four seeds", async () => {
   );
 });
 
+test("reference generator randomizes its sampler seeds but not the captioner", async () => {
+  // The exported graph ships both pipeKSamplers on seed 77, so before this the
+  // same two inputs always produced the same image and re-rendering for a
+  // different take was a no-op.
+  const graph = await build("reference-generator", {}, ["BASE64A", "BASE64B"]);
+  assert.deepEqual(
+    [value(graph, "11", "seed"), value(graph, "12", "seed"), value(graph, "16", "seed"), value(graph, "139", "noise_seed")],
+    [1, 2, 3, 4],
+    "each seed comes from a fresh draw, so repeat runs differ",
+  );
+
+  // Node 53 is the AILab_QwenVL captioner. general-enhancement and qwen-edit
+  // both leave their equivalent fixed; varying it changes the description of the
+  // input rather than the render, which is not what a new seed means here.
+  assert.equal(value(graph, "53", "seed"), 78, "the captioner seed stays as exported");
+});
+
 test("hidden sliders leave the graph default rather than writing undefined", async () => {
   // generalDenoise is dropped by the normalizer when its branch is off. Writing
   // it anyway would put `undefined` into a live node input.

@@ -28,9 +28,21 @@ import { canAccessJob, canCreateJobInProject, canViewProject, getVisibleJobForRe
 import { getProject, getProjects } from "../projectService.js";
 import { safeSegment } from "../storageService.js";
 import { writeStreamAtomically } from "../streamingMediaService.js";
-import { getOrCreateThumbnail } from "../thumbnailService.js";
+import { getOrCreateThumbnail, streamConvertedImage, type DownloadImageFormat } from "../thumbnailService.js";
 
 export const mediaRouter = express.Router();
+
+function downloadFormat(value: unknown): DownloadImageFormat | undefined {
+  const requested = getQueryValue(value).trim().toLowerCase();
+  if (requested === "png") return "png";
+  if (requested === "jpg" || requested === "jpeg") return "jpg";
+  return undefined;
+}
+
+function matchesFormat(filePath: string, format: DownloadImageFormat) {
+  const extension = path.extname(filePath).toLowerCase();
+  return format === "png" ? extension === ".png" : extension === ".jpg" || extension === ".jpeg";
+}
 
 mediaRouter.post("/api/media/upload", async (req, res) => {
   try {
@@ -192,9 +204,12 @@ mediaRouter.get("/api/jobs/:jobId/result-file", async (req, res) => {
     const job = await getVisibleJobForResult(req.params.jobId, user);
     if (!job || !canAccessJob(user, job)) return res.status(404).json({ error: "Job not found" });
 
-    const index = Number(req.query.index ?? 0);
-    const resultUrl = job.resultUrls[Math.max(0, Number.isFinite(index) ? Math.floor(index) : 0)] ?? job.thumbnailUrls[0];
+    const rawIndex = Number(req.query.index ?? 0);
+    const index = Math.max(0, Number.isFinite(rawIndex) ? Math.floor(rawIndex) : 0);
+    const resultUrl = job.resultUrls[index] ?? job.thumbnailUrls[0];
     if (!resultUrl) return res.status(404).json({ error: "Result file not found" });
+
+    const requestedFormat = downloadFormat(req.query.format);
 
     const absoluteUrl = new URL(resultUrl, `http://127.0.0.1:${PORT}`);
     const localPath = mediaFilePathFromUrl(absoluteUrl);
@@ -204,12 +219,36 @@ mediaRouter.get("/api/jobs/:jobId/result-file", async (req, res) => {
         if (!safeLocalPath) throw new Error("Result file not found");
         await fs.access(safeLocalPath);
         const contentType = contentTypeFromFilePath(safeLocalPath);
+
+        // Only re-encode when the request actually asks for a different format.
+        // Matching formats stream the generator's bytes through untouched, which
+        // is the whole point of the download button.
+        if (requestedFormat && !matchesFormat(safeLocalPath, requestedFormat)) {
+          const extension = requestedFormat === "jpg" ? ".jpg" : ".png";
+          res.setHeader("Content-Type", requestedFormat === "jpg" ? "image/jpeg" : "image/png");
+          res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType, { index, extension }))}"`,
+          );
+          await streamConvertedImage(safeLocalPath, requestedFormat, res);
+          return;
+        }
+
         await streamLocalFile(req, res, safeLocalPath, {
           contentType,
-          disposition: `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
+          disposition: `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType, { index }))}"`,
         });
         return;
-      } catch {
+      } catch (error) {
+        // Nothing useful can be said once the body has started; closing the
+        // connection lets the client see a truncated download rather than a
+        // download with an error page appended to it.
+        if (res.headersSent) return res.destroy();
+        // A conversion that failed before writing anything has already set the
+        // attachment headers. Left in place, the browser would save the JSON
+        // error below as if it were the image the user asked for.
+        res.removeHeader("Content-Disposition");
+        console.warn(`Could not serve result file for ${job.id}:`, error instanceof Error ? error.message : String(error));
         return res.status(404).json({ error: "Result file not found" });
       }
     }

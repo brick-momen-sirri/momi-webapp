@@ -5,6 +5,7 @@ import {
   COMPANY_BALANCE_DELTA_SOURCE,
   creditAccountingSource,
   creditsSpentForAccounting,
+  isCreditExemptJob,
 } from "./creditUsageAccounting.js";
 
 test("company balance delta is preferred over tracker usage", () => {
@@ -74,4 +75,52 @@ test("balance deltas require matching sources and a lower after balance", () => 
     ),
     undefined,
   );
+});
+
+// Still Images presets run on pods that report no usage, so the only figure they
+// ever carried was a flat per-preset estimate. Counting an estimate as spend
+// inflates every total it reaches, so they are exempt and display "--".
+
+test("still image jobs count as zero however their credits were recorded", () => {
+  const stillImage = { stillImage: { categoryId: "reference-generator", settings: {} } };
+
+  // A tracked estimate, the usual shape for these.
+  assert.equal(
+    creditsSpentForAccounting({
+      workflowOptions: stillImage,
+      creditsUsed: 10,
+      creditUsage: { total_estimated_credits: 10, source: "credit_tracker:runtime_price" },
+    }),
+    0,
+  );
+
+  // Even a measured company-balance delta, which outranks everything else for a
+  // normal job, must not put a still image job back into the totals.
+  assert.equal(
+    creditsSpentForAccounting({
+      workflowOptions: stillImage,
+      creditsActual: 17,
+      creditsActualSource: COMPANY_BALANCE_DELTA_SOURCE,
+    }),
+    0,
+  );
+});
+
+test("animation jobs are unaffected by the still image exemption", () => {
+  assert.equal(
+    creditsSpentForAccounting({
+      workflowOptions: { save: { shotNumber: "0007" } },
+      creditsUsed: 32,
+      creditUsage: { total_estimated_credits: 32, source: "credit_tracker:runtime_price" },
+    }),
+    32,
+  );
+});
+
+test("isCreditExemptJob keys off the still image marker, not the model name", () => {
+  // Same marker jobSection uses, so the exemption and the workspace split can
+  // never disagree about what a still image job is.
+  assert.equal(isCreditExemptJob({ workflowOptions: { stillImage: { categoryId: "qwen-edit", settings: {} } } }), true);
+  assert.equal(isCreditExemptJob({ workflowOptions: { save: { cameraNumber: "0001" } } }), false);
+  assert.equal(isCreditExemptJob({}), false);
 });

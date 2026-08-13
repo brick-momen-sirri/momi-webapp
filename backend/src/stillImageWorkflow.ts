@@ -445,7 +445,10 @@ const REFERENCE = {
   mainImage: "42",
   referenceImage: "43",
   ipAdapter: "30",
+  pipeLoader: "11",
   baseSampler: "12",
+  upscaleSampler: "16",
+  fluxNoise: "139",
   controlNet: "20",
   saveImage: "153",
   colorMatched: "149",
@@ -455,6 +458,20 @@ const REFERENCE = {
 
 function applyReferenceGenerator(graph: StillImageGraph, input: ResolvedBuildInput) {
   const { settings } = input;
+
+  // Both samplers ship with seed 77 in the saved graph, so without this every
+  // run of a given input produced the identical image and re-rendering to get a
+  // different take did nothing. The loader's seed goes down the ttN pipe, so it
+  // is set alongside the samplers that consume it.
+  //
+  // The AILab_QwenVL captioner (node 53) is deliberately left fixed, matching
+  // general-enhancement and qwen-edit: randomising a sampler varies the render,
+  // randomising the captioner varies the prompt describing the input, which is
+  // a different thing and not what "new seed" is asking for.
+  set(graph, REFERENCE.pipeLoader, "seed", input.nextSeed());
+  set(graph, REFERENCE.baseSampler, "seed", input.nextSeed());
+  set(graph, REFERENCE.upscaleSampler, "seed", input.nextSeed());
+  set(graph, REFERENCE.fluxNoise, "noise_seed", input.nextSeed());
 
   setIfNumber(graph, settings, "colorStrength", REFERENCE.ipAdapter, "weight");
   setIfNumber(graph, settings, "creativity", REFERENCE.baseSampler, "denoise");

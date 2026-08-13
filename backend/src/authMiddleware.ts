@@ -1,6 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { getAuthenticatedUser, getUserById, isAdmin } from "./authService.js";
 import { isMediaTokenPath, verifyMediaAccessToken } from "./mediaAccessToken.js";
+import { MEDIA_COOKIE } from "./sessionCookie.js";
 import type { User } from "./types.js";
 
 export type AuthenticatedRequest = Request & {
@@ -32,7 +33,10 @@ export const resolveMediaAccessToken: RequestHandler = async (req, res, next) =>
     if (!isMediaTokenPath(req.path)) return next();
 
     const raw = req.query.access_token;
-    const token = typeof raw === "string" ? raw.trim() : "";
+    // The cookie is the normal carrier; the query parameter stays supported so
+    // URLs minted before the cookie existed, and any client that cannot rely on
+    // cookies, keep working.
+    const token = (typeof raw === "string" ? raw.trim() : "") || readCookie(req, MEDIA_COOKIE) || "";
     if (!token) return next();
 
     const verified = verifyMediaAccessToken(token);
@@ -101,16 +105,16 @@ export function extractAuthToken(req: Request) {
   const bearer = header.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if (bearer) return bearer;
 
+  return readCookie(req, "momi_session");
+}
+
+function readCookie(req: Request, name: string) {
   const cookieHeader = req.header("cookie") ?? "";
-  const cookies = cookieHeader.split(";").map((part) => part.trim());
-  for (const cookie of cookies) {
+  for (const cookie of cookieHeader.split(";")) {
     const separator = cookie.indexOf("=");
     if (separator < 0) continue;
-    const name = cookie.slice(0, separator).trim();
-    const value = cookie.slice(separator + 1).trim();
-    if (name === "momi_session") {
-      return decodeURIComponent(value);
-    }
+    if (cookie.slice(0, separator).trim() !== name) continue;
+    return decodeURIComponent(cookie.slice(separator + 1).trim());
   }
 
   return undefined;

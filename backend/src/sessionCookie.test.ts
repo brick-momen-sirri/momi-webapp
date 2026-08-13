@@ -2,17 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type express from "express";
 
-import { clearSessionCookie, setSessionCookie } from "./sessionCookie.js";
+import { clearSessionCookie, setMediaAccessCookie, setSessionCookie } from "./sessionCookie.js";
 
-// Small module, but every attribute on this cookie is a security decision. The
+// Small module, but every attribute on these cookies is a security decision. The
 // flags are asserted individually so that dropping one is a test failure rather
 // than a silent downgrade.
 
+// Collects appended cookies rather than replacing, mirroring express's own
+// append. A fake that only kept the last value would hide the exact bug this
+// module has to avoid: a response issuing both cookies dropping one of them.
 function fakeResponse() {
-  const headers = new Map<string, string>();
+  const cookies: string[] = [];
   return {
-    res: { setHeader: (name: string, value: string) => headers.set(name.toLowerCase(), value) } as unknown as express.Response,
-    cookie: () => headers.get("set-cookie") ?? "",
+    res: { append: (name: string, value: string) => cookies.push(`${name.toLowerCase()}:${value}`) } as unknown as express.Response,
+    cookie: (name = "momi_session") => cookies.find((value) => value.includes(`${name}=`))?.split(":").slice(1).join(":") ?? "",
+    count: () => cookies.length,
   };
 }
 
@@ -81,16 +85,50 @@ test("Secure is set only in production", () => {
   }
 });
 
-test("clearing the cookie expires it immediately and keeps the same attributes", () => {
-  const { res, cookie } = fakeResponse();
+test("clearing expires both cookies immediately, keeping the same attributes", () => {
+  const { res, cookie, count } = fakeResponse();
   clearSessionCookie(res);
-  const value = cookie();
 
-  assert.match(value, /^momi_session=;/);
-  assert.match(value, /Max-Age=0/);
+  const session = cookie("momi_session");
+  assert.match(session, /^momi_session=;/);
+  assert.match(session, /Max-Age=0/);
   // Attributes must match the set call, or the browser keeps the original cookie
   // alongside the cleared one and the user stays signed in.
-  assert.match(value, /HttpOnly/);
+  assert.match(session, /HttpOnly/);
+  assert.match(session, /SameSite=Lax/);
+  assert.match(session, /Path=\//);
+
+  // Leaving the media cookie behind would leave a usable media credential on a
+  // machine whose session has just been invalidated.
+  const media = cookie("momi_media");
+  assert.match(media, /^momi_media=;/);
+  assert.match(media, /Max-Age=0/);
+  assert.equal(count(), 2);
+});
+
+test("the media cookie is readable by scripts, unlike the session cookie", () => {
+  const { res, cookie } = fakeResponse();
+  setMediaAccessCookie(res, "mt_abc", inAnHour());
+  const value = cookie("momi_media");
+
+  assert.match(value, /^momi_media=mt_abc/);
   assert.match(value, /SameSite=Lax/);
   assert.match(value, /Path=\//);
+  // Deliberately not HttpOnly: the frontend has to confirm the cookie exists
+  // before it stops putting the token in media URLs, and guessing wrong would
+  // turn every image on the page into a 401. See setMediaAccessCookie.
+  assert.doesNotMatch(value, /HttpOnly/);
+});
+
+test("issuing both cookies on one response keeps both", () => {
+  const { res, cookie, count } = fakeResponse();
+  setSessionCookie(res, "sess_abc", inAnHour());
+  setMediaAccessCookie(res, "mt_abc", inAnHour());
+
+  // The login response sets both. Using setHeader for these would make the
+  // second call silently discard the first, signing the user out or breaking
+  // every image depending on the order.
+  assert.equal(count(), 2);
+  assert.match(cookie("momi_session"), /^momi_session=sess_abc/);
+  assert.match(cookie("momi_media"), /^momi_media=mt_abc/);
 });

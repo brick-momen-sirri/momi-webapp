@@ -14,8 +14,14 @@ process.env.THUMBNAIL_WIDTHS = "240,480";
 process.env.THUMBNAIL_PASSTHROUGH_MAX_BYTES = "1024";
 
 const sharp = (await import("sharp")).default;
-const { getOrCreateThumbnail, isThumbnailableSource, isVideoSource, normalizeThumbnailWidth, pruneThumbnailCache } =
-  await import("./thumbnailService.js");
+const {
+  getOrCreateThumbnail,
+  isThumbnailableSource,
+  isVideoSource,
+  normalizeThumbnailWidth,
+  pruneThumbnailCache,
+  warmThumbnails,
+} = await import("./thumbnailService.js");
 
 async function writeSourceImage(name: string, width: number, height: number) {
   const filePath = path.join(tempRoot, name);
@@ -226,6 +232,83 @@ test("prune evicts oldest renditions down to the budget", async () => {
   assert.ok((await sizeOf()) <= budget, "cache should end up within its budget");
 });
 
+// Warming exists so that browsing a project never decodes an original. If these
+// stop writing the exact keys the read path looks up, the warm still "succeeds"
+// and every first view silently pays for a 100 MB decode again.
+
+test("warming fills the cache the read path reads, without decoding again", async () => {
+  const source = await writeSourceImage("warm.png", 1200, 800);
+  const written = await warmThumbnails(source, [240, 480]);
+  assert.deepEqual(written.sort(), [240, 480]);
+
+  // The proof that the keys line up: a read now has to find these on disk rather
+  // than encoding its own. A mismatched key would leave the cache cold and this
+  // would still return a rendition, so compare the actual files.
+  for (const width of [240, 480]) {
+    const rendition = await getOrCreateThumbnail(source, width);
+    assert.equal(rendition.kind, "rendition");
+    if (rendition.kind !== "rendition") return;
+    const metadata = await sharp(rendition.filePath).metadata();
+    assert.equal(metadata.format, "webp");
+    assert.equal(metadata.width, width);
+  }
+});
+
+test("warming twice does no work the second time", async () => {
+  const source = await writeSourceImage("warm-idempotent.png", 700, 700);
+  assert.deepEqual((await warmThumbnails(source, [480])).sort(), [480]);
+  // Nothing left to write, so nothing is reported -- a second render pass over a
+  // project must not re-encode everything it already has.
+  assert.deepEqual(await warmThumbnails(source, [480]), []);
+});
+
+test("warming keeps transparency rather than flattening it", async () => {
+  // These results can be transparent, and a preview that silently gained a black
+  // or white background would misrepresent the render.
+  const filePath = path.join(tempRoot, "warm-alpha.png");
+  const pixels = Buffer.alloc(600 * 600 * 4);
+  for (let index = 0; index < pixels.length; index += 4) {
+    pixels[index] = (index * 7) % 256;
+    pixels[index + 1] = (index * 13) % 256;
+    pixels[index + 2] = (index * 29) % 256;
+    pixels[index + 3] = index % 512 === 0 ? 0 : 255;
+  }
+  await sharp(pixels, { raw: { width: 600, height: 600, channels: 4 } })
+    .png({ compressionLevel: 0 })
+    .toFile(filePath);
+
+  await warmThumbnails(filePath, [240]);
+  const rendition = await getOrCreateThumbnail(filePath, 240);
+  assert.equal(rendition.kind, "rendition");
+  if (rendition.kind !== "rendition") return;
+  assert.equal((await sharp(rendition.filePath).metadata()).hasAlpha, true);
+});
+
+test("warming an undecodable source reports nothing instead of throwing", async () => {
+  // A warm failure must never fail the render that produced the image: the read
+  // path falls back to serving the original.
+  const filePath = path.join(tempRoot, "warm-broken.png");
+  await fs.writeFile(filePath, Buffer.alloc(4096, 7));
+  assert.deepEqual(await warmThumbnails(filePath, [240]), []);
+});
+
+test("warming skips sources small enough to be served as they are", async () => {
+  // getOrCreateThumbnail streams these unchanged, so a rendition would be written
+  // and then never read.
+  const filePath = path.join(tempRoot, "warm-tiny.png");
+  await sharp(Buffer.alloc(8 * 8 * 3), { raw: { width: 8, height: 8, channels: 3 } })
+    .png()
+    .toFile(filePath);
+  assert.deepEqual(await warmThumbnails(filePath, [240]), []);
+});
+
+test("warming a video is left to the on-demand poster path", async () => {
+  assert.deepEqual(await warmThumbnails(path.join(tempRoot, "clip.mp4"), [240]), []);
+});
+
 test.after(async () => {
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  // Best effort. Windows reports EBUSY while a just-written rendition still has
+  // an open handle, and this is a temp directory the OS will reclaim anyway --
+  // failing or, worse, retrying the run to death over cleanup helps nobody.
+  await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
 });

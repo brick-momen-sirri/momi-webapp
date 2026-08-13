@@ -2,10 +2,27 @@ import type { CreditBalanceSnapshot, CreditUsageSummary, Job } from "./types.js"
 
 export const COMPANY_BALANCE_DELTA_SOURCE = "company_balance_delta";
 
+/**
+ * Still Images presets are excluded from credit accounting entirely.
+ *
+ * These four run on their own pods, which return no usage figures, so the only
+ * number ever available for them is the flat per-preset estimate in
+ * stillImageModels. Counting an estimate as spend inflates every total it lands
+ * in -- workspace, project, monthly dashboard -- with a figure nobody measured.
+ * They report "--" in the UI instead.
+ *
+ * This is the single gate for that: every total is derived from either this
+ * function or the job.creditsUsed it decides to leave in place.
+ */
+export function isCreditExemptJob(job: Pick<Job, "workflowOptions">) {
+  return Boolean(job.workflowOptions?.stillImage);
+}
+
 export function creditsSpentForAccounting(
-  job: Pick<Job, "source" | "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage">,
+  job: Pick<Job, "source" | "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage" | "workflowOptions">,
 ) {
   if (job.source === "existing_project_media") return 0;
+  if (isCreditExemptJob(job)) return 0;
 
   const actualCredits = positiveNumber(job.creditsActual);
   if (actualCredits != null) return roundCredits(actualCredits);

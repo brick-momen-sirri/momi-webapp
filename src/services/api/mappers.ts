@@ -1,3 +1,4 @@
+import { isStillImageJob } from "../../features/still-images/jobSection";
 import type { Job, MediaResolution, ModelType, Project } from "../../types";
 import { backendResultMediaUrl, resolveMediaUrl } from "./mediaAccess";
 import type { AuthUser, BackendJob, BackendWorkflowModel } from "./types";
@@ -150,6 +151,13 @@ function jobHasUnsavedRemoteMedia(job: BackendJob) {
 }
 
 function mappedCreditsUsed(job: BackendJob) {
+  // Still Images presets are exempt from credit accounting (isCreditExemptJob on
+  // the backend). Gated here, at the boundary, so no consumer has to remember:
+  // the backend stops writing creditsUsed for these, but creditUsage lingers on
+  // jobs that ran before the exemption and the branches below would happily
+  // resurrect a number from its estimate.
+  if (isStillImageJob(job)) return undefined;
+
   const actualCredits = nonNegativeNumber(job.creditsActual);
   if (actualCredits != null) return actualCredits;
   if (isCountedCreditUsage(job.creditUsage)) {

@@ -262,6 +262,19 @@ export type Job = {
   inputImages: string[];
   inputVideo?: string;
   resultUrls: string[];
+  /**
+   * Which remote object each result came from, aligned with resultUrls.
+   *
+   * Identity only: the signature is stripped, so these are NOT fetchable. That is
+   * deliberate. RunPod hands back a presigned S3 URL valid for 7 days, jobs are
+   * serialized to the browser wholesale, and a presigned URL is a bearer
+   * credential -- storing the signed form would hand every user a link that
+   * bypasses the project permission checks and can be forwarded to anyone.
+   *
+   * Kept so a result can still be traced back to, or re-signed from, its origin
+   * bucket. The durable way to read a result is resultUrls.
+   */
+  resultRemoteRefs?: string[];
   thumbnailUrls: string[];
   outputType: "image" | "video" | "sequence";
   projectFolderPath: string;

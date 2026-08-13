@@ -1,28 +1,26 @@
-// resultMedia decides which URL a result actually lives at, and what a downloaded
-// file is called. Both matter more than they look:
+// resultMedia decides which URL a result actually lives at, and how it reaches
+// the user's disk.
 //
 //   - fetchResultBlob tries the authenticated backend route first and only then the
 //     URL recorded on the job. Losing that order means an authenticated-only file
 //     appears broken; losing the fallback means older jobs stop downloading.
-//   - The filename carries the model and job id, and for two-image results the
-//     index. Artists file these into project folders by hand, so a collision
-//     between the two images of one job is a real loss of work.
+//   - downloadFromUrl must stay a bare anchor. The moment it goes back to
+//     fetch + Blob, a 100 MB still is buffered in the tab -- which is exactly what
+//     moving downloads to a streamed backend response was meant to stop. Naming
+//     and format conversion now live on the server; see httpMedia.test.ts.
 //
-// The canvas-backed format conversion is not covered here: it needs a real image
-// decoder and a 2D context, and jsdom fires neither onload nor onerror for a blob
-// URL. Only its passthrough branches are asserted.
+// The canvas re-encode is not covered here: it needs a real image decoder and a
+// 2D context, and jsdom fires neither onload nor onerror for a blob URL. Only its
+// passthrough branch is asserted.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job } from "../../types";
 import { backendResultFileUrl, getStoredAuthToken } from "../../services/backendApi";
 import {
   clipboardCompatibleImageBlob,
-  convertImageBlobForDownload,
-  downloadBlob,
-  downloadNameForJob,
+  downloadFromUrl,
   fetchResultBlob,
   getPrimaryResultUrl,
-  hasTwoImageDownloadChoices,
   isImageResult,
 } from "./resultMedia";
 
@@ -96,26 +94,6 @@ describe("isImageResult", () => {
 
   it("treats a recorded video length as proof it is not an image", () => {
     expect(isImageResult(job({ outputType: undefined, videoLength: "5s" }))).toBe(false);
-  });
-});
-
-describe("hasTwoImageDownloadChoices", () => {
-  it("is true only for a completed two-image result", () => {
-    expect(hasTwoImageDownloadChoices(job({ outputType: "image", resultUrls: ["a.png", "b.png"] }))).toBe(true);
-  });
-
-  it("is false for one or three results", () => {
-    expect(hasTwoImageDownloadChoices(job({ outputType: "image", resultUrls: ["a.png"] }))).toBe(false);
-    expect(hasTwoImageDownloadChoices(job({ outputType: "image", resultUrls: ["a.png", "b.png", "c.png"] }))).toBe(false);
-  });
-
-  it("is false while the job is unfinished", () => {
-    const running = job({ status: "running", outputType: "image", resultUrls: ["a.png", "b.png"] });
-    expect(hasTwoImageDownloadChoices(running)).toBe(false);
-  });
-
-  it("is false for a two-part video result", () => {
-    expect(hasTwoImageDownloadChoices(job({ outputType: "video", resultUrls: ["a.mp4", "b.mp4"] }))).toBe(false);
   });
 });
 
@@ -203,65 +181,11 @@ describe("fetchResultBlob", () => {
   });
 });
 
-describe("downloadNameForJob", () => {
-  it("names the file after the model and job", () => {
-    expect(downloadNameForJob(job({ modelType: "Veo 3" }), blob("image/png"))).toBe("Veo_3-job_1.png");
-  });
-
-  it("replaces characters that are illegal in a filename", () => {
-    const messy = job({ modelType: 'Kling v2.6 <"edit">', id: "job_2" });
-    const name = downloadNameForJob(messy, blob("image/png"));
-    expect(name).not.toMatch(/[<>"]/);
-    // The sanitizer runs on the whole "model-id" template and only trims
-    // underscores from the very ends, so a model name ending in an illegal
-    // character leaves an "_" sitting next to the id separator. Cosmetic, and
-    // pinned here so it is a deliberate choice rather than a surprise.
-    expect(name).toBe("Kling_v2.6_edit_-job_2.png");
-  });
-
-  it("falls back to a generic base when the model is unknown", () => {
-    expect(downloadNameForJob(job({ modelType: "" }), blob("image/png"))).toBe("result-job_1.png");
-  });
-
-  it("derives the extension from the blob's type", () => {
-    const cases: Array<[string, string]> = [
-      ["image/jpeg", ".jpg"],
-      ["image/png", ".png"],
-      ["image/webp", ".webp"],
-      ["image/gif", ".gif"],
-      ["video/mp4", ".mp4"],
-      ["video/quicktime", ".mov"],
-      ["video/webm", ".webm"],
-    ];
-    for (const [type, extension] of cases) {
-      expect(downloadNameForJob(job(), blob(type))).toMatch(new RegExp(`\\${extension}$`));
-    }
-  });
-
-  it("uses .bin for a type it does not recognise rather than no extension", () => {
-    expect(downloadNameForJob(job(), blob("application/octet-stream"))).toMatch(/\.bin$/);
-  });
-
-  it("distinguishes the two images of a two-image result", () => {
-    const two = job({ outputType: "image", resultUrls: ["a.png", "b.png"] });
-    expect(downloadNameForJob(two, blob("image/png"), 0)).toContain("_image-1");
-    expect(downloadNameForJob(two, blob("image/png"), 1)).toContain("_image-2");
-    expect(downloadNameForJob(two, blob("image/png"), 0)).not.toBe(downloadNameForJob(two, blob("image/png"), 1));
-  });
-
-  it("adds no index suffix for a single result", () => {
-    expect(downloadNameForJob(job({ outputType: "image", resultUrls: ["a.png"] }), blob("image/png"))).not.toContain("_image-");
-  });
-});
-
-describe("downloadBlob", () => {
+describe("downloadFromUrl", () => {
   it("clicks a temporary link and cleans it up", () => {
-    const createObjectURL = vi.fn(() => "blob:download");
-    const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
-    downloadBlob(blob("image/png"), "shot.png");
+    downloadFromUrl("/api/jobs/job_1/result-file");
 
     expect(click).toHaveBeenCalledTimes(1);
     // The anchor must not survive in the document, or repeated downloads pile up.
@@ -269,29 +193,44 @@ describe("downloadBlob", () => {
     click.mockRestore();
   });
 
-  it("revokes the object URL on a timer rather than leaking it", () => {
-    vi.useFakeTimers();
-    const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:download", revokeObjectURL });
+  it("never reads the response into memory", async () => {
+    // The whole point of the anchor: a 10K still is over 100 MB, and buffering it
+    // into a Blob to hand to createObjectURL is what used to make downloading one
+    // a memory event in the tab.
+    const fetchMock = vi.fn();
+    const createObjectURL = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { ...URL, createObjectURL });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
-    downloadBlob(blob("image/png"), "shot.png");
-    expect(revokeObjectURL).not.toHaveBeenCalled();
+    downloadFromUrl("/api/jobs/job_1/result-file");
 
-    vi.advanceTimersByTime(1000);
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:download");
-
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
     click.mockRestore();
-    vi.useRealTimers();
+  });
+
+  it("leaves the filename to the response's Content-Disposition", () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const appended: string[] = [];
+    const realAppend = document.body.appendChild.bind(document.body);
+    vi.spyOn(document.body, "appendChild").mockImplementation((node: Node) => {
+      if (node instanceof HTMLAnchorElement) appended.push(node.getAttribute("download") ?? "<absent>");
+      return realAppend(node);
+    });
+
+    downloadFromUrl("/api/jobs/job_1/result-file");
+
+    // An empty download attribute asks for a download without naming it, so the
+    // server's Content-Disposition wins. A non-empty value here would override
+    // the real result filename with a guess.
+    expect(appended).toEqual([""]);
+    click.mockRestore();
+    vi.restoreAllMocks();
   });
 });
 
 describe("format passthroughs", () => {
-  it("returns a PNG unchanged when PNG was requested", async () => {
-    const png = blob("image/png");
-    await expect(convertImageBlobForDownload(png, "png")).resolves.toBe(png);
-  });
-
   it("returns the blob unchanged when the clipboard already supports its type", async () => {
     vi.stubGlobal("ClipboardItem", { supports: () => true });
     const webp = blob("image/webp");

@@ -21,9 +21,18 @@ const {
   uploadedMediaFileName,
   safeHeaderFileName,
   contentTypeFromFilePath,
+  downloadFileName,
   formatBytes,
   parseByteRange,
 } = await import("./httpMedia.js");
+
+type NamedJob = Parameters<typeof downloadFileName>[0];
+
+function downloadJob(overrides: Partial<NamedJob> = {}) {
+  return { id: "job_1", modelName: "Veo 3", resultUrls: ["a.png"], ...overrides } as NamedJob;
+}
+
+const resultUrl = new URL("http://127.0.0.1/api/media?path=C%3A%5Cout%5Cshot.png");
 
 const projectsRoot = path.join(base, "projects");
 const comfyOutput = path.join(base, "comfy", "output");
@@ -155,4 +164,48 @@ test("parseByteRange distinguishes 'not a range request' from 'cannot be satisfi
 
 test("parseByteRange clamps an end past EOF instead of failing", () => {
   assert.deepEqual(parseByteRange("bytes=0-99999", 1000), { start: 0, end: 999 });
+});
+
+// Download naming used to happen in the browser, from the blob's MIME type. It
+// moved here when downloads became a streamed response, so these cases moved
+// with it. Artists file results into project folders by hand, so a collision
+// between the two images of one job is a real loss of work.
+
+test("downloadFileName names the file after the model and job", () => {
+  assert.equal(downloadFileName(downloadJob(), resultUrl, "image/png"), "Veo_3-job_1.png");
+});
+
+test("downloadFileName replaces characters that are illegal in a filename", () => {
+  const name = downloadFileName(downloadJob({ modelName: 'Kling v2.6 <"edit">', id: "job_2" }), resultUrl, "image/png");
+  assert.doesNotMatch(name, /[<>"]/);
+  // The sanitizer runs on the whole "model-id" template and only trims
+  // underscores from the very ends, so a model name ending in an illegal
+  // character leaves an "_" sitting next to the id separator. Cosmetic, and
+  // pinned here so it is a deliberate choice rather than a surprise.
+  assert.equal(name, "Kling_v2.6_edit_-job_2.png");
+});
+
+test("downloadFileName falls back to a generic base when the model is unknown", () => {
+  assert.equal(downloadFileName(downloadJob({ modelName: "" }), resultUrl, "image/png"), "result-job_1.png");
+});
+
+test("downloadFileName distinguishes the images of a multi-image result", () => {
+  const job = downloadJob({ resultUrls: ["a.png", "b.png"] });
+  assert.equal(downloadFileName(job, resultUrl, "image/png", { index: 0 }), "Veo_3-job_1_image-1.png");
+  assert.equal(downloadFileName(job, resultUrl, "image/png", { index: 1 }), "Veo_3-job_1_image-2.png");
+});
+
+test("downloadFileName adds no index suffix when there is only one result", () => {
+  assert.equal(downloadFileName(downloadJob(), resultUrl, "image/png", { index: 0 }), "Veo_3-job_1.png");
+});
+
+test("downloadFileName lets an explicit extension override the source's", () => {
+  // A converted download is no longer a PNG, and a name that still claimed .png
+  // would produce a file the OS opens with the wrong application.
+  assert.equal(downloadFileName(downloadJob(), resultUrl, "image/png", { extension: ".jpg" }), "Veo_3-job_1.jpg");
+});
+
+test("downloadFileName falls back to the content type when the URL carries no extension", () => {
+  const bare = new URL("http://127.0.0.1/api/jobs/job_1/result-media");
+  assert.equal(downloadFileName(downloadJob(), bare, "video/mp4"), "Veo_3-job_1.mp4");
 });

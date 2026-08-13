@@ -246,6 +246,18 @@ export const thumbnailWidths = (
     : [240, 480, 960, 1440]
 ).sort((left, right) => left - right);
 export const thumbnailQuality = boundedNumber(process.env.THUMBNAIL_QUALITY, 72, 20, 95);
+// Widths generated once, at save time, so the first person to open a project does
+// not pay for decoding a 100 MB PNG. These are exactly the widths the UI asks for
+// (grid cards, inline preview, fullscreen); anything else still generates on
+// demand. Values outside THUMBNAIL_WIDTHS snap to an allowed width, which would
+// warm a key nobody reads, so keep the two lists in step.
+export const resultPreviewWidths = (
+  process.env.RESULT_PREVIEW_WIDTHS?.trim()
+    ? process.env.RESULT_PREVIEW_WIDTHS.split(",")
+        .map((value) => Math.floor(Number(value.trim())))
+        .filter((value) => Number.isFinite(value) && value >= 32 && value <= 4096)
+    : [480, 960, 1440]
+).sort((left, right) => left - right);
 // Sharp is multithreaded internally, so keep per-process concurrency modest;
 // three backend processes share the box with nothing else CPU-bound.
 export const thumbnailMaxConcurrency = Math.max(1, Math.floor(positiveNumber(process.env.THUMBNAIL_MAX_CONCURRENCY, 4)));

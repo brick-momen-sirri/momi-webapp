@@ -173,11 +173,21 @@ export function formatBytes(value: number) {
   return `${mib >= 1 ? mib.toFixed(1) : (value / 1024).toFixed(1)} ${mib >= 1 ? "MiB" : "KiB"}`;
 }
 
-export function downloadFileName(job: Job, url: URL, contentType: string) {
+export function downloadFileName(
+  job: Job,
+  url: URL,
+  contentType: string,
+  options: { index?: number; extension?: string } = {},
+) {
   const urlFileName = url.searchParams.get("filename") || path.basename(url.searchParams.get("path") || url.pathname);
-  const extension = path.extname(urlFileName) || extensionFromContentType(contentType);
+  // An explicit extension wins: a converted download is no longer the source's
+  // format, so its name must not claim to be.
+  const extension = options.extension || path.extname(urlFileName) || extensionFromContentType(contentType);
   const baseName = `${job.modelName || "result"}-${job.id}`.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "");
-  return `${baseName}${extension}`;
+  // Only disambiguate when there is something to disambiguate between. This
+  // mirrors the naming the browser used to apply before downloads moved here.
+  const suffix = options.index != null && (job.resultUrls?.length ?? 0) > 1 ? `_image-${options.index + 1}` : "";
+  return `${baseName}${suffix}${extension}`;
 }
 
 export function mediaFilePathFromUrl(url: URL) {

@@ -41,9 +41,16 @@ test("serverless video output under images is mirrored into Brick video folders 
   assert.match(savedPath, /videos[\\/]SHOT_0007[\\/]\d{8}_kling-v3-video_1234_SHOT_0007_v001\.mp4$/);
   assert.equal(await fs.readFile(savedPath, "utf8"), "video-bytes");
 
-  const jobCopy = result.selectedArtifacts[0]?.jobFilePath;
-  assert.ok(jobCopy);
-  assert.equal(await fs.readFile(jobCopy, "utf8"), "video-bytes");
+  // Exactly one copy of the original on disk. There used to be a second, in the
+  // per-job output folder, which nothing ever read -- pure duplication of files
+  // that reach 100+ MB each.
+  const copies = (await recursiveFiles(projectFolder)).filter((filePath) => filePath.endsWith(".mp4"));
+  assert.deepEqual(copies, [savedPath]);
+
+  // The origin is recorded by identity only. RunPod hands back a presigned URL,
+  // and jobs are serialized to the browser wholesale, so storing the signature
+  // would ship a 7-day bearer credential that bypasses project permissions.
+  assert.deepEqual(result.resultRemoteRefs, ["https://cdn.example/ComfyUI_00001_.mp4"]);
 
   const manifestPath = path.join(projectFolder, "metadata", "manifest.jsonl");
   const records = (await fs.readFile(manifestPath, "utf8"))
@@ -60,6 +67,45 @@ test("serverless video output under images is mirrored into Brick video folders 
 
   const versions = JSON.parse(await fs.readFile(path.join(projectFolder, "metadata", "latest_versions.json"), "utf8"));
   assert.equal(versions["video|1234_TestOffice_TestProject|kling-v3-video|SHOT_0007"], 1);
+});
+
+test("a presigned result URL is recorded by identity, never with its signature", async () => {
+  // The real shape RunPod returns: its own S3 bucket, signed for 7 days. Jobs are
+  // serialized to the browser wholesale, and a presigned URL is a bearer
+  // credential -- storing the signed form would hand every user a link that
+  // bypasses the project permission checks, works for a week, and can be
+  // forwarded to anyone.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "momi-serverless-presigned-"));
+  const projectFolder = path.join(root, "1234_TestOffice_TestProject");
+  const project = makeProject(projectFolder);
+  const model = makeModel();
+  const job = makeJob(project, model);
+  const media: RunpodMediaResult[] = [
+    {
+      url: "https://momi-ai.s3.eu-north-1.amazonaws.com/08-26/sync-0eacbf29/52dd60c5.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=604800&X-Amz-Signature=deadbeef",
+      filename: "52dd60c5.mp4",
+      source: "images",
+      type: "s3_url",
+      isVideo: true,
+    },
+  ];
+
+  const result = await persistServerlessArtifacts({
+    project,
+    job,
+    model,
+    media,
+    selectedMedia: media,
+    fetchImpl: (async () =>
+      new Response(Buffer.from("video-bytes"), { headers: { "content-type": "video/mp4" } })) as typeof fetch,
+  });
+
+  assert.deepEqual(result.resultRemoteRefs, [
+    "https://momi-ai.s3.eu-north-1.amazonaws.com/08-26/sync-0eacbf29/52dd60c5.mp4",
+  ]);
+  const stored = result.resultRemoteRefs[0];
+  assert.ok(!stored.includes("X-Amz-Signature"), "the signature must not be stored");
+  assert.ok(!stored.includes("X-Amz-Expires"), "no part of the presigning may be stored");
 });
 
 test("dispatcher failover reserves unique versions while an older write is paused", async () => {

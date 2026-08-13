@@ -7,6 +7,7 @@ import {
   COMPANY_BALANCE_DELTA_SOURCE,
   creditsSpentForAccounting,
   isCountedCreditUsage,
+  isCreditExemptJob,
 } from "../creditUsageAccounting.js";
 import { logMemory } from "../memoryLogger.js";
 import { projectFolderName } from "../projectFolderName.js";
@@ -160,11 +161,16 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     });
     logMemory("after-runpod-download", job.id);
     job.resultUrls = artifacts.resultUrls;
+    job.resultRemoteRefs = artifacts.resultRemoteRefs;
     job.thumbnailUrls = artifacts.thumbnailUrls;
     job.fileName = artifacts.selectedArtifacts[0]?.fileName ?? selectedMedia[0]?.filename;
     job.outputResolution = artifacts.outputResolution;
 
-    if (isCountedCreditUsage(creditUsage)) {
+    // Credit-exempt presets are not pushed to the Credit Tracker either. That
+    // sync is what actually books the spend outside this app, so counting them
+    // nowhere in here while still filing a row there would put the two systems
+    // permanently out of step.
+    if (isCountedCreditUsage(creditUsage) && !isCreditExemptJob(job)) {
       const syncResult = await syncServerlessCreditUsage({
         project: outputProject,
         job,

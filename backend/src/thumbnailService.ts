@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import sharp from "sharp";
 import {
   ffmpegPath,
+  resultPreviewWidths,
   thumbnailBufferRetryMaxBytes,
   thumbnailCacheDir,
   thumbnailCacheMaxBytes,
@@ -140,6 +141,147 @@ export async function getOrCreateThumbnail(sourcePath: string, requestedWidth: n
 
   inFlight.set(cacheKey, generation);
   return generation;
+}
+
+export type DownloadImageFormat = "png" | "jpg";
+
+/**
+ * Streams `sourcePath` re-encoded to `format` into `destination`.
+ *
+ * Format conversion for downloads used to happen in the browser, on a canvas.
+ * That cannot work for the sizes this app produces: a canvas holds the entire
+ * decoded bitmap, which is over 400 MB for a 10K still, on top of the blob it was
+ * decoded from. libvips streams the same pipeline instead, so peak memory is a
+ * few working tiles rather than the whole image.
+ *
+ * Callers must only reach this when the requested format actually differs from
+ * the source; an untouched original should be streamed byte for byte.
+ */
+export async function streamConvertedImage(
+  sourcePath: string,
+  format: DownloadImageFormat,
+  destination: NodeJS.WritableStream,
+) {
+  return withEncodeSlot(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const decoded = sharp(sourcePath, { limitInputPixels: false }).rotate();
+        const encoder =
+          format === "jpg"
+            ? // JPEG has no alpha, so transparency has to become something.
+              // White matches what the download dialog promises.
+              decoded.flatten({ background: "#ffffff" }).jpeg({ quality: 100, chromaSubsampling: "4:4:4" })
+            : decoded.png();
+
+        encoder.on("error", reject);
+        destination.on("error", reject);
+        // "close" as well as "finish": a client that aborts mid-download fires
+        // only the former, and without it the encode slot would never be
+        // released. Resolving twice is a no-op.
+        destination.on("close", () => resolve());
+        encoder.pipe(destination).on("finish", () => resolve());
+      }),
+  );
+}
+
+/**
+ * Generates the standard preview renditions for a freshly saved source, so the
+ * first person to open the project does not pay to decode the original.
+ *
+ * Decodes the source ONCE -- straight down to the largest width asked for -- and
+ * encodes every width from that one raw buffer. The obvious alternative, calling
+ * getOrCreateThumbnail per width, decodes the original once per width, and for a
+ * 10K PNG that decode is by far the most expensive thing this service does.
+ *
+ * Best effort by design, and never throws: returns the widths it actually wrote.
+ * A source that cannot be decoded leaves the cache cold and the read path falls
+ * back to serving the original, so a warm failure must never fail the job that
+ * produced the image.
+ */
+export async function warmThumbnails(sourcePath: string, requestedWidths: number[] = resultPreviewWidths) {
+  const resolvedPath = path.resolve(sourcePath);
+  // Videos need ffmpeg to produce a frame first; that path stays on demand.
+  if (isVideoSource(resolvedPath) || !isThumbnailableSource(resolvedPath)) return [];
+
+  const stat = await fs.stat(resolvedPath).catch(() => undefined);
+  // Small sources are served as-is by getOrCreateThumbnail, so a rendition for
+  // them would be written and never read.
+  if (!stat?.isFile() || stat.size <= thumbnailPassthroughMaxBytes) return [];
+
+  // Snap and dedupe so this writes the exact cache keys the read path looks up,
+  // largest first because the largest drives the single decode below.
+  const widths = [...new Set(requestedWidths.map((width) => normalizeThumbnailWidth(width)))].sort(
+    (left, right) => right - left,
+  );
+
+  const missing: Array<{ width: number; cachePath: string }> = [];
+  for (const width of widths) {
+    const cachePath = cachePathFor(cacheKeyFor(resolvedPath, width, stat.mtimeMs, stat.size));
+    const cached = await fs.stat(cachePath).catch(() => undefined);
+    if (!(cached?.isFile() && cached.size > 0)) {
+      missing.push({ width, cachePath });
+    }
+  }
+  if (!missing.length) return [];
+
+  return withEncodeSlot(async () => {
+    let decoded: Awaited<ReturnType<typeof decodeToRaw>>;
+    try {
+      decoded = await decodeToRaw(resolvedPath, missing[0].width);
+    } catch (error) {
+      // Never throws, so a caller cannot accidentally let a preview problem take
+      // down the render that produced the image. Logged rather than swallowed
+      // silently, because the read path will now decode the original on every
+      // first view -- slow, but correct.
+      console.warn(
+        `Could not pre-build previews for ${path.basename(resolvedPath)}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return [];
+    }
+    const { data, info } = decoded;
+    // channels comes from the decode rather than being forced, so a source
+    // without an alpha channel does not gain a wasted one, and one with alpha
+    // keeps it -- these results can be transparent.
+    const raw = { raw: { width: info.width, height: info.height, channels: info.channels } };
+
+    const written: number[] = [];
+    for (const { width, cachePath } of missing) {
+      await fs.mkdir(path.dirname(cachePath), { recursive: true });
+      const tempPath = `${cachePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+      try {
+        await sharp(data, raw)
+          .resize({ width, height: width, fit: "inside", withoutEnlargement: true })
+          .webp({ quality: thumbnailQuality, effort: 4 })
+          .toFile(tempPath);
+        await fs.rename(tempPath, cachePath);
+        written.push(width);
+      } catch {
+        await fs.rm(tempPath, { force: true }).catch(() => undefined);
+      }
+    }
+    return written;
+  });
+}
+
+/**
+ * Decodes `sourcePath` down to `width` and hands back raw pixels, with the same
+ * long-path fallback encodeRendition needs (see the comment there).
+ */
+async function decodeToRaw(sourcePath: string, width: number) {
+  const decode = (input: string | Buffer) =>
+    sharp(input, { limitInputPixels: false })
+      .rotate()
+      .resize({ width, height: width, fit: "inside", withoutEnlargement: true })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+  try {
+    return await decode(sourcePath);
+  } catch (error) {
+    if (!(await canRetryFromBuffer(sourcePath))) throw error;
+    return await decode(await fs.readFile(sourcePath));
+  }
 }
 
 async function encodeRendition(sourcePath: string, cachePath: string, width: number, video: boolean) {

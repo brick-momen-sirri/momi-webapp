@@ -7,20 +7,33 @@ import { changePassword, logout, updateOwnProfile, updatePinnedProjects } from "
 import { canViewProject } from "../jobPermissions.js";
 import { createMediaAccessToken } from "../mediaAccessToken.js";
 import { getProjects } from "../projectService.js";
-import { clearSessionCookie } from "../sessionCookie.js";
+import { clearSessionCookie, setMediaAccessCookie } from "../sessionCookie.js";
 
 export const authSessionRouter = express.Router();
 
+/**
+ * Mints a media token, puts it in a cookie, and reports that it did.
+ *
+ * The `cookie` flag is what lets the frontend stop appending the token to media
+ * URLs. It must reflect what actually went out on this response, so the client
+ * never assumes a cookie it does not have.
+ */
+function issueMediaAccess(res: express.Response, userId: string) {
+  const mediaAccess = createMediaAccessToken(userId);
+  setMediaAccessCookie(res, mediaAccess.token, mediaAccess.expiresAt);
+  return { ...mediaAccess, cookie: true };
+}
+
 authSessionRouter.get("/api/auth/me", (req, res) => {
   const user = getRequestUser(req);
-  res.json({ user, mediaAccess: createMediaAccessToken(user.id) });
+  res.json({ user, mediaAccess: issueMediaAccess(res, user.id) });
 });
 
 // Refresh endpoint for a page that has been open longer than the token TTL. Sits
 // behind requireAuth, so refreshing needs the session -- a media token cannot
 // renew itself into an unbounded credential.
 authSessionRouter.post("/api/media/access-token", (req, res) => {
-  res.json({ mediaAccess: createMediaAccessToken(getRequestUser(req).id) });
+  res.json({ mediaAccess: issueMediaAccess(res, getRequestUser(req).id) });
 });
 
 authSessionRouter.patch("/api/auth/me", async (req, res) => {

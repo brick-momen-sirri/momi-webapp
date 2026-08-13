@@ -1,9 +1,25 @@
-import { AlertTriangle, Calendar, CheckCircle2, Folder, Hash, ImageIcon, Images, Loader2, UserRound } from "lucide-react";
+import {
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  Download,
+  Folder,
+  Hash,
+  ImageIcon,
+  Images,
+  Loader2,
+  Maximize2,
+  UserRound,
+} from "lucide-react";
+import { useState } from "react";
 import type { StillImageCategoryDefinition, StillImageCategoryState } from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
+import { useNearViewport } from "../features/jobs/useNearViewport";
+import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
+import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
 
 type StillImagesWorkspaceProps = {
   category: StillImageCategoryDefinition;
@@ -129,7 +145,13 @@ function StillImageJobCard({ job, project, userName }: { job: Job; project?: Pro
               <div className="flex flex-wrap gap-2">
                 {inputImages.map((url, index) => (
                   <div key={url} className="relative h-20 w-32 overflow-hidden rounded-md border border-line bg-stone-100">
-                    <img src={url} alt={`Still image input ${index + 1}`} className="h-full w-full object-cover" />
+                    <img
+                      src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.chip)}
+                      alt={`Still image input ${index + 1}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                    />
                     {inputImages.length > 1 ? (
                       <span className="absolute left-1.5 top-1.5 rounded-full bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold">
                         Input {index + 1}
@@ -153,11 +175,7 @@ function StillImageJobCard({ job, project, userName }: { job: Job; project?: Pro
 
         <section className="result-section mt-4 flex justify-center">
           {resultUrl && job.status === "completed" ? (
-            <img
-              src={resultUrl}
-              alt={`Result for ${job.modelType}`}
-              className="max-h-[32rem] w-auto max-w-full rounded-lg border border-line bg-stone-100 object-contain"
-            />
+            <StillImageResult job={job} url={resultUrl} />
           ) : (
             <div className="flex min-h-72 w-full max-w-5xl flex-col items-center justify-center rounded-lg border border-dashed border-line bg-mist/60 px-6 text-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-full border border-line bg-white text-stone-400 shadow-sm">
@@ -189,6 +207,80 @@ function StillImageJobCard({ job, project, userName }: { job: Job; project?: Pro
         <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
       </div>
     </article>
+  );
+}
+
+/**
+ * A completed still image result.
+ *
+ * Still image outputs are the largest media this app handles -- 4K to 10K PNGs
+ * that routinely pass 100 MB. Nothing here ever loads one. The card shows a grid
+ * rendition, Open preview shows a fullscreen rendition, and only Download
+ * touches the original, streamed straight from the backend as an attachment so
+ * the bytes never enter this tab's memory.
+ *
+ * The image is not even requested until the card is near the viewport, so a
+ * project with 50 results costs one small request per card the user actually
+ * scrolls to rather than 50 originals up front.
+ */
+function StillImageResult({ job, url }: { job: Job; url: string }) {
+  const [containerRef, inView] = useNearViewport<HTMLDivElement>();
+  const [fullscreenImage, setFullscreenImage] = useState<FullscreenImage | null>(null);
+  const name = job.fileName ?? `${job.modelType} result`;
+
+  return (
+    <div ref={containerRef} className="w-full">
+      <div className="relative flex justify-center">
+        {inView ? (
+          <img
+            src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
+            alt={`Result for ${job.modelType}`}
+            loading="lazy"
+            decoding="async"
+            className="max-h-[32rem] w-auto max-w-full rounded-lg border border-line bg-stone-100 object-contain"
+          />
+        ) : (
+          <div className="flex h-72 w-full max-w-5xl items-center justify-center rounded-lg border border-line bg-stone-100">
+            <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
+              Result preview
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            setFullscreenImage({
+              previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
+              name,
+              downloadUrl: backendResultFileUrl(job.id, 0),
+            })
+          }
+          className="flex items-center gap-1.5 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-bold text-ink shadow-card transition hover:border-accent hover:bg-cyan-50/50"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          Open preview
+        </button>
+        {/* A plain link, not a fetch: the backend already answers this with
+            Content-Disposition: attachment, so the browser streams it to disk
+            without the page ever holding the bytes. */}
+        <a
+          href={backendResultFileUrl(job.id, 0)}
+          download
+          className="flex items-center gap-1.5 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-bold text-ink shadow-card transition hover:border-accent hover:bg-cyan-50/50"
+          title="Download the untouched full-resolution original"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download original
+        </a>
+      </div>
+
+      {fullscreenImage ? (
+        <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} />
+      ) : null}
+    </div>
   );
 }
 

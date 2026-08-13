@@ -8,7 +8,7 @@ import { login, logout } from "../authService.js";
 import { loginRateLimitLockoutMs, loginRateLimitMaxAttempts, loginRateLimitWindowMs } from "../config.js";
 import { createLoginRateLimiter, loginRateLimitKeys } from "../loginRateLimiter.js";
 import { createMediaAccessToken } from "../mediaAccessToken.js";
-import { clearSessionCookie, setSessionCookie } from "../sessionCookie.js";
+import { clearSessionCookie, setMediaAccessCookie, setSessionCookie } from "../sessionCookie.js";
 
 export const authPublicRouter = express.Router();
 
@@ -41,7 +41,9 @@ authPublicRouter.post("/api/auth/login", async (req, res) => {
     // Issued alongside the session so the first render already has a credential
     // for its <img>/<video> URLs -- no gap where media would 401, and no extra
     // round trip.
-    res.json({ ...result, mediaAccess: createMediaAccessToken(result.user.id) });
+    const mediaAccess = createMediaAccessToken(result.user.id);
+    setMediaAccessCookie(res, mediaAccess.token, mediaAccess.expiresAt);
+    res.json({ ...result, mediaAccess: { ...mediaAccess, cookie: true } });
   } catch (error) {
     loginRateLimiter.recordFailure(rateLimitKeys, Date.now());
     res.status(401).json({ error: error instanceof Error ? error.message : "Could not sign in." });

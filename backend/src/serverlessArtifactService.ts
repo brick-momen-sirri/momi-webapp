@@ -5,16 +5,10 @@ import { runpodOutputMaxBytes } from "./config.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
 import { relativePathFromOutputRoot, resolveProjectOutputRoot, withProjectMutationLock } from "./projectMetadataService.js";
 import { projectFolderName } from "./projectFolderName.js";
-import {
-  assertManifestRecordSafe,
-  ensureJobFolders,
-  fallbackProjectFolder,
-  readJsonFile,
-  safeSegment,
-  writeJsonFile,
-} from "./storageService.js";
+import { assertManifestRecordSafe, fallbackProjectFolder, readJsonFile, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache } from "./mediaService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
+import { warmThumbnails } from "./thumbnailService.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
 import type { Job, Project, Resolution, WorkflowModel } from "./types.js";
 
@@ -26,7 +20,6 @@ export type PersistedServerlessArtifact = {
   url: string;
   remoteUrl: string;
   filePath?: string;
-  jobFilePath?: string;
   fileName?: string;
   resolution?: Resolution;
   manifestRecord?: Record<string, unknown>;
@@ -37,6 +30,11 @@ export type PersistServerlessArtifactsResult = {
   artifacts: PersistedServerlessArtifact[];
   selectedArtifacts: PersistedServerlessArtifact[];
   resultUrls: string[];
+  /**
+   * Which remote object each selected result came from, aligned with resultUrls,
+   * with the presigned signature stripped. See Job.resultRemoteRefs.
+   */
+  resultRemoteRefs: string[];
   thumbnailUrls: string[];
   outputResolution?: Resolution;
   manifestRecords: Array<Record<string, unknown>>;
@@ -76,17 +74,15 @@ export async function persistServerlessArtifacts({
   fetchImpl = fetch,
 }: PersistServerlessArtifactsInput): Promise<PersistServerlessArtifactsResult> {
   const folders = await ensureBrickProjectFolders(project, job.folderId);
-  const jobFolders = await ensureJobFolders(project, job.id);
   const artifacts: PersistedServerlessArtifact[] = [];
 
   for (let index = 0; index < media.length; index += 1) {
     artifacts.push(
-      await persistOneArtifact(media[index], index, {
+      await persistOneArtifact(media[index], {
         project,
         job,
         model,
         folders,
-        jobOutputFolder: jobFolders.output,
         fetchImpl,
       }),
     );
@@ -109,6 +105,7 @@ export async function persistServerlessArtifacts({
     artifacts,
     selectedArtifacts,
     resultUrls,
+    resultRemoteRefs: selectedArtifacts.map((artifact) => remoteObjectRef(artifact.remoteUrl)),
     thumbnailUrls,
     outputResolution: selectedArtifacts.find((artifact) => artifact.resolution)?.resolution,
     manifestRecords: artifacts
@@ -119,13 +116,11 @@ export async function persistServerlessArtifacts({
 
 async function persistOneArtifact(
   media: RunpodMediaResult,
-  index: number,
   context: {
     project: Project;
     job: Job;
     model: WorkflowModel;
     folders: BrickProjectFolders;
-    jobOutputFolder: string;
     fetchImpl: typeof fetch;
   },
 ): Promise<PersistedServerlessArtifact> {
@@ -148,9 +143,14 @@ async function persistOneArtifact(
     await mediaSource.writeTo(target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
 
-    const jobFileName = `${safeSegment(context.job.id)}_${String(index + 1).padStart(2, "0")}_${path.basename(target.filePath)}`;
-    const jobFilePath = path.join(context.jobOutputFolder, jobFileName);
-    await fs.copyFile(target.filePath, jobFilePath);
+    // Build the preview renditions now, so browsing the project never decodes the
+    // original. warmThumbnails does not throw and logs its own failures: the
+    // render succeeded, and a preview that could not be encoded must not turn
+    // that into a failed job. The read path falls back to serving the original,
+    // and the next request retries the encode.
+    if (assetType === "image") {
+      await warmThumbnails(target.filePath);
+    }
 
     const manifestRecord = buildManifestRecord({
       project: context.project,
@@ -176,7 +176,6 @@ async function persistOneArtifact(
       url: mediaUrl(target.filePath),
       remoteUrl: safeRemoteUrl(media, target.filePath),
       filePath: target.filePath,
-      jobFilePath,
       fileName: path.basename(target.filePath),
       resolution,
       manifestRecord,
@@ -474,6 +473,28 @@ function safeMediaRecord(media: RunpodMediaResult): RunpodMediaResult {
     ...media,
     url: "[embedded data URL omitted]",
   };
+}
+
+/**
+ * Strips the query and fragment from a remote media URL, leaving just the object
+ * it identifies.
+ *
+ * The query is where the presigning lives (X-Amz-Signature and friends), and it
+ * is the only part that makes the URL a credential. Dropping it keeps a stable,
+ * shareable reference to the origin object while making the stored value useless
+ * to anyone who gets hold of it. Anything that is not an http(s) URL -- a local
+ * media path we substituted for an embedded data URL, say -- is left alone.
+ */
+function remoteObjectRef(value: string) {
+  if (!/^https?:\/\//i.test(value)) return value;
+  try {
+    const url = new URL(value);
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function safeRemoteUrl(media: RunpodMediaResult, filePath?: string) {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Check, Download, FileImage, X } from "lucide-react";
+import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job } from "../types";
 
 export type ImageDownloadFormat = "png" | "jpg";
@@ -84,7 +85,9 @@ export function DownloadImageChoiceModal({ job, onChoose, onClose }: DownloadIma
                   >
                     <div className={`${choices.length > 1 ? "aspect-square" : "aspect-video"} bg-stone-100`}>
                       <img
-                        src={choice.url}
+                        // A rendition: this is a picker, and the choice it makes
+                        // is which original to stream, never which to load here.
+                        src={thumbnailMediaUrl(choice.url, THUMBNAIL_WIDTH.grid)}
                         alt={choice.label}
                         loading="lazy"
                         decoding="async"

@@ -1,4 +1,5 @@
 import { CalendarDays, CheckCircle2, Clock3, Coins, Folder, Gauge, Hash, ImageIcon, Maximize2, UserRound } from "lucide-react";
+import { isStillImageJob } from "../features/still-images/jobSection";
 import type { Job, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 
@@ -54,6 +55,14 @@ export function JobMetadata({ job, project, user }: JobMetadataProps) {
 }
 
 function creditMetadataItem(job: Job) {
+  // Still Images presets run on pods that report no usage, so the only figure
+  // that ever existed for them was a flat per-preset estimate. They are excluded
+  // from every credit total (see isCreditExemptJob on the backend), and showing a
+  // number here would contradict that. The estimate branch below is skipped for
+  // the same reason -- "10 est." reads as a cost that will be charged.
+  if (isStillImageJob(job)) {
+    return { label: "Credits", value: "--" };
+  }
   if (job.creditsUsed != null) {
     return { label: "Credits", value: formatCredits(job.creditsUsed) };
   }
