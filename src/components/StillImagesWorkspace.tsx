@@ -1,6 +1,7 @@
 import { AlertTriangle, Calendar, CheckCircle2, Folder, Hash, ImageIcon, Images, Loader2, UserRound } from "lucide-react";
 import type { StillImageCategoryDefinition, StillImageCategoryState } from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
+import { stillImageResultFileName } from "../features/still-images/resultFileName";
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
 
@@ -263,9 +264,12 @@ function EmptyState({
               ? `${uploadedImages.length} input ready. Press Generate to send this ${category.label} job to its pod.`
               : category.instructions}
           </p>
-          {/* Preview of the name the result will be saved under, so the camera
-              number can be checked before spending a render. */}
-          <p className="mt-3 font-mono text-xs text-stone-500">{draftFileName(selectedProject, category.label, saveNumber)}</p>
+          {/* The name the backend will save under, so the camera number can be
+              checked before spending a render. Mirrors the server's naming; the
+              version suffix is reserved at save time, hence the placeholder. */}
+          <p className="mt-3 font-mono text-xs text-stone-500">
+            {stillImageResultFileName({ project: selectedProject, modelName: category.label, saveNumber })}
+          </p>
         </div>
       </article>
     </div>
@@ -290,12 +294,6 @@ function resultPlaceholderTitle(status: Job["status"]) {
   if (status === "running" || status === "sending") return "Rendering on the preset pod";
   if (status === "queued") return "Queued";
   return "Generated image will appear here";
-}
-
-function draftFileName(project: Project | undefined, categoryLabel: string, saveNumber: string) {
-  const projectPrefix = project ? `${project.shortName}_${project.name.replaceAll(" ", "_")}` : "PROJECT";
-  const workflow = categoryLabel.replaceAll(" ", "_");
-  return `${projectPrefix}_${workflow}_CAM${saveNumber || "0000"}.png`;
 }
 
 function formatTimestamp(value?: string) {

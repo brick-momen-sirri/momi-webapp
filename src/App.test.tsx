@@ -181,7 +181,11 @@ describe("main workspace sections", () => {
     const cameraNumber = screen.getByRole("textbox", { name: "Camera number" });
     await user.clear(cameraNumber);
     await user.type(cameraNumber, "0042");
-    expect(screen.getByText(/General_Enhancement_CAM0042\.png$/)).toBeInTheDocument();
+    // The preview mirrors what the backend actually writes -- date, lowercased
+    // model, four-digit project code, cam-NN, and a placeholder version -- rather
+    // than the invented SHORT_Name_Workflow_CAM0042 format it used to show. The
+    // date is left unpinned so this does not fail tomorrow.
+    expect(screen.getByText(/^\d{8}_general-enhancement_.+_cam-42_v###\.png$/)).toBeInTheDocument();
     expect(harness.callsTo("/api/jobs").filter((call) => call.method === "POST")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: /^Animation/ }));
