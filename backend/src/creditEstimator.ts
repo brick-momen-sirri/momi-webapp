@@ -14,6 +14,10 @@ export function estimateWorkflowCredits(
     return seedanceCreditRange(key, duration, resolutionLabel).maxCredits;
   }
 
+  if (key.includes("flux3") || key.includes("flux 3")) {
+    return roundCredits(flux3CreditsPerSecond(resolutionLabel) * duration);
+  }
+
   if (key.includes("veo3") || key.includes("veo 3")) {
     return roundCredits(veo3CreditsPerSecond(key, resolutionLabel) * duration);
   }
@@ -202,6 +206,11 @@ function klingV3NoAudioCreditsPerSecond(resolution: string) {
     "4k": 0.42,
   };
   return creditsFromUsd(rates[normalizeResolution(resolution)] ?? rates["1080p"]);
+}
+
+function flux3CreditsPerSecond(resolution: string) {
+  const usdPerSecond = normalizeResolution(resolution) === "720p" ? 0.2431 : 0.4147;
+  return creditsFromUsd(usdPerSecond);
 }
 
 function klingV3UsdPerSecond(resolution: string, audioEnabled: boolean) {

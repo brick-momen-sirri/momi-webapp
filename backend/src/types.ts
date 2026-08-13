@@ -90,6 +90,8 @@ export type ProjectMember = {
   addedBy: string;
 };
 
+export type ProjectVisibility = "private" | "team" | "public";
+
 export type ProjectGroupMember = {
   groupId: string;
   role: "editor" | "viewer";
@@ -136,6 +138,7 @@ export type Project = {
   description?: string;
   folderPath: string;
   ownerId: string;
+  visibility?: ProjectVisibility;
   members: ProjectMember[];
   groupMembers: ProjectGroupMember[];
   folders?: ProjectFolder[];

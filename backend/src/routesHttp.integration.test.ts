@@ -326,8 +326,23 @@ test("media upload enforces MIME, size, body, range, and cache/disposition behav
   assert.equal(empty.response.status, 400);
 });
 
-test("media reads hide uploaded project inputs from an unrelated authenticated user", async () => {
-  const uploaded = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image&name=private.png`, {
+// Uploads live under their project, so the project's visibility is what decides
+// who may read them. Both halves are asserted here: on a private project an
+// unrelated account is still an intruder, and on a team project every workspace
+// account is a legitimate reader -- that second half is the point of team
+// visibility, so it is pinned rather than left implicit.
+test("media reads follow project visibility for an unrelated authenticated user", async () => {
+  const sealed = await asAdmin("POST", "/api/projects", {
+    name: "Sealed Wing",
+    shortName: "4321",
+    client: "Acme",
+    visibility: "private",
+  });
+  assert.equal(sealed.status, 201, sealed.text);
+  const sealedProjectId = String((sealed.body as { project?: { id?: string } }).project?.id);
+  assert.ok(sealedProjectId && sealedProjectId !== "undefined");
+
+  const uploaded = await callBinary("POST", `/api/media/upload?projectId=${sealedProjectId}&kind=image&name=private.png`, {
     token: adminToken,
     headers: { "Content-Type": "image/png" },
     body: Buffer.from("private"),
@@ -347,7 +362,7 @@ test("media reads hide uploaded project inputs from an unrelated authenticated u
 
   for (const routePath of [payload.url, payload.url.replace("/api/media?", "/api/media/thumbnail?")]) {
     const hidden = await callBinary("GET", routePath, { token: intruderToken });
-    assert.equal(hidden.response.status, 404, `${routePath} leaked uploaded project media`);
+    assert.equal(hidden.response.status, 404, `${routePath} leaked private project media`);
   }
 
   const ownerThumbnail = await callBinary("GET", payload.url.replace("/api/media?", "/api/media/thumbnail?"), {
@@ -355,6 +370,16 @@ test("media reads hide uploaded project inputs from an unrelated authenticated u
   });
   assert.equal(ownerThumbnail.response.status, 200);
   assert.equal(ownerThumbnail.bytes.toString(), "private");
+
+  const shared = await callBinary("POST", `/api/media/upload?projectId=${testProjectId}&kind=image&name=shared.png`, {
+    token: adminToken,
+    headers: { "Content-Type": "image/png" },
+    body: Buffer.from("shared"),
+  });
+  const sharedPayload = JSON.parse(shared.bytes.toString()) as { url: string };
+  const readable = await callBinary("GET", sharedPayload.url, { token: intruderToken });
+  assert.equal(readable.response.status, 200, "a team project's inputs are readable by any workspace account");
+  assert.equal(readable.bytes.toString(), "shared");
 });
 
 test("media reads reject traversal and distinguish missing allowed files", async () => {

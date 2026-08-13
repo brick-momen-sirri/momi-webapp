@@ -53,9 +53,22 @@ const gptImage = {
   estimatedCredits: 141,
 };
 
+const flux3ImageToVideo = {
+  id: "brick_api_flux3_i2v",
+  name: "Api Flux3 I2v",
+  category: "image_to_video" as const,
+  workflowPath: "workflow/i2v/Brick_api_flux3_i2v.json",
+  defaultDurationSeconds: 5,
+};
+
 test("Seedance 2.0 first-last estimate uses Comfy price badge token formula", () => {
   assert.equal(estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1280, height: 720, label: "720p" }), 228);
   assert.equal(estimateWorkflowCredits(seedanceFirstLast, 5, { width: 1920, height: 1080, label: "1080p" }), 567);
+});
+
+test("Flux 3 estimate follows the Comfy price badge for HD and FHD", () => {
+  assert.equal(estimateWorkflowCredits(flux3ImageToVideo, 5, { width: 1280, height: 720, label: "720p" }), 256);
+  assert.equal(estimateWorkflowCredits(flux3ImageToVideo, 5, { width: 1920, height: 1080, label: "1080p" }), 438);
 });
 
 test("Seedance 2.0 image-to-video does not use the input-video range", () => {

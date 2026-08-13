@@ -4,6 +4,7 @@
 
 import { getJobsWithExistingMedia } from "./jobQueue.js";
 import { getProject } from "./projectService.js";
+import { grantsWorkspaceAccess } from "./projectVisibility.js";
 import type { Job, Project, User } from "./types.js";
 
 export function canAccessJob(user: User, job: Job) {
@@ -26,13 +27,23 @@ export function canManageJob(user: User, job: Job) {
 }
 
 export function canViewProject(user: User, project: Project) {
-  return user.role === "admin" || project.ownerId === user.id || Boolean(getProjectRole(project, user.id));
+  if (user.role === "admin" || project.ownerId === user.id) return true;
+  if (getProjectRole(project, user.id)) return true;
+  return grantsWorkspaceAccess(project);
 }
 
 export function canCreateJobInProject(user: User, project: Project) {
   if (user.role === "admin") return true;
   const role = getProjectRole(project, user.id);
-  return role === "owner" || role === "editor";
+  if (role === "owner" || role === "editor") return true;
+  // An explicit viewer row outranks the implicit team grant: pinning a client
+  // review account to viewer has to work on a team project too, otherwise the
+  // role is unenforceable outside private projects.
+  if (role === "viewer") return false;
+  // Demo accounts are refused before this point on every write route; excluding
+  // them here as well keeps the implicit grant from becoming the one path that
+  // hands a demo login a live project.
+  return grantsWorkspaceAccess(project) && !isDemoAccount(user);
 }
 
 export function isDemoAccount(user: User) {
@@ -52,6 +63,8 @@ export function isDemoAccount(user: User) {
   );
 }
 
+// Deliberately no implicit team grant: a team project is open to work in, not
+// open to re-permission. Membership stays with admins and the project's owners.
 export function canManageProject(user: User, project: Project) {
   return user.role === "admin" || project.ownerId === user.id || getProjectRole(project, user.id) === "owner";
 }

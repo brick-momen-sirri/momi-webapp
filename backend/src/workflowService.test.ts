@@ -57,6 +57,49 @@ test("workflow discovery produces unique, internally consistent production model
   assert.equal(getWorkflowModel("workflow_that_does_not_exist"), undefined);
 });
 
+test("discovers Flux 3 video workflows with the official limits", () => {
+  const firstLast = getWorkflowModel("brick_api_flux3_flf2v");
+  const imageToVideo = getWorkflowModel("brick_api_flux3_i2v");
+  const expectedDurations = Array.from({ length: 16 }, (_, index) => index + 5);
+
+  assert.equal(firstLast?.category, "first_last_frame_to_video");
+  assert.equal(firstLast?.requiresStartEndFrames, true);
+  assert.equal(firstLast?.imageSlotCount, 2);
+  assert.deepEqual(firstLast?.supportedDurations, expectedDurations);
+  assert.deepEqual(firstLast?.supportedResolutions, ["720p", "1080p"]);
+
+  assert.equal(imageToVideo?.category, "image_to_video");
+  assert.equal(imageToVideo?.requiresStartEndFrames, false);
+  assert.equal(imageToVideo?.imageSlotCount, 1);
+  assert.deepEqual(imageToVideo?.supportedDurations, expectedDurations);
+  assert.deepEqual(imageToVideo?.supportedResolutions, ["720p", "1080p"]);
+  assert.equal(getWorkflowModel("brick_api_flux3_image_editing"), undefined);
+});
+
+test("Flux 3 workflows connect keyframes from the zero-based image_0 slot", async () => {
+  const firstLast = requiredModel("brick_api_flux3_flf2v");
+  const firstLastPrompt = (await loadWorkflowForRunpod(
+    firstLast,
+    request(firstLast, ["start.png", "end.png"]),
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+  const firstLastInputs = firstLastPrompt["3"].inputs;
+  assert.deepEqual(firstLastInputs["keyframes.image_0"], ["1", 0]);
+  assert.deepEqual(firstLastInputs["keyframes.image_1"], ["2", 0]);
+  assert.equal(firstLastInputs["keyframes.image_2"], undefined);
+
+  const imageToVideo = requiredModel("brick_api_flux3_i2v");
+  const imageToVideoPrompt = (await loadWorkflowForRunpod(
+    imageToVideo,
+    request(imageToVideo, ["start.png"]),
+    "0000_ply_graound",
+    ["start.png"],
+  )) as Record<string, any>;
+  assert.deepEqual(imageToVideoPrompt["2"].inputs["keyframes.image_0"], ["1", 0]);
+  assert.equal(imageToVideoPrompt["2"].inputs["keyframes.image_1"], undefined);
+});
+
 test("detects provider image/video field names from API and UI workflow shapes", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-input-names-"));
   try {

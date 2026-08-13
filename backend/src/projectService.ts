@@ -16,6 +16,7 @@ import {
   validateDisplayName,
   withProjectRegistryMutationLock,
 } from "./projectMetadataService.js";
+import { normalizeProjectVisibility } from "./projectVisibility.js";
 import { readJsonFile, safeSegment, writeJsonFile } from "./storageService.js";
 import { openSqliteProjectStore, type SqliteProjectStore } from "./sqliteProjectStore.js";
 import type { Project, ProjectFolder, ProjectMember } from "./types.js";
@@ -40,6 +41,7 @@ function seedProjects(): Project[] {
       description: "Official default Playground project folder for local tests.",
       folderPath: path.join(brickProjectsRoot, PLAYGROUND_FOLDER_NAME),
       ownerId: "usr_momen",
+      visibility: "team",
       members: [{ userId: "usr_momen", role: "owner", addedAt: createdAt, addedBy: "usr_momen" }],
       groupMembers: [],
       jobCount: 0,
@@ -130,6 +132,10 @@ export async function discoverBrickProjects() {
           isDefault: entry.name === PLAYGROUND_FOLDER_NAME,
           folderPath,
           ownerId: "usr_momen",
+          // Folders found on disk have no ACL of their own. They are team
+          // projects so the studio can work in them; the placeholder owner only
+          // decides who may edit membership, and admins can do that regardless.
+          visibility: "team",
           members: [{ userId: "usr_momen", role: "owner", addedAt: createdAt, addedBy: "usr_momen" }],
           groupMembers: [],
           jobCount: 0,
@@ -182,9 +188,11 @@ export async function createProject(input: Partial<Project>) {
     folderName: folderName || projectFolderName(folderPath),
     folderPath,
     ownerId: input.ownerId || "usr_momen",
-    members: input.members || [
-      { userId: input.ownerId || "usr_momen", role: "owner", addedAt: createdAt, addedBy: input.ownerId || "usr_momen" },
-    ],
+    visibility: normalizeProjectVisibility(input.visibility),
+    // normalizeMembers here as well as on update: the create path used to store
+    // whatever list it was handed, so a bad role or a missing owner row only
+    // surfaced later as an unusable project.
+    members: normalizeMembers(input.members ?? [], input.ownerId || "usr_momen"),
     groupMembers: input.groupMembers || [],
     jobCount: 0,
     createdAt,
@@ -325,10 +333,13 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
   return project;
 }
 
+// Removing an owner is allowed as long as another owner remains. The previous
+// rule kept every owner row forever, so the UI's "Remove" reported success while
+// the server quietly ignored it -- ownership could be granted but never undone.
 export async function removeProjectMember(projectId: string, userId: string) {
   if (sqliteProjectStore) {
     return sqliteProjectStore.applyToProject(projectId, (project) => {
-      project.members = project.members.filter((item) => item.userId !== userId || item.role === "owner");
+      project.members = membersWithoutUser(project, userId);
       project.updatedAt = now();
     });
   }
@@ -336,10 +347,18 @@ export async function removeProjectMember(projectId: string, userId: string) {
   if (!project) {
     return undefined;
   }
-  project.members = project.members.filter((item) => item.userId !== userId || item.role === "owner");
+  project.members = membersWithoutUser(project, userId);
   project.updatedAt = now();
   await saveProjects();
   return project;
+}
+
+function membersWithoutUser(project: Project, userId: string) {
+  const target = project.members.find((item) => item.userId === userId);
+  if (target?.role === "owner" && project.members.filter((item) => item.role === "owner").length <= 1) {
+    throw new Error("Every project must keep at least one owner.");
+  }
+  return project.members.filter((item) => item.userId !== userId);
 }
 
 async function saveProjects() {
@@ -355,6 +374,7 @@ function updatedProject(current: Project, input: Partial<Project>): Project {
     shortName: current.shortName,
     description: input.description ?? current.description,
     ownerId,
+    visibility: normalizeProjectVisibility(input.visibility ?? current.visibility),
     members: normalizeMembers(input.members ?? current.members, ownerId),
     groupMembers: input.groupMembers ?? current.groupMembers ?? [],
     updatedAt: now(),
@@ -404,6 +424,7 @@ function normalizeProjects(input: Project[]) {
       const parsed = parseProjectDiskName(folderName, project.name, project.shortName);
       return withoutDerivedProjectStats({
         ...project,
+        visibility: normalizeProjectVisibility(project.visibility),
         shortName: project.shortName || parsed.code,
         code: project.code || project.shortName || parsed.code,
         client: project.client || parsed.client,

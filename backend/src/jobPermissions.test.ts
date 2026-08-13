@@ -26,8 +26,19 @@ function user(overrides: Partial<User> = {}): User {
   } as User;
 }
 
+// Defaults to private so the cases below keep testing the explicit-membership
+// rule. A team project grants access without any members row, which is its own
+// set of tests further down.
 function project(overrides: Partial<Project> = {}): Project {
-  return { id: "proj_1", name: "Tower", shortName: "TWR", ownerId: "usr_owner", members: [], ...overrides } as Project;
+  return {
+    id: "proj_1",
+    name: "Tower",
+    shortName: "TWR",
+    ownerId: "usr_owner",
+    visibility: "private",
+    members: [],
+    ...overrides,
+  } as Project;
 }
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -50,6 +61,43 @@ test("canViewProject: admin, owner, or any member", () => {
   assert.equal(canViewProject(user({ id: "usr_owner" }), p), true, "owner");
   assert.equal(canViewProject(user({ id: "usr_viewer" }), p), true, "member with the weakest role");
   assert.equal(canViewProject(user({ id: "usr_stranger" }), p), false, "unrelated user is denied");
+});
+
+test("canViewProject: a team project needs no members row", () => {
+  const p = project({ visibility: "team" });
+  assert.equal(canViewProject(user({ id: "usr_stranger" }), p), true);
+  assert.equal(canViewProject(user({ id: "usr_stranger" }), project({ visibility: "private" })), false);
+});
+
+test("canViewProject treats a project stored before visibility existed as a team project", () => {
+  // Rows written by the old code have no visibility field, and the UI has always
+  // labelled those "Team". Resolving absent to team is what makes the badge true.
+  const p = project();
+  delete (p as Partial<Project>).visibility;
+  assert.equal(canViewProject(user({ id: "usr_stranger" }), p), true);
+});
+
+test("canCreateJobInProject: a team project grants an implicit editor grant", () => {
+  assert.equal(canCreateJobInProject(user({ id: "usr_stranger" }), project({ visibility: "team" })), true);
+  assert.equal(canCreateJobInProject(user({ id: "usr_stranger" }), project({ visibility: "private" })), false);
+});
+
+test("canCreateJobInProject: an explicit viewer row outranks the team grant", () => {
+  // Otherwise a client review account could only be held to viewer by making the
+  // whole project private.
+  const p = project({ visibility: "team", members: [{ userId: "usr_a", role: "viewer" }] as Project["members"] });
+  assert.equal(canViewProject(user({ id: "usr_a" }), p), true);
+  assert.equal(canCreateJobInProject(user({ id: "usr_a" }), p), false);
+});
+
+test("canCreateJobInProject: the team grant skips demo accounts", () => {
+  const p = project({ visibility: "team" });
+  assert.equal(canViewProject(user({ email: "demo@brickvisual.com" }), p), true, "a demo login may still look");
+  assert.equal(canCreateJobInProject(user({ email: "demo@brickvisual.com" }), p), false);
+});
+
+test("canManageProject: a team project is open to work in, not to re-permission", () => {
+  assert.equal(canManageProject(user({ id: "usr_stranger" }), project({ visibility: "team" })), false);
 });
 
 test("canCreateJobInProject: admin, owner or editor -- not a viewer", () => {

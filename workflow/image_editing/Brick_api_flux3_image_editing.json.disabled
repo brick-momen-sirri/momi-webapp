@@ -1,0 +1,41 @@
+{
+  "_momi": {
+    "enabled": false,
+    "reason": "Black Forest Labs has not released the FLUX 3 Image API or a Flux3 image-editing ComfyUI node yet. Rename this file to Brick_api_flux3_image_editing.json only after replacing the pending node with the official released class and inputs."
+  },
+  "1": {
+    "inputs": {
+      "image": "flux3_source_image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Source Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "prompt": "",
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "Flux3ImageEditingNode_PENDING_OFFICIAL_RELEASE",
+    "_meta": {
+      "title": "Flux 3 Image Editing (Pending Official Release)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

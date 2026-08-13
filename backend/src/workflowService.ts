@@ -424,6 +424,9 @@ function referenceImageInputCount(workflow: unknown) {
 
 function inferSupportedResolutions(source: string) {
   const key = source.toLowerCase();
+  if (key.includes("flux3") || key.includes("flux 3")) {
+    return ["720p", "1080p"];
+  }
   if (key.includes("nano") && key.includes("banana")) {
     return ["1K", "2K", "4K"];
   }
@@ -449,6 +452,9 @@ function inferDurationConfig(source: string, workflow: unknown, outputType: "ima
   }
 
   const key = source.toLowerCase();
+  if (key.includes("flux3") || key.includes("flux 3")) {
+    return { supportedDurations: range(5, 20), defaultDurationSeconds: 5 };
+  }
   if (key.includes("veo3") && key.includes("flf2v")) {
     return { supportedDurations: [4, 6, 8], defaultDurationSeconds: 6 };
   }
@@ -484,6 +490,9 @@ function inferSupportedDurations(workflow: unknown, outputType: "image" | "video
 
   if (classTypes.some((classType) => classType.includes("veo3"))) {
     return [4, 6, 8];
+  }
+  if (classTypes.some((classType) => classType.includes("flux3"))) {
+    return range(5, 20);
   }
   if (classTypes.some((classType) => classType.includes("bytedance2"))) {
     return range(4, 15);
@@ -521,6 +530,7 @@ function inferDefaultDurationSeconds(workflow: unknown, supportedDurations: numb
 
 function isDurationProviderNode(classType: string) {
   return (
+    classType.includes("flux3") ||
     classType.includes("veo3") ||
     classType.includes("bytedance2") ||
     classType.includes("klingfirstlastframenode") ||
@@ -1033,7 +1043,9 @@ function injectInputs(
       if (resolution && lowerKey === "resolution") inputs[key] = directResolutionLabel(resolution.label ?? "1080p");
       if (resolution && lowerKey === "model.resolution") inputs[key] = resolutionWidgetLabel(resolution.label ?? "1080p");
       if (resolution && isGptImageNode(node) && lowerKey === "size") inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
-      if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) inputs[key] = durationSeconds;
+      if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) {
+        inputs[key] = typeof inputs[key] === "string" ? String(durationSeconds) : durationSeconds;
+      }
       if (lowerKey.includes("project_name"))
         inputs[key] = coerceProjectName(projectName, String(node.class_type ?? ""), objectInfo);
       if (isNumberedImageInput(lowerKey) && typeof inputs[key] === "string") {
@@ -1418,7 +1430,7 @@ function injectDurationInput(inputs: ComfyNode, classType: string, durationSecon
   if (!durationSeconds) return;
   const durationKey = firstInputName(classType, objectInfo, ["duration", "duration_seconds", "video_duration", "length_seconds"]);
   if (durationKey) {
-    inputs[durationKey] = durationSeconds;
+    inputs[durationKey] = typeof inputs[durationKey] === "string" ? String(durationSeconds) : durationSeconds;
   }
 
   if (inputs.model && typeof inputs.model === "object" && !Array.isArray(inputs.model)) {

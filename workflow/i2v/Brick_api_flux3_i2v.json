@@ -1,0 +1,46 @@
+{
+  "1": {
+    "inputs": {
+      "image": "flux3_start_frame.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Start Frame"
+    }
+  },
+  "2": {
+    "inputs": {
+      "prompt": "",
+      "keyframes.image_0": [
+        "1",
+        0
+      ],
+      "placement": "spread across the clip",
+      "aspect_ratio": "16:9",
+      "duration": "5",
+      "resolution": "1080p",
+      "generate_audio": true,
+      "safety_tolerance": 2,
+      "seed": 42
+    },
+    "class_type": "Flux3ImageToVideoNode",
+    "_meta": {
+      "title": "Flux 3 Image to Video"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

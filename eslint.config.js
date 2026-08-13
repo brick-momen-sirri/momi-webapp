@@ -26,6 +26,10 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "backend/dist/**",
+      // Pre-deploy rollback snapshots of the two dist trees. Built bundles, not
+      // source -- linting them reports thousands of errors in minified output.
+      "dist-prev-*/**",
+      "backend/dist-prev-*/**",
       ".e2e-dist/**",
       "backend/.e2e-dist/**",
       "playwright-report/**",

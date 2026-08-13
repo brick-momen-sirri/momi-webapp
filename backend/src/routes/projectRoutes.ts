@@ -2,12 +2,15 @@
 
 import express from "express";
 import { getRequestUser, requireAdmin } from "../authMiddleware.js";
+import { getUserById } from "../authService.js";
 import { creditsSpentForJob, findCreditTrackerProjectStats, roundCredits } from "../creditDashboardService.js";
 import { getCreditTrackerProjectStats } from "../creditUsageService.js";
 import { currentMonthRange } from "../httpQuery.js";
 import { canAccessJob, canManageJob, canManageProject, canViewProject, filterJobsForUser } from "../jobPermissions.js";
 import { getJob, getJobsWithExistingMedia, moveJobResult, renameJob, updateJobSaveNumber } from "../jobQueue.js";
+import { parseProjectMemberInput, projectMemberInputError } from "../projectMemberInput.js";
 import { projectCodeChangeRequested, projectRenameRequested } from "../projectRequestGuards.js";
+import { isProjectVisibility } from "../projectVisibility.js";
 import {
   addProjectMember,
   createProject,
@@ -21,6 +24,7 @@ import {
   renameProjectFolder,
   updateProject,
 } from "../projectService.js";
+import type { ProjectMember } from "../types.js";
 
 export const projectRouter = express.Router();
 
@@ -90,10 +94,23 @@ projectRouter.get("/api/projects/:projectId/folders", async (req, res) => {
 projectRouter.post("/api/projects", async (req, res) => {
   try {
     const user = getRequestUser(req);
+    // The invite list from the create dialog is honored here. It used to be
+    // overwritten with an owner-only list, so every project arrived with nobody
+    // on it and the picker in the dialog was decoration.
+    const memberInput = parseProjectMemberInput(req.body?.members, {
+      ownerId: user.id,
+      actorId: user.id,
+      now: new Date().toISOString(),
+      userExists: (userId) => Boolean(getUserById(userId)),
+    });
+    const memberError = projectMemberInputError(memberInput);
+    if (memberError) return res.status(400).json({ error: memberError });
+
     const project = await createProject({
       ...(req.body ?? {}),
       ownerId: user.id,
-      members: [{ userId: user.id, role: "owner", addedAt: new Date().toISOString(), addedBy: user.id }],
+      visibility: isProjectVisibility(req.body?.visibility) ? req.body.visibility : undefined,
+      members: memberInput.members,
     });
     res.status(201).json({ project });
   } catch (error) {
@@ -121,9 +138,23 @@ projectRouter.patch("/api/projects/:projectId", async (req, res) => {
       if (!renamed) return res.status(404).json({ error: "Project not found" });
     }
 
+    let members: ProjectMember[] | undefined;
+    if (Array.isArray(req.body?.members)) {
+      const memberInput = parseProjectMemberInput(req.body.members, {
+        ownerId: project.ownerId,
+        actorId: user.id,
+        now: new Date().toISOString(),
+        userExists: (userId) => Boolean(getUserById(userId)),
+      });
+      const memberError = projectMemberInputError(memberInput);
+      if (memberError) return res.status(400).json({ error: memberError });
+      members = memberInput.members;
+    }
+
     const updated = await updateProject(project.id, {
       description: typeof req.body?.description === "string" ? req.body.description : undefined,
-      members: Array.isArray(req.body?.members) ? req.body.members : undefined,
+      visibility: isProjectVisibility(req.body?.visibility) ? req.body.visibility : undefined,
+      members,
       groupMembers: Array.isArray(req.body?.groupMembers) ? req.body.groupMembers : undefined,
     });
     if (!updated) return res.status(404).json({ error: "Project not found" });
@@ -249,9 +280,14 @@ projectRouter.post("/api/projects/:projectId/members", async (req, res) => {
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
     if (!canManageProject(user, project)) return res.status(403).json({ error: "Project owner access required." });
 
+    const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+    if (!getUserById(userId)) return res.status(400).json({ error: `No such user: ${userId || "(none)"}.` });
+    // An unrecognized role used to be silently downgraded to viewer, which read
+    // as "added, but view-only" in the UI with no way to tell why. Let
+    // addProjectMember reject it instead.
     const updated = await addProjectMember(req.params.projectId, {
-      userId: typeof req.body?.userId === "string" ? req.body.userId : "",
-      role: req.body?.role === "owner" || req.body?.role === "editor" || req.body?.role === "viewer" ? req.body.role : "viewer",
+      userId,
+      role: req.body?.role,
       addedAt: new Date().toISOString(),
       addedBy: user.id,
     });
@@ -263,11 +299,15 @@ projectRouter.post("/api/projects/:projectId/members", async (req, res) => {
 });
 
 projectRouter.delete("/api/projects/:projectId/members/:userId", async (req, res) => {
-  const user = getRequestUser(req);
-  const project = getProject(req.params.projectId);
-  if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
-  if (!canManageProject(user, project)) return res.status(403).json({ error: "Project owner access required." });
-  const updated = await removeProjectMember(req.params.projectId, req.params.userId);
-  if (!updated) return res.status(404).json({ error: "Project not found" });
-  res.json({ project: updated });
+  try {
+    const user = getRequestUser(req);
+    const project = getProject(req.params.projectId);
+    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canManageProject(user, project)) return res.status(403).json({ error: "Project owner access required." });
+    const updated = await removeProjectMember(req.params.projectId, req.params.userId);
+    if (!updated) return res.status(404).json({ error: "Project not found" });
+    res.json({ project: updated });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Could not remove project member." });
+  }
 });
