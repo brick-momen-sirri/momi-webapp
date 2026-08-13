@@ -190,13 +190,37 @@ test("invalid or missing workflow JSON fails explicitly", async () => {
   }
 });
 
-test("workflow snapshots round-trip and reject embedded media payloads", async () => {
+test("workflow snapshots round-trip and redact embedded media payloads", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-snapshot-"));
   try {
     const snapshotPath = path.join(tempDir, "nested", "workflow.json");
     await saveWorkflowSnapshot(snapshotPath, { node: { inputs: { prompt: "safe" } } });
     assert.deepEqual(JSON.parse(await fs.readFile(snapshotPath, "utf8")), { node: { inputs: { prompt: "safe" } } });
-    await assert.rejects(saveWorkflowSnapshot(snapshotPath, { image: "data:image/png;base64,AQID" }), /embedded media/i);
+
+    // Inline-transport still image presets put the input image inside the graph.
+    // This used to throw, and the snapshot is written before submission, so the
+    // render died before it was ever sent. The payload is replaced instead.
+    await saveWorkflowSnapshot(snapshotPath, { image: "data:image/png;base64,AQID" });
+    const written = JSON.parse(await fs.readFile(snapshotPath, "utf8"));
+    assert.match(written.image, /embedded media omitted/);
+    assert.ok(!written.image.includes("AQID"), "the payload itself must not survive into the snapshot");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("saving a snapshot leaves the graph it was given untouched", async () => {
+  // The caller hands this exact object to the provider immediately afterwards.
+  // Redacting in place would submit a graph with no image in it -- a paid run
+  // that cannot succeed, and a failure that would look like the provider's.
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-snapshot-mutate-"));
+  try {
+    const base64 = "A".repeat(200_000);
+    const workflow = { "63": { inputs: { image: base64, upscale: 4 } } };
+    await saveWorkflowSnapshot(path.join(tempDir, "workflow.json"), workflow);
+
+    assert.equal(workflow["63"].inputs.image, base64, "the in-memory graph must still carry the image");
+    assert.equal(workflow["63"].inputs.upscale, 4);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

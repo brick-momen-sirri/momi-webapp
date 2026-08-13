@@ -6,7 +6,7 @@ import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { isPathWithinRoot } from "./pathContainment.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
-import { assertNoEmbeddedMedia, readJsonFile } from "./storageService.js";
+import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
 import type {
   ArchVizGridOptions,
   CreateJobRequest,
@@ -113,10 +113,27 @@ export async function detectWorkflowLoadVideoNames(model: WorkflowModel) {
   return names.length ? names : undefined;
 }
 
+/**
+ * Records the graph that ran, for reference.
+ *
+ * Inline-transport presets carry their input image as base64 inside the graph
+ * itself, which used to fail the whole job here: the snapshot refused to write
+ * an oversized string, and it is written before submission, so the render died
+ * before it was ever sent. The bytes are not what this file is for -- the inputs
+ * are already stored as job media -- so they are replaced by a placeholder
+ * rather than treated as a reason to throw away the work.
+ *
+ * Redacts a copy: `workflow` itself is handed to the provider immediately after
+ * this returns, and must still contain the image.
+ */
 export async function saveWorkflowSnapshot(filePath: string, workflow: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  assertNoEmbeddedMedia(workflow, "workflow snapshot");
-  await fs.writeFile(filePath, `${JSON.stringify(workflow, null, 2)}\n`, "utf8");
+  const snapshot = redactEmbeddedMedia(workflow);
+  // Kept as a backstop: redaction should have removed anything that trips this,
+  // so if it still fires the redactor has a gap rather than the graph being at
+  // fault.
+  assertNoEmbeddedMedia(snapshot, "workflow snapshot");
+  await fs.writeFile(filePath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
 }
 
 async function listJsonFiles(root: string): Promise<string[]> {

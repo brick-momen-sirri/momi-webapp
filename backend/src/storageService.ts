@@ -106,6 +106,59 @@ export function assertNoEmbeddedMedia(value: unknown, location = "metadata") {
   assertNoEmbeddedMediaInner(value, location, new WeakSet<object>());
 }
 
+/**
+ * A copy of `value` with embedded media and over-long strings swapped for short
+ * placeholders that record what was dropped and how big it was.
+ *
+ * For records that are *about* media this is the wrong tool -- there, an embedded
+ * payload means something upstream failed to externalize it, and
+ * assertNoEmbeddedMedia should still refuse. This is for documents that
+ * legitimately carry media inline and are written for reference rather than for
+ * their payload: a workflow snapshot exists to record which graph ran with which
+ * settings, and a few MB of base64 pixels answer no question anyone asks of it.
+ *
+ * NEVER mutates the input. The caller is typically holding the same object to
+ * hand to the provider moments later, so stripping in place would quietly send a
+ * graph with no image in it.
+ */
+export function redactEmbeddedMedia<T>(value: T): T {
+  return redactInner(value, new Map<object, unknown>()) as T;
+}
+
+function redactInner(value: unknown, seen: Map<object, unknown>): unknown {
+  if (typeof value === "string") {
+    if (isEmbeddedMediaString(value)) return `[embedded media omitted: ${describeSize(value)}]`;
+    if (value.length > MAX_METADATA_STRING_LENGTH) return `[oversized value omitted: ${describeSize(value)}]`;
+    return value;
+  }
+
+  if (!value || typeof value !== "object") return value;
+  // Shared and cyclic references resolve to the same redacted copy rather than
+  // recursing forever or duplicating a large subtree.
+  const cached = seen.get(value);
+  if (cached !== undefined) return cached;
+
+  if (Array.isArray(value)) {
+    const copy: unknown[] = [];
+    seen.set(value, copy);
+    for (const item of value) copy.push(redactInner(item, seen));
+    return copy;
+  }
+
+  const copy: Record<string, unknown> = {};
+  seen.set(value, copy);
+  for (const [key, child] of Object.entries(value)) {
+    copy[key] = redactInner(child, seen);
+  }
+  return copy;
+}
+
+function describeSize(value: string) {
+  const bytes = Buffer.byteLength(value, "utf8");
+  const mib = bytes / (1024 * 1024);
+  return mib >= 1 ? `${mib.toFixed(1)} MiB` : `${(bytes / 1024).toFixed(0)} KiB`;
+}
+
 export function assertManifestRecordSafe(record: unknown, location = "manifest record") {
   assertNoEmbeddedMedia(record, location);
   const line = JSON.stringify(record);
