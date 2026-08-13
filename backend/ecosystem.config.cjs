@@ -35,6 +35,20 @@ const commonEnv = {
   BACKUP_AZURE_PREFIX: process.env.BACKUP_AZURE_PREFIX || "momi-backend",
   AZCOPY_PATH: process.env.AZCOPY_PATH || "azcopy",
   MEDIA_BACKUP_ENABLED: process.env.MEDIA_BACKUP_ENABLED || "true",
+  // Still Images preset pods (dispatcher/monolith only; see runpodEndpoints.ts).
+  // Each preset runs on its own RunPod endpoint, and a job whose endpoint is
+  // unset is refused at dispatch rather than falling back to the Animation
+  // endpoint, where the graph would fail on its first loader node.
+  //
+  // Declared here rather than left to the environment because pm2 restarts
+  // inherit the *daemon's* environment, captured when the daemon started -- so a
+  // variable set after that never reaches the process, even with --update-env.
+  // Listing it makes the pm2 CLI read it from the launching shell instead.
+  // These are endpoint identifiers, not credentials.
+  RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT: process.env.RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT || "",
+  RUNPOD_ENDPOINT_ID_PRO_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER || "",
+  RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR: process.env.RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR || "",
+  RUNPOD_ENDPOINT_ID_QWEN_EDIT: process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT || "",
 };
 
 const processSafety = {
