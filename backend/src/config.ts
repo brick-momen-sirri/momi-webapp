@@ -208,6 +208,19 @@ export const runpodInlineImageAutoCompress = !["0", "false", "no", "off"].includ
 );
 export const runpodInlineImageMaxDimension = positiveNumber(process.env.RUNPOD_INLINE_IMAGE_MAX_DIMENSION, 4096);
 export const runpodInlineImageMinQuality = boundedNumber(process.env.RUNPOD_INLINE_IMAGE_MIN_QUALITY, 55, 20, 95);
+// The same fallback for video: without RUNPOD_INPUT_BASE_URL an oversized video
+// input is re-encoded at a lower bitrate rather than failing the job outright.
+// Unlike the image fallback this never changes resolution -- see
+// runpodVideoInlineService.ts for why that is load-bearing.
+export const runpodInlineVideoAutoCompress = !["0", "false", "no", "off"].includes(
+  String(process.env.RUNPOD_INLINE_VIDEO_AUTO_COMPRESS ?? "true")
+    .trim()
+    .toLowerCase(),
+);
+// Floor for the re-encode. Below this a long clip squeezed into the inline
+// budget would be too degraded to be worth the paid provider run, so the
+// backend fails with the base-URL hint instead.
+export const runpodInlineVideoMinBitrate = positiveNumber(process.env.RUNPOD_INLINE_VIDEO_MIN_BITRATE, 400_000);
 export const runpodOutputMaxBytes = positiveNumber(process.env.RUNPOD_OUTPUT_MAX_BYTES, 1024 * 1024 * 1024);
 export const runpodTextOutputMaxBytes = Math.max(1024, positiveNumber(process.env.RUNPOD_TEXT_OUTPUT_MAX_BYTES, 1024 * 1024));
 // Retries downloading completed results whose media is still on a remote URL

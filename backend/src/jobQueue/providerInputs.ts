@@ -23,6 +23,7 @@ import { isAllowedMediaPath, resolveAllowedExistingMediaPath } from "../mediaPat
 import type { RunpodComfyImageInput } from "../runpodComfyService.js";
 import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "../runpodImageInlineService.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "../runpodInputUrlService.js";
+import { prepareRunpodInlineVideoFile } from "../runpodVideoInlineService.js";
 import { prepareRunpodVideoFile } from "../runpodVideoPreprocessService.js";
 import { safeSegment } from "../storageService.js";
 import type { Job, WorkflowModel } from "../types.js";
@@ -58,7 +59,9 @@ export async function materializeRunpodInputVideo(job: Job, model: WorkflowModel
   const preparedFilePath = safeFilePath ? await prepareRunpodVideoFile(safeFilePath, inputFolder, model) : undefined;
   return {
     videos: [
-      preparedFilePath ? await runpodFileInput(preparedFilePath, name, "video") : await runpodVideoInput(job.inputVideo, name),
+      preparedFilePath
+        ? await runpodFileInput(preparedFilePath, name, "video", { videoWorkFolder: inputFolder })
+        : await runpodVideoInput(job.inputVideo, name, inputFolder),
     ],
     videoName: name,
   };
@@ -70,7 +73,7 @@ async function runpodImageInput(value: string, name: string, inlineImageMaxBytes
   }
   const filePath = localMediaFilePathFromUrl(value);
   if (filePath) {
-    return runpodFileInput(filePath, name, "image", inlineImageMaxBytes);
+    return runpodFileInput(filePath, name, "image", { inlineImageMaxBytes });
   }
   if (/^https?:\/\//i.test(value)) {
     return { name, url: value };
@@ -78,13 +81,13 @@ async function runpodImageInput(value: string, name: string, inlineImageMaxBytes
   throw new Error("RunPod image inputs must be saved media, browser data URLs, or public http(s) URLs.");
 }
 
-async function runpodVideoInput(value: string, name: string): Promise<RunpodComfyImageInput> {
+async function runpodVideoInput(value: string, name: string, videoWorkFolder?: string): Promise<RunpodComfyImageInput> {
   if (value.startsWith("data:video/")) {
     return runpodInlineVideoDataUrlInput(value, name);
   }
   const filePath = localMediaFilePathFromUrl(value);
   if (filePath) {
-    return runpodFileInput(filePath, name, "video");
+    return runpodFileInput(filePath, name, "video", { videoWorkFolder });
   }
   if (/^https?:\/\//i.test(value)) {
     return { name, url: value };
@@ -92,11 +95,18 @@ async function runpodVideoInput(value: string, name: string): Promise<RunpodComf
   throw new Error("RunPod video inputs must be saved media, browser data URLs, or public http(s) URLs.");
 }
 
+type RunpodFileInputOptions = {
+  inlineImageMaxBytes?: number;
+  // Scratch folder an oversized video may be re-encoded into. Absent for
+  // callers with no per-job folder, which keeps the strict size assertion.
+  videoWorkFolder?: string;
+};
+
 async function runpodFileInput(
   filePath: string,
   name: string,
   kind: RunpodInputKind,
-  inlineImageMaxBytes?: number,
+  options: RunpodFileInputOptions = {},
 ): Promise<RunpodComfyImageInput> {
   const safeFilePath = await requireAllowedExistingMediaPath(filePath);
   const signedUrl = createRunpodInputUrl(safeFilePath, kind);
@@ -105,7 +115,12 @@ async function runpodFileInput(
   }
 
   if (kind === "image") {
-    return runpodInlineImageFileInput(safeFilePath, name, inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
+    return runpodInlineImageFileInput(safeFilePath, name, options.inlineImageMaxBytes ?? runpodInlineImageByteBudget(1));
+  }
+
+  if (options.videoWorkFolder) {
+    const prepared = await prepareRunpodInlineVideoFile({ filePath: safeFilePath, workFolder: options.videoWorkFolder });
+    return { name, image: prepared.image };
   }
 
   return {
@@ -142,6 +157,10 @@ async function runpodInlineImageFileInput(filePath: string, name: string, maxByt
   return { name: prepared.name, image: prepared.image };
 }
 
+// Not routed through the re-encode fallback: every video the app submits is
+// uploaded first and arrives as an /api/media path, so a data URL video is a
+// legacy shape only. Re-encoding one would mean staging decoded bytes back to
+// disk for a case production cannot reach.
 function runpodInlineVideoDataUrlInput(value: string, name: string): RunpodComfyImageInput {
   const byteLength = dataUrlBase64ByteLength(value);
   if (byteLength != null) {

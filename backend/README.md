@@ -73,6 +73,8 @@ For large image/video inputs, set `RUNPOD_INPUT_BASE_URL` to a public HTTPS URL 
 
 When `RUNPOD_INPUT_BASE_URL` is not configured, oversized image inputs are automatically resized and re-encoded before inline JSON submission so the request stays below RunPod's limit. This fallback can reduce image quality; set `RUNPOD_INLINE_IMAGE_AUTO_COMPRESS=false` to restore strict failures, or tune `RUNPOD_INLINE_IMAGE_MAX_DIMENSION` and `RUNPOD_INLINE_IMAGE_MIN_QUALITY`.
 
+Oversized *video* inputs get the same treatment, with one deliberate difference: the re-encode lowers the bitrate but never changes the resolution. Video dimensions are already normalized for each provider's limits by the video preprocess step (Kling O3's 720–2160px range, Seedance 2.0's reference pixel cap), so downscaling here would silently undo that and get the job rejected by the provider instead. When even `RUNPOD_INLINE_VIDEO_MIN_BITRATE` cannot fit the inline budget the job fails with the base-URL hint rather than sending a badly degraded clip to a paid run. Set `RUNPOD_INLINE_VIDEO_AUTO_COMPRESS=false` to restore strict failures. Requires FFmpeg and ffprobe on `PATH` (or `FFMPEG_PATH`/`FFPROBE_PATH`).
+
 By default, RunPod mode scans `SERVERLESS_WORKFLOW_ROOT` for clean serverless workflow JSON files. Local Comfy development scans the legacy Comfy custom-node workflow folders unless `WORKFLOW_ROOTS` is explicitly set.
 
 Serverless credit usage is stored on each job and, when a local Credit Tracker is reachable, mirrored to `/credit-tracker/api/ingest-rows`. If `CREDIT_TRACKER_URLS` is not set, the backend tries `http://127.0.0.1:8188` first and then the configured Comfy pool servers.
