@@ -133,7 +133,10 @@ function StillImageJobCard({
 
   return (
     <article className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
-      <div className="flex flex-col gap-3 border-b border-line pb-3 xl:flex-row xl:items-start xl:justify-between">
+      {/* Always a row, so the actions stay in the top-right corner. This used to
+          become one only at xl, which put the toolbar underneath the title on
+          any window narrower than 1280px -- which is most of them. */}
+      <div className="flex flex-row items-start justify-between gap-3 border-b border-line pb-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
@@ -172,7 +175,9 @@ function StillImageJobCard({
             when the handlers are not supplied, which keeps the panel usable in
             tests and previews that do not wire them. */}
         {actions.onDownload ? (
-          <JobActions
+          // shrink-0 so the toolbar keeps its size and the badges wrap instead.
+          <div className="shrink-0">
+            <JobActions
             job={job}
             project={project}
             isFavorite={actions.favoriteJobIds?.has(job.id) ?? false}
@@ -186,8 +191,9 @@ function StillImageJobCard({
             onMove={actions.onMove ?? (async () => false)}
             onArchive={actions.onArchive ?? noop}
             onRestore={actions.onRestore ?? noop}
-            onDeletePermanently={actions.onDeletePermanently ?? noop}
-          />
+              onDeletePermanently={actions.onDeletePermanently ?? noop}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -259,9 +265,12 @@ function StillImageJobCard({
         </section>
       </div>
 
-      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <MetadataItem label="Status" value={job.status} />
         <MetadataItem label="Workflow" value={job.modelType} />
+        {/* Who submitted it. Projects are studio-wide, so a result in the list is
+            as likely to be someone else's as your own. */}
+        <MetadataItem label="User" value={userName} />
         <MetadataItem label="Input" value={`${inputImages.length} image${inputImages.length === 1 ? "" : "s"}`} />
         <MetadataItem label="Camera" value={saveNumber} />
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
@@ -301,12 +310,11 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
         // entirely. object-contain means the cap letterboxes rather than crops,
         // and the fullscreen preview is there for the extreme cases.
         <img
-          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.preview)}
-          // The card spans the panel now, so the 480px grid rendition it used to
-          // load was being upscaled and looked soft. 960 fits a normal display
-          // and 1440 covers a retina one; the browser takes whichever it needs
-          // rather than everyone paying for the larger.
-          srcSet={`${thumbnailMediaUrl(url, THUMBNAIL_WIDTH.preview)} 1x, ${thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen)} 2x`}
+          // 1440, the largest rendition. The card spans the panel and these are
+          // the studio's own renders being judged, so softness reads as a
+          // quality problem with the render itself. Still a rendition -- the
+          // original can be 100+ MB and is only ever fetched by Download.
+          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen)}
           alt={`Result for ${job.modelType}`}
           loading="lazy"
           decoding="async"

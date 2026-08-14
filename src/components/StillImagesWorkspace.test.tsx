@@ -71,6 +71,14 @@ describe("StillImagesWorkspace", () => {
     expect(screen.getByText("No still image results for this project yet")).toBeInTheDocument();
   });
 
+  it("names the user who submitted the job in the metadata row", () => {
+    // Projects are studio-wide, so a result in this list is as likely to be
+    // someone else's as your own.
+    renderPanel([stillJob()]);
+    expect(screen.getByText("User")).toBeInTheDocument();
+    expect(screen.getAllByText("Momen").length).toBeGreaterThan(0);
+  });
+
   it("renders a completed job with its result image and metadata", () => {
     renderPanel([stillJob()]);
 
@@ -90,12 +98,12 @@ describe("StillImagesWorkspace", () => {
     renderPanel([stillJob()]);
 
     const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
-    // 960, not the 480 grid size: the card spans the panel, so the smaller
-    // rendition was being upscaled and looked soft.
-    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=960");
-    // And a 2x source, so a retina display gets real pixels rather than everyone
-    // paying for the larger file.
-    expect(result.getAttribute("srcset")).toContain("w=1440 2x");
+    // 1440, the largest rendition: the card spans the panel and these renders
+    // are being judged on quality, so a smaller one upscaled reads as a fault in
+    // the render rather than in the preview.
+    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=1440");
+    // Still a rendition, never the un-resized media route.
+    expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
     // Nothing on the card may point at the un-resized media route.
     expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
     // jsdom does not reflect these as IDL properties, so read the attributes.
