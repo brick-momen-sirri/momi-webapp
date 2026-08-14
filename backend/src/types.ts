@@ -255,11 +255,30 @@ export type RunpodJobProgress = {
   /**
    * What the worker last reported it was doing, e.g. "Sampling tiles".
    *
-   * Comes from the worker's own progress stream, mapped from the ComfyUI node id
-   * it names. Absent for workers that emit nothing, and for every phase outside
-   * the render itself.
+   * Comes from the worker's own progress reporting, mapped from the ComfyUI node
+   * id it names. Absent for workers that emit nothing, and for every phase
+   * outside the render itself.
    */
   detail?: string;
+  /** Where the current step has got to, when the worker counts it. */
+  stepDone?: number;
+  stepTotal?: number;
+  /**
+   * Which item those steps belong to. Enhancement works one tile at a time and
+   * restarts its step counter for each, so without this the numbers read as
+   * going backwards.
+   */
+  item?: number;
+  /**
+   * The steps already finished, oldest first.
+   *
+   * A trail rather than a plan: it lists what the worker has actually done, not
+   * what it is expected to do next. The graph branches on the enhancement, body
+   * and face toggles, so the remaining steps are genuinely not known in advance
+   * -- and a checklist that guessed them would mislead exactly when a run takes
+   * an unusual path. Bounded, because it is carried on every job payload.
+   */
+  completedSteps?: string[];
   phaseStartedAt: string;
 };
 

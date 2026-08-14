@@ -133,14 +133,25 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       // oldest-first and most name nothing useful, so this walks backwards for
       // the latest recognisable step rather than reporting the first.
       let detail = previous?.detail;
+      let step: { done: number; total: number } | undefined;
+      let item: number | undefined;
       for (const chunk of [...(observation.streamChunks ?? [])].reverse()) {
         const label = stillImage ? stillImageNodeStatusLabel(stillImage.categoryId, chunk.nodeId) : undefined;
         if (label) {
-          // The step count is the worker's own, so it is shown as-is. It says
-          // how far through this node the run is, not through the graph.
-          detail = chunk.step ? `${label} (step ${chunk.step.done}/${chunk.step.total})` : label;
+          detail = label;
+          step = chunk.step;
+          item = chunk.item;
           break;
         }
+      }
+
+      // The trail of what is finished. A step joins it when a different one
+      // starts, so the current step is never listed as done.
+      const completedSteps = [...(previous?.completedSteps ?? [])];
+      if (previous?.detail && detail && previous.detail !== detail && !completedSteps.includes(previous.detail)) {
+        completedSteps.push(previous.detail);
+        // Bounded: this rides on every job payload the API returns.
+        while (completedSteps.length > 12) completedSteps.shift();
       }
 
       const unchanged =
@@ -148,7 +159,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
         previous.workerId === observation.workerId &&
         previous.delayMs === observation.delayMs &&
         previous.runpodStatus === observation.status &&
-        previous.detail === detail;
+        previous.detail === detail &&
+        previous.stepDone === step?.done &&
+        previous.item === item;
       if (unchanged) return;
 
       setJobPhase(job, phase, {
@@ -156,6 +169,10 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
         workerId: observation.workerId,
         delayMs: observation.delayMs,
         detail,
+        stepDone: step?.done,
+        stepTotal: step?.total,
+        item,
+        completedSteps,
         // A phase that is only gaining detail (a worker id arriving, or the next
         // node starting) keeps its original start time, or the elapsed counter
         // would jump back to zero on every step.
@@ -325,7 +342,17 @@ async function captureRunpodPostBalance(job: Job, activityBaseline: RunpodActivi
 function setJobPhase(
   job: Job,
   phase: NonNullable<Job["runpodProgress"]>["phase"],
-  options: { runpodStatus?: string; workerId?: string; delayMs?: number; detail?: string; keepStartedAt?: boolean } = {},
+  options: {
+    runpodStatus?: string;
+    workerId?: string;
+    delayMs?: number;
+    detail?: string;
+    stepDone?: number;
+    stepTotal?: number;
+    item?: number;
+    completedSteps?: string[];
+    keepStartedAt?: boolean;
+  } = {},
 ) {
   job.runpodProgress = {
     phase,
@@ -333,6 +360,10 @@ function setJobPhase(
     workerId: options.workerId,
     delayMs: options.delayMs,
     detail: options.detail,
+    stepDone: options.stepDone,
+    stepTotal: options.stepTotal,
+    item: options.item,
+    completedSteps: options.completedSteps?.length ? options.completedSteps : undefined,
     phaseStartedAt: (options.keepStartedAt && job.runpodProgress?.phaseStartedAt) || new Date().toISOString(),
   };
 }

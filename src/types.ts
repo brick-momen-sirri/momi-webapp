@@ -128,6 +128,12 @@ export type RunpodJobProgress = {
   delayMs?: number;
   /** What the worker last reported doing, e.g. "Sampling tiles". */
   detail?: string;
+  stepDone?: number;
+  stepTotal?: number;
+  /** Which item the steps belong to, for nodes that work through a batch. */
+  item?: number;
+  /** Steps already finished, oldest first. A record, not a forecast. */
+  completedSteps?: string[];
   phaseStartedAt: string;
 };
 

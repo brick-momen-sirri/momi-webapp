@@ -56,6 +56,21 @@ export function extractStepFraction(text: string) {
   return Number.isFinite(done) && Number.isFinite(total) && total > 0 ? { done, total } : undefined;
 }
 
+/**
+ * Which item a step belongs to: "node=32 item=6 step=11/30".
+ *
+ * Without this the step count looks like it runs backwards -- 13/30, 27/30,
+ * 7/30 -- because enhancement samples one tile at a time and the step counter
+ * restarts for each. The item number is what makes that sequence read as
+ * progress rather than a fault.
+ */
+const ITEM_NUMBER = /\bitem=(\d+)/;
+
+export function extractItemNumber(text: string) {
+  const value = Number(ITEM_NUMBER.exec(text)?.[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 // Chunks can be re-delivered, so each is remembered by signature. Bounded
 // because a long render emits thousands and this set would otherwise grow for
 // the life of the job.
@@ -90,6 +105,8 @@ export type StreamProgressChunk = {
   nodeId?: string;
   /** Sampler steps within that node, when the line counts them. */
   step?: { done: number; total: number };
+  /** Which item those steps belong to, for nodes that work through a batch. */
+  item?: number;
 };
 
 export function createStreamProgressReader(label = ""): StreamProgressReader {
@@ -122,7 +139,12 @@ export function createStreamProgressReader(label = ""): StreamProgressReader {
             if (stale !== undefined) seen.delete(stale);
           }
 
-          chunks.push({ text, nodeId: extractNodeId(text), step: extractStepFraction(text) });
+          chunks.push({
+            text,
+            nodeId: extractNodeId(text),
+            step: extractStepFraction(text),
+            item: extractItemNumber(text),
+          });
         }
       }
 

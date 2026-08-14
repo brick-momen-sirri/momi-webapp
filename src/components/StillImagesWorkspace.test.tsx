@@ -156,10 +156,12 @@ describe("StillImagesWorkspace", () => {
     ]);
 
     expect(screen.getByText("Waiting for a worker")).toBeInTheDocument();
-    expect(screen.getByText("IN_QUEUE")).toBeInTheDocument();
+    // RunPod's own status string is deliberately not shown: "IN_QUEUE" is
+    // jargon, and the label above already says it in English.
+    expect(screen.queryByText("IN_QUEUE")).not.toBeInTheDocument();
   });
 
-  it("shows the worker and queue wait once RunPod reports them", () => {
+  it("shows the real queue wait once RunPod reports it", () => {
     renderPanel([
       stillJob({
         status: "running",
@@ -173,12 +175,38 @@ describe("StillImagesWorkspace", () => {
       }),
     ]);
 
-    expect(screen.getByText("Processing on the worker")).toBeInTheDocument();
+    expect(screen.getByText(/Processing on the worker/)).toBeInTheDocument();
 
-    // Real figures from RunPod, not a synthesised percentage.
-    // 11673ms of real queue time, rounded to the second.
+    // Real figures from RunPod, not a synthesised percentage: 11673ms of queue
+    // time, rounded to the second.
     expect(screen.getByText(/queued 12s/)).toBeInTheDocument();
-    expect(screen.getByText(/worker fcphj8m6/)).toBeInTheDocument();
+    // The worker id is not shown. It is support detail rather than something an
+    // artist waiting on a render needs; it stays on the job record and in logs.
+    expect(screen.queryByText(/fcphj8m6/)).not.toBeInTheDocument();
+  });
+
+  it("shows finished steps above the current one, so progress is visible", () => {
+    // The single line this replaced answered "what now?" but never "how far?".
+    renderPanel([
+      stillJob({
+        status: "running",
+        runpodProgress: {
+          phase: "running",
+          detail: "Sampling tiles",
+          stepDone: 11,
+          stepTotal: 30,
+          item: 6,
+          completedSteps: ["Loading the input image", "Resizing the image", "Building the mask"],
+          phaseStartedAt: new Date().toISOString(),
+        },
+      }),
+    ]);
+
+    expect(screen.getByText("Loading the input image")).toBeInTheDocument();
+    expect(screen.getByText("Building the mask")).toBeInTheDocument();
+    expect(screen.getByText("Sampling tiles")).toBeInTheDocument();
+    // The tile number is what stops a restarting step count reading as a fault.
+    expect(screen.getByText(/tile 6 · step 11\/30/)).toBeInTheDocument();
   });
 
   it("leads with what the worker itself reported, keeping the phase as context", () => {
@@ -197,7 +225,9 @@ describe("StillImagesWorkspace", () => {
     ]);
 
     expect(screen.getByText("Sampling tiles")).toBeInTheDocument();
-    expect(screen.getByText("Processing on the worker")).toBeInTheDocument();
+    // The phase drops to the footer once the worker has something specific to
+    // say, so it reads as context rather than competing with the live step.
+    expect(screen.getByText(/Processing on the worker/)).toBeInTheDocument();
   });
 
   it("falls back to the job status when no phase has been reported yet", () => {
