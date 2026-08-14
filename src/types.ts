@@ -115,6 +115,22 @@ export type MediaResolution = {
   label?: string;
 };
 
+/**
+ * What a running job is doing right now. Mirrors RunpodJobProgress on the
+ * backend; every field is observed rather than estimated, and there is
+ * deliberately no percentage -- the pods report nothing from inside the worker,
+ * so any completion figure would be invented.
+ */
+export type RunpodJobProgress = {
+  phase: "preparing" | "submitting" | "queued" | "running" | "saving";
+  runpodStatus?: string;
+  workerId?: string;
+  delayMs?: number;
+  /** What the worker last reported doing, e.g. "Sampling tiles". */
+  detail?: string;
+  phaseStartedAt: string;
+};
+
 export type Job = {
   id: string;
   projectId: string;
@@ -149,6 +165,7 @@ export type Job = {
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
   videoLength?: string;
+  runpodProgress?: RunpodJobProgress;
   creditsEstimated?: number;
   creditsUsed?: number;
   creditsActual?: number;

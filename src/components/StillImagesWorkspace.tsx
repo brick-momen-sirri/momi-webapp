@@ -20,6 +20,8 @@ import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../ser
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
+import { JobProgress } from "./JobProgress";
+import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
 
 type StillImagesWorkspaceProps = {
   category: StillImageCategoryDefinition;
@@ -173,11 +175,15 @@ function StillImageJobCard({ job, project, userName }: { job: Job; project?: Pro
           </div>
         </section>
 
-        <section className="result-section mt-4 flex justify-center">
+        <section className="result-section mt-4">
           {resultUrl && job.status === "completed" ? (
             <StillImageResult job={job} url={resultUrl} />
+          ) : isJobWorking(job.status) ? (
+            <div className="flex min-h-72 w-full flex-col items-center justify-center rounded-lg border border-dashed border-line bg-mist/60 px-6">
+              <JobProgress job={job} />
+            </div>
           ) : (
-            <div className="flex min-h-72 w-full max-w-5xl flex-col items-center justify-center rounded-lg border border-dashed border-line bg-mist/60 px-6 text-center">
+            <div className="flex min-h-72 w-full flex-col items-center justify-center rounded-lg border border-dashed border-line bg-mist/60 px-6 text-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-full border border-line bg-white text-stone-400 shadow-sm">
                 {job.status === "failed" || job.status === "canceled" ? (
                   <AlertTriangle className="h-5 w-5" />
@@ -229,28 +235,37 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
   const name = job.fileName ?? `${job.modelType} result`;
 
   return (
-    <div ref={containerRef} className="w-full">
-      <div className="relative flex justify-center">
-        {inView ? (
-          <img
-            src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
-            alt={`Result for ${job.modelType}`}
-            loading="lazy"
-            decoding="async"
-            className="max-h-[32rem] w-auto max-w-full rounded-lg border border-line bg-stone-100 object-contain"
-          />
-        ) : (
-          <div className="flex h-72 w-full max-w-5xl items-center justify-center rounded-lg border border-line bg-stone-100">
-            <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
-              Result preview
-            </span>
-          </div>
-        )}
-      </div>
+    <div ref={containerRef} className="relative w-full overflow-hidden rounded-lg border border-line bg-stone-100">
+      {inView ? (
+        // Fills the card's width and takes whatever height the aspect ratio asks
+        // for, so a portrait render makes the card taller instead of being boxed
+        // into a fixed frame. `h-auto` with no cropping keeps the ratio exact.
+        //
+        // The viewport cap is the one limit: a very long vertical image would
+        // otherwise push the metadata below it off the bottom of a screen
+        // entirely. object-contain means the cap letterboxes rather than crops,
+        // and the fullscreen preview is there for the extreme cases.
+        <img
+          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
+          alt={`Result for ${job.modelType}`}
+          loading="lazy"
+          decoding="async"
+          className="block h-auto max-h-[85vh] w-full object-contain"
+        />
+      ) : (
+        // Only a placeholder height: the real one is unknown until the image
+        // loads, and guessing would make the page jump twice instead of once.
+        <div className="flex min-h-[20rem] w-full items-center justify-center">
+          <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
+            Result preview
+          </span>
+        </div>
+      )}
 
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-        <button
-          type="button"
+      <ResultOverlayActions>
+        <ResultOverlayButton
+          icon={<Maximize2 className="h-4 w-4" />}
+          label="Open preview"
           onClick={() =>
             setFullscreenImage({
               previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
@@ -260,24 +275,16 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
               originalUrl: url,
             })
           }
-          className="flex items-center gap-1.5 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-bold text-ink shadow-card transition hover:border-accent hover:bg-cyan-50/50"
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
-          Open preview
-        </button>
+        />
         {/* A plain link, not a fetch: the backend already answers this with
             Content-Disposition: attachment, so the browser streams it to disk
             without the page ever holding the bytes. */}
-        <a
+        <ResultOverlayLink
+          icon={<Download className="h-4 w-4" />}
+          label="Download original"
           href={backendResultFileUrl(job.id, 0)}
-          download
-          className="flex items-center gap-1.5 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-bold text-ink shadow-card transition hover:border-accent hover:bg-cyan-50/50"
-          title="Download the untouched full-resolution original"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Download original
-        </a>
-      </div>
+        />
+      </ResultOverlayActions>
 
       {fullscreenImage ? (
         <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} />
@@ -380,6 +387,10 @@ function MetadataItem({ label, value }: { label: string; value: string }) {
       <p className="mt-1 truncate text-xs font-semibold capitalize text-ink">{value}</p>
     </div>
   );
+}
+
+function isJobWorking(status: Job["status"]) {
+  return status === "queued" || status === "sending" || status === "running";
 }
 
 function resultPlaceholderTitle(status: Job["status"]) {

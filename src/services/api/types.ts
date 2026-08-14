@@ -50,6 +50,7 @@ export type BackendJob = {
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
   status: Job["status"];
+  runpodProgress?: Job["runpodProgress"];
   inputImages: string[];
   inputVideo?: string;
   resultUrls: string[];

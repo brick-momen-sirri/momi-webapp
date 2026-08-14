@@ -228,6 +228,41 @@ export type CreateJobRequest = {
   userId: string;
 };
 
+/**
+ * What a running job is actually doing, for the waiting UI.
+ *
+ * Every field here is observed, never estimated. RunPod's serverless API reports
+ * a job's status plus how long it queued and how long it has executed, and our
+ * own pipeline knows what it is doing either side of that. What is deliberately
+ * absent is anything from *inside* the worker -- loading models, sampling steps,
+ * uploading the result. These pods are not generator handlers (their /stream is
+ * empty), so ComfyUI's progress never leaves the container. Showing a stage the
+ * worker never reported would be a guess dressed as a fact, so there is no
+ * percentage here at all: the UI shows the phase and how long it has been in it.
+ *
+ * `phaseStartedAt` exists so the client can tick the elapsed time itself. The
+ * alternative -- writing a counter on every poll -- would put a database write
+ * per job per few seconds behind a purely cosmetic number.
+ */
+export type RunpodJobProgress = {
+  phase: "preparing" | "submitting" | "queued" | "running" | "saving";
+  /** RunPod's own status string (IN_QUEUE, IN_PROGRESS, ...) when there is one. */
+  runpodStatus?: string;
+  /** Which worker picked the job up. Only known once one has. */
+  workerId?: string;
+  /** How long RunPod held the job before a worker took it. */
+  delayMs?: number;
+  /**
+   * What the worker last reported it was doing, e.g. "Sampling tiles".
+   *
+   * Comes from the worker's own progress stream, mapped from the ComfyUI node id
+   * it names. Absent for workers that emit nothing, and for every phase outside
+   * the render itself.
+   */
+  detail?: string;
+  phaseStartedAt: string;
+};
+
 export type Job = {
   id: string;
   clientRequestId?: string;
@@ -241,6 +276,7 @@ export type Job = {
   runpodEndpointId?: string;
   runpodStatus?: string;
   runpodSubmissionState?: "preparing" | "submitting" | "submitted";
+  runpodProgress?: RunpodJobProgress;
   projectId: string;
   folderId?: string | null;
   folderName?: string;

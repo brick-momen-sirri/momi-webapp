@@ -7,6 +7,7 @@ import {
   runpodTimeoutMs,
 } from "./config.js";
 import { defaultRunpodEndpoint, type RunpodEndpoint } from "./runpodEndpoints.js";
+import { createStreamProgressReader, type StreamProgressChunk, type StreamProgressReader } from "./runpodStreamProgress.js";
 import {
   combinedTextArtifactContent,
   extractRunpodTextArtifacts,
@@ -30,6 +31,24 @@ export type RunpodMediaResult = {
   isVideo: boolean;
 };
 
+/**
+ * One observation from polling RunPod, passed through without interpretation.
+ * What it means for the job is the caller's decision, not this module's.
+ */
+export type RunpodPollObservation = {
+  status: string;
+  /** Milliseconds RunPod queued the job before a worker took it. */
+  delayMs?: number;
+  /** Milliseconds the worker has been executing. */
+  executionMs?: number;
+  workerId?: string;
+  /**
+   * Progress the worker emitted since the previous poll, oldest first. Empty
+   * for workers that report nothing, and for every poll before one starts.
+   */
+  streamChunks?: StreamProgressChunk[];
+};
+
 export type RunpodComfyResult = {
   jobId?: string;
   status: string;
@@ -46,6 +65,8 @@ type RunpodComfyInput = {
   fetchImpl?: typeof fetch;
   shouldCancel?: () => boolean;
   onSubmitted?: (submission: { jobId: string; status: string }) => void | Promise<void>;
+  /** Called on each status poll so a caller can surface what the job is doing. */
+  onPoll?: (observation: RunpodPollObservation) => void | Promise<void>;
   // Omitted means the shared Animation endpoint. Still image jobs pass their
   // preset's own pod -- see runpodEndpoints.ts.
   endpoint?: RunpodEndpoint;
@@ -56,6 +77,7 @@ type ResumeRunpodComfyInput = {
   fetchImpl?: typeof fetch;
   shouldCancel?: () => boolean;
   endpoint?: RunpodEndpoint;
+  onPoll?: (observation: RunpodPollObservation) => void | Promise<void>;
 };
 
 type RunpodResponse = {
@@ -105,6 +127,7 @@ export async function runComfyWorkflowOnRunpod({
   fetchImpl = fetch,
   shouldCancel,
   onSubmitted,
+  onPoll,
   endpoint = defaultRunpodEndpoint(),
 }: RunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
@@ -141,7 +164,7 @@ export async function runComfyWorkflowOnRunpod({
     });
   }
 
-  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt, endpoint, shouldCancel);
+  return resolveRunpodResponse(firstResponse, fetchImpl, startedAt, endpoint, shouldCancel, onPoll);
 }
 
 export async function resumeComfyWorkflowOnRunpod({
@@ -149,10 +172,11 @@ export async function resumeComfyWorkflowOnRunpod({
   fetchImpl = fetch,
   shouldCancel,
   endpoint = defaultRunpodEndpoint(),
+  onPoll,
 }: ResumeRunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
   throwIfCancellationRequested(shouldCancel);
-  return resolveRunpodResponse({ id: jobId, status: "IN_PROGRESS" }, fetchImpl, Date.now(), endpoint, shouldCancel);
+  return resolveRunpodResponse({ id: jobId, status: "IN_PROGRESS" }, fetchImpl, Date.now(), endpoint, shouldCancel, onPoll);
 }
 
 export async function cancelComfyWorkflowOnRunpod(
@@ -293,13 +317,42 @@ async function resolveRunpodResponse(
   startedAt: number,
   endpoint: RunpodEndpoint,
   shouldCancel?: () => boolean,
+  onPoll?: (observation: RunpodPollObservation) => void | Promise<void>,
 ): Promise<RunpodComfyResult> {
   let current = response;
+  // Only built when someone is listening, so a caller that does not want
+  // progress does not pay for an extra request per poll.
+  const streamReader = onPoll ? createStreamProgressReader() : undefined;
+
   while (true) {
     throwIfCancellationRequested(shouldCancel);
     const status = normalizeStatus(
       current.status ?? (current.output as Record<string, unknown> | undefined)?.status ?? "COMPLETED",
     );
+    // Reported before the pending check so a caller sees the terminal poll too,
+    // and never awaited into the failure path: a progress listener must not be
+    // able to break a job that RunPod is running fine.
+    if (onPoll) {
+      const jobId = runpodJobId(current);
+      // Drained on every poll while the job is live. Skipping this until the job
+      // looked "interesting" would lose the chunks emitted in the meantime --
+      // the buffer only hands each one over once.
+      const streamChunks =
+        streamReader && jobId && pendingStatuses.has(status)
+          ? await readStreamChunks(fetchImpl, endpoint, jobId, streamReader)
+          : [];
+      try {
+        await onPoll({
+          status,
+          delayMs: finiteNumber(current.delayTime),
+          executionMs: finiteNumber(current.executionTime),
+          workerId: stringFrom(current.workerId),
+          streamChunks,
+        });
+      } catch {
+        // Progress reporting is decoration; losing it must not lose the render.
+      }
+    }
     if (pendingStatuses.has(status)) {
       const jobId = runpodJobId(current);
       if (!jobId) {
@@ -696,6 +749,37 @@ function sumRows(rows: CreditUsageRow[], key: "total_estimated_credits" | "total
 function numberFrom(value: unknown) {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : undefined;
   return parsed != null && Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Drains the worker's progress buffer.
+ *
+ * Swallows every failure and returns nothing on error: the stream is an extra
+ * request per poll against an endpoint that may not implement it at all, and a
+ * job must never fail because its progress feed did.
+ */
+async function readStreamChunks(
+  fetchImpl: typeof fetch,
+  endpoint: RunpodEndpoint,
+  jobId: string,
+  reader: StreamProgressReader,
+): Promise<StreamProgressChunk[]> {
+  try {
+    const response = await fetchImpl(endpoint.streamUrl(jobId), {
+      method: "GET",
+      headers: runpodHeaders(),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return [];
+    return reader.read(await response.json());
+  } catch {
+    return [];
+  }
+}
+
+function finiteNumber(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function stringFrom(value: unknown) {

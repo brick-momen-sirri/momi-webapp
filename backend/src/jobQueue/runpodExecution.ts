@@ -22,7 +22,7 @@ import {
 } from "../runpodComfyService.js";
 import { resolveRunpodEndpoint } from "../runpodEndpoints.js";
 import { getStillImageCategory, stillImageSlotCount, type StillImageOptions } from "../stillImageCategories.js";
-import { buildStillImageWorkflow } from "../stillImageWorkflow.js";
+import { buildStillImageWorkflow, stillImageNodeStatusLabel } from "../stillImageWorkflow.js";
 import { materializeStillImageInputs } from "./stillImageInputMaterializer.js";
 import {
   beginRunpodBillableOperation,
@@ -73,6 +73,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     }
 
     if (!job.runpodJobId) job.runpodSubmissionState = "preparing";
+    setJobPhase(job, "preparing");
     job.creditBalanceBefore = job.creditBalanceBefore ?? (await captureCreditBalanceSnapshot());
     if (job.creditBalanceBefore) await deps.persistJob(job);
 
@@ -110,14 +111,61 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     if (await deps.settleRequestedCancellation(job, execution)) return;
     job.status = "running";
     if (!job.runpodJobId) job.runpodSubmissionState = "submitting";
+    setJobPhase(job, "submitting");
     await deps.persistJob(job);
 
     logMemory("before-runpod-request", job.id);
     const shouldStopRunpodWork = () =>
       deps.isCancellationRequested(job) || !deps.isExecutionCurrent(execution) || !deps.ownsDispatcherWork();
+
+    /**
+     * Translates a poll into a phase, and writes only when something actually
+     * changed. Polling runs every few seconds for the life of the job, so
+     * persisting each observation would mean a database write per job per tick
+     * for a number the client can derive from phaseStartedAt on its own.
+     */
+    const onPoll = async (observation: Parameters<NonNullable<Parameters<typeof runComfyWorkflowOnRunpod>[0]["onPoll"]>>[0]) => {
+      const phase = observation.status === "IN_QUEUE" ? "queued" : observation.status === "IN_PROGRESS" ? "running" : undefined;
+      if (!phase) return;
+      const previous = job.runpodProgress;
+
+      // The newest chunk that names a node we have a label for. Chunks arrive
+      // oldest-first and most name nothing useful, so this walks backwards for
+      // the latest recognisable step rather than reporting the first.
+      let detail = previous?.detail;
+      for (const chunk of [...(observation.streamChunks ?? [])].reverse()) {
+        const label = stillImage ? stillImageNodeStatusLabel(stillImage.categoryId, chunk.nodeId) : undefined;
+        if (label) {
+          detail = label;
+          break;
+        }
+      }
+
+      const unchanged =
+        previous?.phase === phase &&
+        previous.workerId === observation.workerId &&
+        previous.delayMs === observation.delayMs &&
+        previous.runpodStatus === observation.status &&
+        previous.detail === detail;
+      if (unchanged) return;
+
+      setJobPhase(job, phase, {
+        runpodStatus: observation.status,
+        workerId: observation.workerId,
+        delayMs: observation.delayMs,
+        detail,
+        // A phase that is only gaining detail (a worker id arriving, or the next
+        // node starting) keeps its original start time, or the elapsed counter
+        // would jump back to zero on every step.
+        keepStartedAt: previous?.phase === phase,
+      });
+      await deps.persistJob(job);
+    };
+
     const result = job.runpodJobId
-      ? await resumeComfyWorkflowOnRunpod({ jobId: job.runpodJobId, shouldCancel: shouldStopRunpodWork, endpoint })
+      ? await resumeComfyWorkflowOnRunpod({ jobId: job.runpodJobId, shouldCancel: shouldStopRunpodWork, endpoint, onPoll })
       : await runComfyWorkflowOnRunpod({
+          onPoll,
           workflow,
           images: runpodImages.images,
           videos: runpodVideo?.videos ?? [],
@@ -149,6 +197,11 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     job.creditUsage = creditUsage;
     applyAccountingCreditsToJob(job);
     job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
+
+    // The provider is done; everything after this is ours -- pulling the result
+    // out of S3, building previews, filing it into the project folder.
+    setJobPhase(job, "saving");
+    await deps.persistJob(job);
 
     logMemory("before-runpod-download", job.id);
     outputProject = getProject(job.projectId) ?? project;
@@ -184,6 +237,8 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     }
 
     if (await deps.settleRequestedCancellation(job, execution)) return;
+    // A finished card must stop claiming a worker is busy on it.
+    delete job.runpodProgress;
     if (!markJobCompleted(job, new Date().toISOString())) return;
     if (jobRemoteMediaEntries(job).length) deps.scheduleRemoteResultRecovery();
     logMemory("job-finished", job.id);
@@ -197,6 +252,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     const canceled = await deps.settleRequestedCancellation(job, execution);
     if (!canceled && job.status !== "canceled") {
       job.status = "failed";
+      delete job.runpodProgress;
       job.completedAt = new Date().toISOString();
       await captureRunpodPostBalance(job, activityBaseline);
       if (error instanceof RunpodComfyError) {
@@ -256,6 +312,27 @@ async function captureRunpodPostBalance(job: Job, activityBaseline: RunpodActivi
   job.creditsActual = actualCredits;
   job.creditsActualSource = COMPANY_BALANCE_DELTA_SOURCE;
   job.creditsUsed = actualCredits;
+}
+
+/**
+ * Records what the job is doing now.
+ *
+ * Clearing it on a terminal state matters: a finished or failed card must not
+ * keep claiming a worker is busy on it.
+ */
+function setJobPhase(
+  job: Job,
+  phase: NonNullable<Job["runpodProgress"]>["phase"],
+  options: { runpodStatus?: string; workerId?: string; delayMs?: number; detail?: string; keepStartedAt?: boolean } = {},
+) {
+  job.runpodProgress = {
+    phase,
+    runpodStatus: options.runpodStatus,
+    workerId: options.workerId,
+    delayMs: options.delayMs,
+    detail: options.detail,
+    phaseStartedAt: (options.keepStartedAt && job.runpodProgress?.phaseStartedAt) || new Date().toISOString(),
+  };
 }
 
 function applyAccountingCreditsToJob(job: Job) {

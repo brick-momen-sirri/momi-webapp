@@ -161,6 +161,7 @@ export const runpodEndpointUrl =
   (runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/${runpodSubmissionMode === "async" ? "run" : "runsync"}` : "");
 export const runpodStatusUrl = (jobId: string) => `${runpodEndpointBaseUrl}/status/${encodeURIComponent(jobId)}`;
 export const runpodCancelUrl = (jobId: string) => `${runpodEndpointBaseUrl}/cancel/${encodeURIComponent(jobId)}`;
+export const runpodStreamUrl = (jobId: string) => `${runpodEndpointBaseUrl}/stream/${encodeURIComponent(jobId)}`;
 export const runpodHealthUrl = runpodEndpointBaseUrl ? `${runpodEndpointBaseUrl}/health` : "";
 export const runpodApiKey = process.env.RUNPOD_API_KEY?.trim() ?? "";
 export const comfyOrgApiKey = process.env.COMFY_ORG_API_KEY?.trim() ?? "";

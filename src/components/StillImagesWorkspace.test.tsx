@@ -140,11 +140,68 @@ describe("StillImagesWorkspace", () => {
     // resultUrl can be populated from a previous attempt on retry; only a completed
     // job should display one.
     renderPanel([stillJob({ status: "running" })]);
-    expect(screen.getByText("Rendering on the preset pod")).toBeInTheDocument();
     expect(screen.queryByAltText("Result for Pro Upscaler")).not.toBeInTheDocument();
   });
 
-  it("shows the queued state distinctly", () => {
+  it("reports the phase a running job is actually in", () => {
+    renderPanel([
+      stillJob({
+        status: "running",
+        runpodProgress: {
+          phase: "queued",
+          runpodStatus: "IN_QUEUE",
+          phaseStartedAt: new Date().toISOString(),
+        },
+      }),
+    ]);
+
+    expect(screen.getByText("Waiting for a worker")).toBeInTheDocument();
+    expect(screen.getByText("IN_QUEUE")).toBeInTheDocument();
+  });
+
+  it("shows the worker and queue wait once RunPod reports them", () => {
+    renderPanel([
+      stillJob({
+        status: "running",
+        runpodProgress: {
+          phase: "running",
+          runpodStatus: "IN_PROGRESS",
+          workerId: "fcphj8m6z5rcyy",
+          delayMs: 11673,
+          phaseStartedAt: new Date().toISOString(),
+        },
+      }),
+    ]);
+
+    expect(screen.getByText("Processing on the worker")).toBeInTheDocument();
+
+    // Real figures from RunPod, not a synthesised percentage.
+    // 11673ms of real queue time, rounded to the second.
+    expect(screen.getByText(/queued 12s/)).toBeInTheDocument();
+    expect(screen.getByText(/worker fcphj8m6/)).toBeInTheDocument();
+  });
+
+  it("leads with what the worker itself reported, keeping the phase as context", () => {
+    // The stream names the ComfyUI node running right now; "Sampling tiles" is
+    // the answer someone watching a slow render is actually after.
+    renderPanel([
+      stillJob({
+        status: "running",
+        runpodProgress: {
+          phase: "running",
+          runpodStatus: "IN_PROGRESS",
+          detail: "Sampling tiles",
+          phaseStartedAt: new Date().toISOString(),
+        },
+      }),
+    ]);
+
+    expect(screen.getByText("Sampling tiles")).toBeInTheDocument();
+    expect(screen.getByText("Processing on the worker")).toBeInTheDocument();
+  });
+
+  it("falls back to the job status when no phase has been reported yet", () => {
+    // Older jobs, and any job the dispatcher has not picked up, carry no phase.
     renderPanel([stillJob({ status: "queued", resultUrl: undefined, resultUrls: [] })]);
     expect(screen.getByText("Queued")).toBeInTheDocument();
   });

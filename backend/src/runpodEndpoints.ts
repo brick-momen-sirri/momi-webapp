@@ -19,6 +19,7 @@ import {
   runpodEndpointUrl,
   runpodHealthUrl,
   runpodStatusUrl,
+  runpodStreamUrl,
   runpodStillImageEndpointIds,
   runpodSubmissionMode,
 } from "./config.js";
@@ -30,6 +31,15 @@ export type RunpodEndpoint = {
   submitUrl: string;
   statusUrl: (jobId: string) => string;
   cancelUrl: (jobId: string) => string;
+  /**
+   * Progress chunks the worker has emitted but nobody has read yet.
+   *
+   * Drain-on-read: each call returns only what has arrived since the last one,
+   * so this is only useful while the job is running. Reading it after the job
+   * finishes returns an empty list, which is exactly how its usefulness was
+   * missed the first time round.
+   */
+  streamUrl: (jobId: string) => string;
   healthUrl: string;
 };
 
@@ -46,6 +56,7 @@ export function defaultRunpodEndpoint(): RunpodEndpoint {
     submitUrl: runpodEndpointUrl,
     statusUrl: runpodStatusUrl,
     cancelUrl: runpodCancelUrl,
+    streamUrl: runpodStreamUrl,
     healthUrl: runpodHealthUrl,
   };
 }
@@ -61,6 +72,7 @@ export function runpodEndpointForId(id: string): RunpodEndpoint {
     submitUrl: `${base}/${runpodSubmissionMode === "async" ? "run" : "runsync"}`,
     statusUrl: (jobId: string) => `${base}/status/${encodeURIComponent(jobId)}`,
     cancelUrl: (jobId: string) => `${base}/cancel/${encodeURIComponent(jobId)}`,
+    streamUrl: (jobId: string) => `${base}/stream/${encodeURIComponent(jobId)}`,
     healthUrl: `${base}/health`,
   };
 }

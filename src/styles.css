@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Indeterminate progress: a sweep that says "still working" without claiming to
+   know how far along a job is. See JobProgress.tsx for why there is no
+   percentage. */
+@keyframes momi-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .momi-indeterminate-track > * {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
 @keyframes move-result-menu-in {
   from {
     opacity: 0;

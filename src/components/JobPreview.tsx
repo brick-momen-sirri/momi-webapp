@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, Loader2, Maximize2, PlayCircle } from "lucide-react";
+import { AlertTriangle, ExternalLink, Maximize2, PlayCircle } from "lucide-react";
 import { type DragEvent, useState } from "react";
 import type { Job } from "../types";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
@@ -6,6 +6,8 @@ import { useNearViewport } from "../features/jobs/useNearViewport";
 import { setResultImageDragData } from "../utils/resultDrag";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
 import { ImageCompareSlider } from "./ImageCompareSlider";
+import { JobProgress } from "./JobProgress";
+import { ResultOverlayActions, ResultOverlayButton } from "./ResultOverlayActions";
 
 type JobPreviewProps = {
   job: Job;
@@ -56,14 +58,11 @@ export function JobPreview({ job }: JobPreviewProps) {
         ref={previewRef}
         className="flex min-h-[260px] w-full items-center justify-center rounded-lg border border-line bg-stone-100 sm:min-h-[360px]"
       >
-        <div className="w-full max-w-sm px-6 text-center">
-          <Loader2 className="mx-auto h-7 w-7 animate-spin text-accent" />
-          <p className="mt-3 text-sm font-semibold capitalize">{job.status}</p>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
-            <div
-              className={`h-full rounded-full bg-accent ${job.status === "queued" ? "w-1/4" : job.status === "sending" ? "w-1/2" : "w-2/3"}`}
-            />
-          </div>
+        {/* This used to be a bar pinned at 25/50/66% by status -- a number that
+            looked measured and never was. It now reports the phase the job is
+            actually in, and how long it has been there. */}
+        <div className="w-full max-w-sm px-6">
+          <JobProgress job={job} />
         </div>
       </div>
     );
@@ -227,15 +226,9 @@ export function JobPreview({ job }: JobPreviewProps) {
 
 function FullscreenImageButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-ink shadow-card transition hover:bg-white"
-      title="Preview image fullscreen"
-      aria-label="Preview image fullscreen"
-    >
-      <Maximize2 className="h-4 w-4" />
-    </button>
+    <ResultOverlayActions>
+      <ResultOverlayButton icon={<Maximize2 className="h-4 w-4" />} label="Preview image fullscreen" onClick={onClick} />
+    </ResultOverlayActions>
   );
 }
 

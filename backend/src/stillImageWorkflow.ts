@@ -677,6 +677,66 @@ const RAW_ENHANCEMENT_QWEN_PROMPT = [
   "   - premium archviz quality",
 ].join("\n");
 
+/**
+ * What each ComfyUI node means, for the waiting UI.
+ *
+ * The workers prefix their progress chunks with the node id that produced them,
+ * so this turns "32 ..." into something a person can read. Ported from
+ * momi-forge's NODE_STATUS_HINTS, which is where these labels were worked out
+ * against the real graphs.
+ *
+ * Only labelled nodes are reported. An unlabelled node leaves the phase text as
+ * it was rather than showing a bare number, and a graph re-export that renumbers
+ * things degrades to that rather than lying about the stage.
+ */
+const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<string, string>>>> = {
+  "general-enhancement": {
+    "13": "Preparing masked tiles",
+    "66": "Preparing tiles",
+    "32": "Sampling tiles",
+    "64": "Decoding tiles",
+    "79": "Advance details - preparing tiles",
+    "69": "Advance details - preparing tiles",
+    "22": "Advance details - sampling tiles",
+    "21": "Advance details - decoding tiles",
+    "53": "Body enhancement - preparing detections",
+    "52": "Body enhancement - sampling detected persons",
+    "54": "Face enhancement - sampling detected faces",
+    "82": "Compositing result",
+    "83": "Saving final image",
+  },
+  "reference-generator": {
+    "42": "Loading main image",
+    "43": "Loading reference image",
+    "35": "Resizing main image",
+    "36": "Resizing reference image",
+    "44": "Preparing depth guidance",
+    "19": "Building edge guidance",
+    "20": "Applying structure guidance",
+    "22": "Preparing reference features",
+    "30": "Applying colour reference",
+    "14": "Encoding latent input",
+    "17": "Combining guidance",
+    "29": "Preparing styled prompt",
+    "12": "Running base sampler",
+    "16": "Running upscale sampler",
+    "182": "Resizing enhanced result",
+    "151": "Normalizing enhancement input",
+    "136": "Running enhancement sampler",
+    "147": "Decoding enhanced image",
+    "149": "Matching colours",
+    "153": "Saving final image",
+  },
+};
+
+/** The human label for a node a worker is reporting on, if it has one. */
+export function stillImageNodeStatusLabel(categoryId: string, nodeId: string | undefined) {
+  if (!nodeId) return undefined;
+  const labels = NODE_STATUS_LABELS[categoryId as StillImageCategoryId];
+  // Subgraph nodes arrive as "80:29"; the outer id is the one that is labelled.
+  return labels?.[nodeId] ?? labels?.[nodeId.split(":")[0]];
+}
+
 const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "general-enhancement": {
     categoryId: "general-enhancement",
