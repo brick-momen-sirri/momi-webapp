@@ -9,10 +9,21 @@ process.env.RUNPOD_TIMEOUT_MS = "1000";
 
 const service = await import("./runpodComfyService.js");
 
+/**
+ * The request URL without its cache buster.
+ *
+ * Polling appends a unique `_t` so an intermediary cannot answer a repeated poll
+ * from cache. These assertions are about which endpoint a call was routed to,
+ * which that parameter does not affect.
+ */
+function routedUrl(url: string | URL | Request) {
+  return String(url).replace(/[?&]_t=\d+/, "");
+}
+
 test("runsync returns COMPLETED", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init });
+    calls.push({ url: routedUrl(url), init });
     return jsonResponse({
       id: "job-complete",
       status: "COMPLETED",
@@ -55,7 +66,7 @@ test("submission, polling and cancellation all address the endpoint they were gi
 
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {
-    calls.push(String(url));
+    calls.push(routedUrl(url));
     if (calls.length === 1) return jsonResponse({ id: "job-still", status: "IN_PROGRESS" });
     return jsonResponse({ id: "job-still", status: "COMPLETED", output: { files: [] } });
   };
@@ -77,7 +88,7 @@ test("submission, polling and cancellation all address the endpoint they were gi
   await service.cancelComfyWorkflowOnRunpod(
     "job-still",
     (async (url: string | URL | Request) => {
-      cancelCalls.push(String(url));
+      cancelCalls.push(routedUrl(url));
       return jsonResponse({ id: "job-still", status: "CANCELLED" });
     }) as unknown as typeof fetch,
     pod,
@@ -170,7 +181,7 @@ test("an animation worker with no output.status is unaffected", async () => {
 test("omitting the endpoint keeps using the shared animation endpoint", async () => {
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {
-    calls.push(String(url));
+    calls.push(routedUrl(url));
     return jsonResponse({ id: "job-default", status: "COMPLETED", output: { files: [] } });
   };
 
@@ -184,7 +195,7 @@ test("runsync returns IN_PROGRESS then status COMPLETED", async () => {
   const calls: string[] = [];
   const submissions: Array<{ jobId: string; status: string }> = [];
   const fetchImpl = async (url: string | URL | Request) => {
-    calls.push(String(url));
+    calls.push(routedUrl(url));
     if (calls.length === 1) {
       return jsonResponse({ id: "job-progress", status: "IN_PROGRESS" });
     }
@@ -213,7 +224,7 @@ test("runsync returns IN_PROGRESS then status COMPLETED", async () => {
 test("resume polls an acknowledged job id without submitting the workflow again", async () => {
   const calls: Array<{ url: string; method?: string }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), method: init?.method });
+    calls.push({ url: routedUrl(url), method: init?.method });
     return jsonResponse({
       id: "job-resume",
       status: "COMPLETED",
@@ -235,7 +246,7 @@ test("resume polls an acknowledged job id without submitting the workflow again"
 test("cancel posts to the acknowledged RunPod job without resubmitting", async () => {
   const calls: Array<{ url: string; method?: string }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), method: init?.method });
+    calls.push({ url: routedUrl(url), method: init?.method });
     return jsonResponse({ id: "job-cancel-remote", status: "CANCELLED" });
   };
 
@@ -254,7 +265,7 @@ test("cancellation is checked before every RunPod status poll", async () => {
   let cancelRequested = false;
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {
-    calls.push(String(url));
+    calls.push(routedUrl(url));
     cancelRequested = true;
     return jsonResponse({ id: "job-cancel", status: "IN_PROGRESS" });
   };
@@ -275,7 +286,7 @@ test("cancellation is checked before every RunPod status poll", async () => {
 test("video inputs are submitted as named worker input files", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init });
+    calls.push({ url: routedUrl(url), init });
     return jsonResponse({
       id: "job-video-input",
       status: "COMPLETED",
@@ -299,7 +310,7 @@ test("video inputs are submitted as named worker input files", async () => {
 test("URL inputs are submitted without inline base64 media", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), init });
+    calls.push({ url: routedUrl(url), init });
     return jsonResponse({
       id: "job-url-input",
       status: "COMPLETED",
@@ -369,7 +380,7 @@ test("old RunPod image-only response keeps media behavior and no text artifacts"
 test("RunPod response with inline texts returns generated prompt before file artifacts", async () => {
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {
-    calls.push(String(url));
+    calls.push(routedUrl(url));
     if (String(url) === "https://cdn.example/seedance_prompt.txt") {
       return new Response("FILE TEXT SHOULD NOT WIN", {
         headers: { "content-type": "text/plain" },

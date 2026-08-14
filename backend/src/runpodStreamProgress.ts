@@ -10,8 +10,30 @@
 // Ported from momi-forge's utils.py (_extract_stream_progress_signals and
 // friends), which is the working implementation of the same idea.
 
-/** A node id prefix: "32", or "80:29" for a nested subgraph node. */
+// The shapes these workers actually emit, taken from momi-forge's utils.py
+// where they were derived against live pods. Node ids may be nested subgraph
+// references like "80:29", hence the optional colon segment.
+//
+//   [comfy-log][exec] Running node 32: KSampler
+//   Running node 32: KSampler
+//   node=32 5/20
+//   node=32 done=5 total=20
+//   node=32 item=1/3 step=5/20
+//   32 sampling
+//
+// The first port of this only handled the last of those -- a bare leading id --
+// which matches none of the common forms, so a stream could have been arriving
+// in full and still produced no labels.
+const COMFY_LOG_PREFIX = /^\[comfy-log\]\[[^\]]*\]\s*/;
+const RUNNING_NODE = /^Running node (\d+(?::\d+)?)\s*:/;
+const NODE_ASSIGNMENT = /\bnode=(\d+(?::\d+)?)\b/;
 const NODE_ID_PREFIX = /^(\d+(?::\d+)?)\b/;
+
+/** The ComfyUI node a progress line is about, in whichever form it names one. */
+export function extractNodeId(text: string) {
+  const body = text.replace(COMFY_LOG_PREFIX, "");
+  return RUNNING_NODE.exec(body)?.[1] ?? NODE_ASSIGNMENT.exec(body)?.[1] ?? NODE_ID_PREFIX.exec(body)?.[1];
+}
 
 // Chunks can be re-delivered, so each is remembered by signature. Bounded
 // because a long render emits thousands and this set would otherwise grow for
@@ -77,7 +99,7 @@ export function createStreamProgressReader(label = ""): StreamProgressReader {
             if (stale !== undefined) seen.delete(stale);
           }
 
-          chunks.push({ text, nodeId: NODE_ID_PREFIX.exec(text)?.[1] });
+          chunks.push({ text, nodeId: extractNodeId(text) });
         }
       }
 

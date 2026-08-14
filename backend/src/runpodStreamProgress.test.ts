@@ -49,6 +49,34 @@ test("subgraph node ids survive intact", () => {
   assert.equal(chunk.nodeId, "80:29");
 });
 
+// The forms these workers really emit. The first port of this handled only the
+// bare leading id, which matches none of the first four -- so a fully working
+// stream would still have produced no labels at all.
+test("every progress line shape the workers emit yields its node", () => {
+  const cases: Array<[string, string]> = [
+    ["Running node 32: KSampler", "32"],
+    ["[comfy-log][exec] Running node 32: KSampler", "32"],
+    ["[comfy-log][progress] node=22 5/20", "22"],
+    ["node=52 done=3 total=8", "52"],
+    ["node=80:12 item=1/3 step=5/20", "80:12"],
+    ["Running node 80:29: SeedVR", "80:29"],
+    ["32 sampling tiles", "32"],
+  ];
+
+  for (const [text, expected] of cases) {
+    const [chunk] = createStreamProgressReader().read({ stream: [text] });
+    assert.equal(chunk?.nodeId, expected, `failed to read a node id from ${JSON.stringify(text)}`);
+  }
+});
+
+test("lines that name no node are still kept, just unattributed", () => {
+  for (const text of ["[comfy-log][exec] Prompt executed", "Queue remaining: 0"]) {
+    const [chunk] = createStreamProgressReader().read({ stream: [text] });
+    assert.equal(chunk?.nodeId, undefined, `unexpectedly read a node id from ${JSON.stringify(text)}`);
+    assert.equal(chunk?.text, text);
+  }
+});
+
 test("text with no node prefix is still reported, just unattributed", () => {
   const reader = createStreamProgressReader();
   const [chunk] = reader.read({ stream: ["warming up"] });

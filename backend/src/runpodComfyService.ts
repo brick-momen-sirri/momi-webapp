@@ -367,7 +367,7 @@ async function resolveRunpodResponse(
       await waitBeforePoll(startedAt, shouldCancel);
       current = await runpodFetch(
         fetchImpl,
-        endpoint.statusUrl(jobId),
+        withCacheBuster(endpoint.statusUrl(jobId)),
         {
           method: "GET",
           headers: runpodHeaders(),
@@ -512,7 +512,25 @@ function runpodHeaders() {
   return {
     Authorization: `Bearer ${runpodApiKey}`,
     "Content-Type": "application/json",
+    // Progress polling reads the same two URLs every few seconds and needs the
+    // newest answer each time, not whatever an intermediary held on to. Without
+    // these (and the cache buster below) /stream can keep answering with the
+    // empty list it returned before the worker started emitting, which reads
+    // exactly like a worker that never streams at all.
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
   };
+}
+
+/**
+ * A unique query parameter per request.
+ *
+ * Belt and braces with the no-cache headers above: the same URL polled on a
+ * timer is precisely the shape a cache is happiest to serve stale, and a stale
+ * status also stalls the phase the UI reports.
+ */
+function withCacheBuster(url: string) {
+  return `${url}${url.includes("?") ? "&" : "?"}_t=${Date.now()}`;
 }
 
 function assertRunpodRequestBodySize(body: string) {
@@ -770,7 +788,7 @@ async function readStreamChunks(
   reader: StreamProgressReader,
 ): Promise<StreamProgressChunk[]> {
   try {
-    const response = await fetchImpl(endpoint.streamUrl(jobId), {
+    const response = await fetchImpl(withCacheBuster(endpoint.streamUrl(jobId)), {
       method: "GET",
       headers: runpodHeaders(),
       signal: AbortSignal.timeout(15_000),
