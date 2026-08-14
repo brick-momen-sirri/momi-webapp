@@ -352,9 +352,21 @@ async function resolveRunpodResponse(
       //
       // Only the newest message is kept by RunPod, so a poll sees the current
       // step rather than every step. That is what the UI wants anyway.
-      const statusChunks = streamReader && current.progress !== undefined
-        ? streamReader.read({ progress: current.progress })
-        : [];
+      //
+      // The field is `output`, and only while the job is pending. RunPod's
+      // progress_update() overwrites the job's output with the latest message
+      // as it runs, then replaces it with the real result on completion --
+      // observed live:
+      //
+      //   IN_PROGRESS  output: "Running node 32: KSampler"      <- progress
+      //   COMPLETED    output: { message: [s3Url], status: ... } <- the result
+      //
+      // Hence both guards. Reading `output` on a terminal poll would feed the
+      // result payload, S3 URL and all, into the progress line.
+      const statusChunks =
+        streamReader && pendingStatuses.has(status) && typeof current.output === "string"
+          ? streamReader.read({ progress: current.output })
+          : [];
 
       // Still drained, for any worker that is a generator. Kept deliberately:
       // it costs one request per poll and the presets do not all share an image.

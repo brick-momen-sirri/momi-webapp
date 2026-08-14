@@ -42,10 +42,14 @@ export function extractNodeId(text: string) {
  * measured rather than guessed. It says how far through the current node the
  * run is, and nothing about how many nodes remain.
  */
+// Two forms, both seen live on the same run:
+//   [comfy-log][enhance-step] node=32 item=6 step=11/30
+//   [comfy-log][progress] node=32 4/30
 const STEP_FRACTION = /\bstep=(\d+)\/(\d+)\b/;
+const BARE_FRACTION = /\bnode=\S+\s+(\d+)\/(\d+)\b/;
 
 export function extractStepFraction(text: string) {
-  const match = STEP_FRACTION.exec(text);
+  const match = STEP_FRACTION.exec(text) ?? BARE_FRACTION.exec(text);
   if (!match) return undefined;
   const done = Number(match[1]);
   const total = Number(match[2]);

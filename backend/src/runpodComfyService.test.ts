@@ -543,40 +543,40 @@ function jsonFetch(body: unknown) {
   return async () => jsonResponse(body);
 }
 
-test("progress reported on the status response reaches the caller", async () => {
-  // The real thing these workers emit. They call RunPod's progress_update(),
-  // which surfaces the newest message on /status -- not on /stream, which is for
-  // generator handlers and returns an empty list for these pods. Reading only
-  // the stream is why this looked for a long time like a worker that reports
-  // nothing at all.
+
+test("a pending job's output string is progress; a completed one's is the result", async () => {
+  // Observed live: progress_update() overwrites the job's output with its latest
+  // message while running, and the real result replaces it on completion. Both
+  // arrive under the same key, so only the pending ones are progress.
   const messages = [
     "Running node 63: Load Image (Base64) (ETN_LoadImageBase64)",
-    "[comfy-log][node] 34 Resize Image v2 (ImageResizeKJv2)",
     "[comfy-log][enhance-step] node=32 item=2 step=5/30",
   ];
   let poll = 0;
+  const s3Url = "https://momi-ai.s3.eu-north-1.amazonaws.com/08-26/abc/def.png";
   const fetchImpl = async (url: string | URL | Request) => {
     if (String(url).includes("/stream/")) return jsonResponse({ status: "IN_PROGRESS", stream: [] });
     const index = poll++;
-    if (index < messages.length) {
-      return jsonResponse({ id: "job-p", status: "IN_PROGRESS", progress: messages[index] });
-    }
-    return jsonResponse({ id: "job-p", status: "COMPLETED", output: { images: [] } });
+    if (index < messages.length) return jsonResponse({ id: "job-o", status: "IN_PROGRESS", output: messages[index] });
+    return jsonResponse({ id: "job-o", status: "COMPLETED", output: { message: [s3Url], status: "success" } });
   };
 
-  const observed: string[] = [];
-  await service.runComfyWorkflowOnRunpod({
+  const observed: Array<{ nodeId?: string; text: string }> = [];
+  const result = await service.runComfyWorkflowOnRunpod({
     workflow: {},
     images: [],
     fetchImpl: fetchImpl as typeof fetch,
     onPoll: (observation) => {
-      for (const chunk of observation.streamChunks ?? []) {
-        if (chunk.nodeId) observed.push(chunk.nodeId);
-      }
+      for (const chunk of observation.streamChunks ?? []) observed.push({ nodeId: chunk.nodeId, text: chunk.text });
     },
   });
 
-  // Every shape in the log yields its node, which is what the UI turns into a
-  // label like "Sampling tiles".
-  assert.deepEqual(observed, ["63", "34", "32"]);
+  assert.deepEqual(
+    observed.map((chunk) => chunk.nodeId),
+    ["63", "32"],
+  );
+  // The completed output is the result, and must never be mistaken for a
+  // progress line -- that would put a signed S3 URL in the status text.
+  assert.ok(!observed.some((chunk) => chunk.text.includes(s3Url)), "the result payload must not be read as progress");
+  assert.equal(result.media[0]?.url, s3Url, "and it must still be read as the result");
 });

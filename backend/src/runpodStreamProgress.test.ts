@@ -208,3 +208,25 @@ test("summarize says nothing when the stream was never read", () => {
 
   assert.deepEqual(lines, []);
 });
+
+// Every line shape captured from a live General Enhancement run, verbatim.
+test("the real progress lines from a live run all parse", () => {
+  const cases: Array<[string, string | undefined, string | undefined]> = [
+    ["Still running... waiting for next ComfyUI update.", undefined, undefined],
+    ["[comfy-log][ws] receive timeout, waiting for updates", undefined, undefined],
+    ["[comfy-log][progress] node=32 4/30", "32", "4/30"],
+    ["[comfy-log][enhance-step] node=32 item=6 step=11/30", "32", "11/30"],
+    ["[comfy-log][enhance-state] node=32 done=8", "32", undefined],
+    ["[comfy-log][node] 12 Image List To Image Batch (easy imageListToImageBatch)", "12", undefined],
+    ["[comfy-log][node] 82 ✂️ Inpaint Stitch (InpaintStitchImproved)", "82", undefined],
+    ["[comfy-log][enhance-state] node=83 done=0", "83", undefined],
+    ["Running node 63: Load Image (Base64) (ETN_LoadImageBase64)", "63", undefined],
+  ];
+
+  for (const [text, expectedNode, expectedStep] of cases) {
+    const [chunk] = createStreamProgressReader().read({ progress: text });
+    assert.equal(chunk?.nodeId, expectedNode, `node id from ${JSON.stringify(text)}`);
+    const step = chunk?.step ? `${chunk.step.done}/${chunk.step.total}` : undefined;
+    assert.equal(step, expectedStep, `step from ${JSON.stringify(text)}`);
+  }
+});
