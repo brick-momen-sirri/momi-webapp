@@ -7,6 +7,7 @@ import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { isPathWithinRoot } from "./pathContainment.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
+import { isGptImageKey, isGptImageModel, isNanoBananaModel, supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type {
   ArchVizGridOptions,
   CreateJobRequest,
@@ -1141,10 +1142,6 @@ function applyTextOnlyImageWorkflowMode(prompt: ComfyNode, model: WorkflowModel,
   }
 }
 
-function supportsTextOnlyImageWorkflow(model: WorkflowModel) {
-  return isNanoBananaModel(model) || isGptImageModel(model);
-}
-
 function isTextOnlyCapableGenerationNode(node: ComfyNode) {
   return isNanoBananaNode(node) || isGptImageNode(node);
 }
@@ -1188,20 +1185,6 @@ function applyImageOutputCountOptions(prompt: ComfyNode, model: WorkflowModel, r
     secondSaveNode._meta.title = `${String(secondSaveNode._meta.title ?? "Save Image")} Variation 2`;
   }
   prompt[secondSaveNodeId] = secondSaveNode;
-}
-
-function isNanoBananaModel(model: WorkflowModel) {
-  const key = `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase();
-  return key.includes("nano") && key.includes("banana");
-}
-
-function isGptImageModel(model: WorkflowModel) {
-  const key = `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase();
-  return isGptImageKey(key);
-}
-
-function isGptImageKey(key: string) {
-  return (key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid");
 }
 
 function isNanoBananaNode(node: ComfyNode) {

@@ -3,6 +3,7 @@ import type { RequestHandler } from "express";
 import { getRequestUser } from "./authMiddleware.js";
 import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImageModels.js";
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
+import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
 
 export type JobSubmissionDependencies = {
@@ -105,7 +106,10 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   if (model.requiresPrompt && !prompt?.trim()) {
     throw new JobSubmissionError("A prompt is required for this workflow.");
   }
-  if (model.requiredInputs.includes("single_image") && !inputImages?.length) {
+  // Nano Banana and GPT Image are the exception: their graphs are shaped like edits
+  // -- so requiredInputs says single_image -- but both providers also generate from
+  // a prompt alone, and buildWorkflow strips the image wiring when none is sent.
+  if (model.requiredInputs.includes("single_image") && !inputImages?.length && !supportsTextOnlyImageWorkflow(model)) {
     throw new JobSubmissionError("At least one input image is required for this workflow.");
   }
   if (model.requiredInputs.includes("start_frame") && !startFrame) {

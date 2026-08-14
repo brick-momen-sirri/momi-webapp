@@ -7,7 +7,7 @@ import express from "express";
 
 import type { AuthenticatedRequest } from "./authMiddleware.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
-import { createJobSubmissionHandler } from "./jobSubmissionRoute.js";
+import { createJobSubmissionHandler, validatedRequest } from "./jobSubmissionRoute.js";
 import { isStillImageCategoryId } from "./stillImageCategories.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
@@ -54,6 +54,27 @@ const model: WorkflowModel = {
   outputType: "video",
   estimatedCredits: 42,
 };
+
+// Shaped like the model inferWorkflowModel produces for the Nano Banana graph:
+// image_editing, so requiredInputs carries single_image even though the provider
+// generates from a prompt alone.
+const nanoBananaModel: WorkflowModel = {
+  id: "brick_nano_banana_2",
+  name: "Nano Banana 2",
+  category: "image_editing",
+  workflowPath: "image_editing/Brick_Nano Banana 2.json",
+  requiredInputs: ["prompt", "single_image", "resolution"],
+  supportedResolutions: ["1K", "2K"],
+  defaultResolution: "1K",
+  requiresPrompt: true,
+  requiresImage: true,
+  requiresStartEndFrames: false,
+  imageSlotCount: 4,
+  outputType: "image",
+  estimatedCredits: 4,
+};
+
+const oneKilo = { width: 1024, height: 1024, label: "1K" };
 
 // The real preset models, so these tests exercise the ids the client actually
 // sends and the modelId/categoryId consistency check that guards them.
@@ -471,6 +492,47 @@ test("an animation submission is unaffected by the still image path", async () =
   const response = await call(validBody());
   assert.equal(response.status, 201);
   assert.equal(createRequests[0].workflowOptions, undefined);
+});
+
+test("Nano Banana accepts a prompt with no input image", () => {
+  const request = validatedRequest(
+    { projectId: project.id, modelId: nanoBananaModel.id, prompt: "a lighthouse at dusk", resolution: oneKilo },
+    nanoBananaModel,
+    users.owner.id,
+  );
+
+  assert.equal(request.inputImages, undefined);
+  assert.equal(request.prompt, "a lighthouse at dusk");
+});
+
+test("Nano Banana still accepts input images when they are provided", () => {
+  const request = validatedRequest(
+    {
+      projectId: project.id,
+      modelId: nanoBananaModel.id,
+      prompt: "relight this",
+      resolution: oneKilo,
+      inputImages: ["https://media.example/a.png", "https://media.example/b.png"],
+    },
+    nanoBananaModel,
+    users.owner.id,
+  );
+
+  assert.deepEqual(request.inputImages, ["https://media.example/a.png", "https://media.example/b.png"]);
+});
+
+test("an image editing workflow with no text-only mode still requires an input image", () => {
+  const editModel: WorkflowModel = { ...nanoBananaModel, id: "brick_qwen_edit", name: "Qwen Edit", workflowPath: "qwen.json" };
+
+  assert.throws(
+    () =>
+      validatedRequest(
+        { projectId: project.id, modelId: editModel.id, prompt: "relight this", resolution: oneKilo },
+        editModel,
+        users.owner.id,
+      ),
+    /At least one input image is required for this workflow/,
+  );
 });
 
 async function call(body: unknown) {
