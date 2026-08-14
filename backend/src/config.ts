@@ -325,9 +325,16 @@ export const playableVideoProbeTimeoutMs = positiveNumber(process.env.PLAYABLE_V
 // Its own budget, pruned on the same timer as the thumbnail cache. Video
 // renditions are two orders of magnitude larger than a WebP, so sharing one
 // budget would let a handful of them evict the entire image cache.
+//
+// Sized against the disk rather than against the workload: this host is a single
+// volume with ~34 GB free, on which renders, the 8 GiB thumbnail budget and this
+// all compete. The library needed 295 MiB to cover every affected video ever
+// produced, and only a handful of new ones arrive a week, so 4 GiB is years of
+// headroom -- where a budget large enough to "never prune" would instead be a
+// budget large enough to fill the volume the renders write to.
 export const playableVideoCacheMaxBytes = positiveNumber(
   process.env.PLAYABLE_VIDEO_CACHE_MAX_BYTES,
-  16 * 1024 * 1024 * 1024,
+  4 * 1024 * 1024 * 1024,
 );
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
