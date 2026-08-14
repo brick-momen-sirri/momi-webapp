@@ -322,7 +322,7 @@ async function resolveRunpodResponse(
   let current = response;
   // Only built when someone is listening, so a caller that does not want
   // progress does not pay for an extra request per poll.
-  const streamReader = onPoll ? createStreamProgressReader() : undefined;
+  const streamReader = onPoll ? createStreamProgressReader(endpoint.id || "endpoint") : undefined;
 
   while (true) {
     throwIfCancellationRequested(shouldCancel);
@@ -770,9 +770,16 @@ async function readStreamChunks(
       headers: runpodHeaders(),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      // The difference between "this pod does not report progress" and "we are
+      // asking it wrong". Without this the two are indistinguishable, because
+      // everything here is swallowed.
+      reader.note(`stream request returned HTTP ${response.status}`);
+      return [];
+    }
     return reader.read(await response.json());
-  } catch {
+  } catch (error) {
+    reader.note(`stream request failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }

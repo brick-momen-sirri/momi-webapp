@@ -90,3 +90,57 @@ test("the seen-set does not grow without bound", () => {
   // intended trade: a bounded set, at the cost of a repeat after 512 chunks.
   assert.equal(reader.read({ stream: ["32 step 0"] }).length, 1);
 });
+
+// The notes exist because every failure in this path is swallowed, so without
+// them "the worker reports nothing" and "our request is broken" look the same
+// from the outside.
+
+test("a note is logged once, however many times it is raised", () => {
+  const reader = createStreamProgressReader("test-endpoint");
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => void lines.push(String(message));
+  try {
+    reader.note("stream request returned HTTP 404");
+    reader.note("stream request returned HTTP 404");
+    reader.note("stream request failed: timeout");
+  } finally {
+    console.log = original;
+  }
+
+  assert.equal(lines.length, 2, "a repeated note must not log on every poll");
+  assert.match(lines[0], /test-endpoint/);
+  assert.match(lines[0], /HTTP 404/);
+});
+
+test("the first real chunk is reported, with its parsed node ids", () => {
+  const reader = createStreamProgressReader("ge");
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => void lines.push(String(message));
+  try {
+    reader.read({ stream: ["32 sampling tiles"] });
+    reader.read({ stream: ["64 decoding tiles"] });
+  } finally {
+    console.log = original;
+  }
+
+  assert.equal(lines.length, 1, "only the first batch is worth a line");
+  assert.match(lines[0], /emitting progress/);
+  assert.match(lines[0], /"32"/);
+});
+
+test("a persistently empty stream says so once, and only after several polls", () => {
+  const reader = createStreamProgressReader("ge");
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => void lines.push(String(message));
+  try {
+    for (let index = 0; index < 20; index += 1) reader.read({ status: "IN_PROGRESS", stream: [] });
+  } finally {
+    console.log = original;
+  }
+
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /appears not to stream/);
+});

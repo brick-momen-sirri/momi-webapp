@@ -21,6 +21,18 @@ const MAX_REMEMBERED_CHUNKS = 512;
 export type StreamProgressReader = {
   /** New chunks since the last read, oldest first. */
   read: (payload: unknown) => StreamProgressChunk[];
+  /**
+   * Records something worth knowing about this job's stream, at most once per
+   * distinct message.
+   *
+   * The stream is read with every failure swallowed, so that a progress problem
+   * cannot take down a paid render. The cost of that is that "the worker reports
+   * nothing" and "our request is failing" look identical from outside. These
+   * notes are the difference, and they are deliberately not behind a debug flag:
+   * one or two lines per job is cheap, and the question comes up every time a
+   * preset appears to report no detail.
+   */
+  note: (message: string) => void;
 };
 
 export type StreamProgressChunk = {
@@ -29,11 +41,22 @@ export type StreamProgressChunk = {
   nodeId?: string;
 };
 
-export function createStreamProgressReader(): StreamProgressReader {
+export function createStreamProgressReader(label = ""): StreamProgressReader {
   const seen = new Set<string>();
   const order: string[] = [];
+  const noted = new Set<string>();
+  const prefix = label ? `[runpod-stream ${label}]` : "[runpod-stream]";
+  let emptyReads = 0;
+  let reportedChunks = false;
+
+  function note(message: string) {
+    if (noted.has(message)) return;
+    noted.add(message);
+    console.log(`${prefix} ${message}`);
+  }
 
   return {
+    note,
     read(payload: unknown) {
       const chunks: StreamProgressChunk[] = [];
       for (const raw of streamChunks(payload)) {
@@ -51,6 +74,25 @@ export function createStreamProgressReader(): StreamProgressReader {
           chunks.push({ text, nodeId: NODE_ID_PREFIX.exec(text)?.[1] });
         }
       }
+
+      if (chunks.length && !reportedChunks) {
+        reportedChunks = true;
+        // The first real chunk settles what the worker emits and whether the
+        // node prefix parses. Truncated because chunk text is worker-shaped and
+        // can carry paths.
+        const sample = chunks[0].text.slice(0, 120);
+        const nodeIds = chunks.map((chunk) => chunk.nodeId).filter(Boolean);
+        note(`emitting progress: ${chunks.length} chunk(s), nodeIds=${JSON.stringify(nodeIds)}, first=${JSON.stringify(sample)}`);
+      } else if (!chunks.length && !reportedChunks) {
+        emptyReads += 1;
+        // Enough polls to cover a cold start and the first real work. Still
+        // nothing by here means this worker does not report progress at all,
+        // which is a property of the pod rather than a fault to chase.
+        if (emptyReads === 8) {
+          note(`no progress chunks after ${emptyReads} polls; this worker appears not to stream`);
+        }
+      }
+
       return chunks;
     },
   };
