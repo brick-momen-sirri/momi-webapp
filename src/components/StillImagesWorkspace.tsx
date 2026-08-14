@@ -20,6 +20,7 @@ import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../ser
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
+import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
 
@@ -33,6 +34,22 @@ type StillImagesWorkspaceProps = {
   /** Still image jobs only -- App filters by section before passing them here. */
   jobs: Job[];
   users?: User[];
+  // The same actions an Animation card offers. Passed through rather than
+  // reimplemented so the two surfaces cannot drift into different behaviour for
+  // download, archive or move.
+  projects?: Project[];
+  archiveView?: boolean;
+  favoriteJobIds?: Set<string>;
+  canReuseSettings?: (job: Job) => boolean;
+  onDownload?: (job: Job) => void;
+  onCopyImage?: (job: Job) => void;
+  onReuseSettings?: (job: Job) => void;
+  onRetry?: (job: Job) => void;
+  onToggleFavorite?: (job: Job) => void;
+  onMove?: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
+  onArchive?: (job: Job) => void;
+  onRestore?: (job: Job) => void;
+  onDeletePermanently?: (job: Job) => void;
 };
 
 export function StillImagesWorkspace({
@@ -44,6 +61,7 @@ export function StillImagesWorkspace({
   userName,
   jobs,
   users = [],
+  ...actions
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
   const targetFolder = selectedProject?.folders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
@@ -73,8 +91,9 @@ export function StillImagesWorkspace({
             <StillImageJobCard
               key={job.id}
               job={job}
-              project={selectedProject}
+              project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
               userName={users.find((user) => user.id === job.userId)?.name ?? userName}
+              actions={actions}
             />
           ))}
         </div>
@@ -92,7 +111,19 @@ export function StillImagesWorkspace({
   );
 }
 
-function StillImageJobCard({ job, project, userName }: { job: Job; project?: Project; userName: string }) {
+type StillImageActions = Omit<StillImagesWorkspaceProps, "category" | "state" | "selectedProject" | "targetFolderId" | "saveNumber" | "userName" | "jobs" | "users">;
+
+function StillImageJobCard({
+  job,
+  project,
+  userName,
+  actions,
+}: {
+  job: Job;
+  project?: Project;
+  userName: string;
+  actions: StillImageActions;
+}) {
   const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === job.workflowOptions?.stillImage?.categoryId);
   const PresetIcon = preset?.icon ?? ImageIcon;
   const resultUrl = job.resultUrl ?? job.thumbnailUrl;
@@ -134,6 +165,30 @@ function StillImageJobCard({ job, project, userName }: { job: Job; project?: Pro
             </span>
           </div>
         </div>
+
+        {/* The same toolbar the Animation cards carry -- download, copy, reuse,
+            retry, favourite, move, archive. Rendered from the shared component
+            rather than rebuilt, so the two surfaces cannot drift apart. Absent
+            when the handlers are not supplied, which keeps the panel usable in
+            tests and previews that do not wire them. */}
+        {actions.onDownload ? (
+          <JobActions
+            job={job}
+            project={project}
+            isFavorite={actions.favoriteJobIds?.has(job.id) ?? false}
+            canReuseSettings={actions.canReuseSettings?.(job) ?? false}
+            archiveView={actions.archiveView ?? false}
+            onDownload={actions.onDownload}
+            onCopyImage={actions.onCopyImage ?? noop}
+            onReuseSettings={actions.onReuseSettings ?? noop}
+            onRetry={actions.onRetry ?? noop}
+            onToggleFavorite={actions.onToggleFavorite ?? noop}
+            onMove={actions.onMove ?? (async () => false)}
+            onArchive={actions.onArchive ?? noop}
+            onRestore={actions.onRestore ?? noop}
+            onDeletePermanently={actions.onDeletePermanently ?? noop}
+          />
+        ) : null}
       </div>
 
       <div className="py-4">
@@ -246,7 +301,12 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
         // entirely. object-contain means the cap letterboxes rather than crops,
         // and the fullscreen preview is there for the extreme cases.
         <img
-          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.grid)}
+          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.preview)}
+          // The card spans the panel now, so the 480px grid rendition it used to
+          // load was being upscaled and looked soft. 960 fits a normal display
+          // and 1440 covers a retina one; the browser takes whichever it needs
+          // rather than everyone paying for the larger.
+          srcSet={`${thumbnailMediaUrl(url, THUMBNAIL_WIDTH.preview)} 1x, ${thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen)} 2x`}
           alt={`Result for ${job.modelType}`}
           loading="lazy"
           decoding="async"
@@ -388,6 +448,9 @@ function MetadataItem({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+/** Stand-in for an action the host did not wire; JobActions requires them all. */
+function noop() {}
 
 function isJobWorking(status: Job["status"]) {
   return status === "queued" || status === "sending" || status === "running";

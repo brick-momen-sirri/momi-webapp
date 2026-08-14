@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
@@ -90,12 +90,50 @@ describe("StillImagesWorkspace", () => {
     renderPanel([stillJob()]);
 
     const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
-    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=480");
+    // 960, not the 480 grid size: the card spans the panel, so the smaller
+    // rendition was being upscaled and looked soft.
+    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=960");
+    // And a 2x source, so a retina display gets real pixels rather than everyone
+    // paying for the larger file.
+    expect(result.getAttribute("srcset")).toContain("w=1440 2x");
     // Nothing on the card may point at the un-resized media route.
     expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
     // jsdom does not reflect these as IDL properties, so read the attributes.
     expect(result.getAttribute("loading")).toBe("lazy");
     expect(result.getAttribute("decoding")).toBe("async");
+  });
+
+  it("carries the same action toolbar as an Animation card", async () => {
+    const onDownload = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob()]}
+        onDownload={onDownload}
+      />,
+    );
+
+    // Rendered from the shared JobActions rather than rebuilt here, so the two
+    // surfaces cannot drift into different behaviour.
+    const download = screen.getByRole("button", { name: /download/i });
+    expect(download).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /copy image to clipboard/i })).toBeInTheDocument();
+
+    const { default: userEvent } = await import("@testing-library/user-event");
+    await userEvent.click(download);
+    expect(onDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the toolbar when the host wires no actions", () => {
+    // The panel is rendered without handlers in tests and previews; it must not
+    // show controls that would do nothing.
+    renderPanel([stillJob()]);
+    expect(screen.queryByRole("button", { name: /copy image to clipboard/i })).not.toBeInTheDocument();
   });
 
   it("previews an input as a chip-sized rendition too", () => {

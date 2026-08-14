@@ -510,6 +510,19 @@ function App() {
               userName={account.name}
               jobs={stillImageJobs}
               users={workspaceUsers}
+              projects={projects}
+              archiveView={showArchivedJobs}
+              favoriteJobIds={favoriteJobIds}
+              canReuseSettings={(job) => canReuseJobSettings(job, models)}
+              onDownload={handleDownloadJobResult}
+              onCopyImage={handleCopyJobImage}
+              onReuseSettings={handleReuseJobSettings}
+              onRetry={handleRetryJob}
+              onToggleFavorite={handleToggleFavorite}
+              onMove={handleMoveJobResult}
+              onArchive={handleArchiveJob}
+              onRestore={handleRestoreArchivedJob}
+              onDeletePermanently={handlePermanentlyDeleteJob}
             />
           )
         }
