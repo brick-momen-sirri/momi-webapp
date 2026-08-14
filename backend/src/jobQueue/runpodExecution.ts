@@ -354,6 +354,18 @@ function setJobPhase(
     keepStartedAt?: boolean;
   } = {},
 ) {
+  const previous = job.runpodProgress;
+  // The trail survives a phase change unless the caller replaces it. Losing it
+  // on the move to "saving" wiped the record at the moment it was most worth
+  // reading: the card went from ticked steps back to none, right at the end.
+  const carried = options.completedSteps ?? previous?.completedSteps ?? [];
+  // A phase change also retires whatever step was running -- it finished, so it
+  // belongs above the line rather than disappearing.
+  const completedSteps =
+    !options.completedSteps && previous?.detail && previous.phase !== phase && !carried.includes(previous.detail)
+      ? [...carried, previous.detail].slice(-12)
+      : carried;
+
   job.runpodProgress = {
     phase,
     runpodStatus: options.runpodStatus,
@@ -363,8 +375,8 @@ function setJobPhase(
     stepDone: options.stepDone,
     stepTotal: options.stepTotal,
     item: options.item,
-    completedSteps: options.completedSteps?.length ? options.completedSteps : undefined,
-    phaseStartedAt: (options.keepStartedAt && job.runpodProgress?.phaseStartedAt) || new Date().toISOString(),
+    completedSteps: completedSteps.length ? completedSteps : undefined,
+    phaseStartedAt: (options.keepStartedAt && previous?.phaseStartedAt) || new Date().toISOString(),
   };
 }
 
