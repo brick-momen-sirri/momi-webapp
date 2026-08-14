@@ -35,6 +35,23 @@ export function extractNodeId(text: string) {
   return RUNNING_NODE.exec(body)?.[1] ?? NODE_ASSIGNMENT.exec(body)?.[1] ?? NODE_ID_PREFIX.exec(body)?.[1];
 }
 
+/**
+ * Sampler steps, when a line reports them: "node=32 item=2 step=5/30".
+ *
+ * Counted by the worker, so unlike a percentage across the whole graph this is
+ * measured rather than guessed. It says how far through the current node the
+ * run is, and nothing about how many nodes remain.
+ */
+const STEP_FRACTION = /\bstep=(\d+)\/(\d+)\b/;
+
+export function extractStepFraction(text: string) {
+  const match = STEP_FRACTION.exec(text);
+  if (!match) return undefined;
+  const done = Number(match[1]);
+  const total = Number(match[2]);
+  return Number.isFinite(done) && Number.isFinite(total) && total > 0 ? { done, total } : undefined;
+}
+
 // Chunks can be re-delivered, so each is remembered by signature. Bounded
 // because a long render emits thousands and this set would otherwise grow for
 // the life of the job.
@@ -67,6 +84,8 @@ export type StreamProgressChunk = {
   text: string;
   /** The ComfyUI node that produced it, when the text names one. */
   nodeId?: string;
+  /** Sampler steps within that node, when the line counts them. */
+  step?: { done: number; total: number };
 };
 
 export function createStreamProgressReader(label = ""): StreamProgressReader {
@@ -99,7 +118,7 @@ export function createStreamProgressReader(label = ""): StreamProgressReader {
             if (stale !== undefined) seen.delete(stale);
           }
 
-          chunks.push({ text, nodeId: extractNodeId(text) });
+          chunks.push({ text, nodeId: extractNodeId(text), step: extractStepFraction(text) });
         }
       }
 

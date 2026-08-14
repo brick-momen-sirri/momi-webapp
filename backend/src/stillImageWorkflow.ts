@@ -691,6 +691,16 @@ const RAW_ENHANCEMENT_QWEN_PROMPT = [
  */
 const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<string, string>>>> = {
   "general-enhancement": {
+    // The first block is taken from a live worker log rather than from forge's
+    // table, which covered only the sampling nodes -- so most of a run reported
+    // nothing and the card sat on whichever label it had last seen.
+    "63": "Loading the input image",
+    "34": "Resizing the image",
+    "85": "Building the mask",
+    "65": "Converting the mask",
+    "76": "Softening the mask",
+    "68": "Preparing the mask",
+    "12": "Collecting the tiles",
     "13": "Preparing masked tiles",
     "66": "Preparing tiles",
     "32": "Sampling tiles",

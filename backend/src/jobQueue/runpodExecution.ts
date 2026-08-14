@@ -136,7 +136,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       for (const chunk of [...(observation.streamChunks ?? [])].reverse()) {
         const label = stillImage ? stillImageNodeStatusLabel(stillImage.categoryId, chunk.nodeId) : undefined;
         if (label) {
-          detail = label;
+          // The step count is the worker's own, so it is shown as-is. It says
+          // how far through this node the run is, not through the graph.
+          detail = chunk.step ? `${label} (step ${chunk.step.done}/${chunk.step.total})` : label;
           break;
         }
       }

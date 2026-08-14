@@ -323,6 +323,9 @@ async function resolveRunpodResponse(
   // Only built when someone is listening, so a caller that does not want
   // progress does not pay for an extra request per poll.
   const streamReader = onPoll ? createStreamProgressReader(endpoint.id || "endpoint") : undefined;
+  // The stream request currently open, awaited on the next pass. Never rejects:
+  // readStreamChunks resolves to an empty list on any failure.
+  let pendingStream: Promise<StreamProgressChunk[]> | undefined;
 
   while (true) {
     throwIfCancellationRequested(shouldCancel);
@@ -334,20 +337,42 @@ async function resolveRunpodResponse(
     // able to break a job that RunPod is running fine.
     if (onPoll) {
       const jobId = runpodJobId(current);
-      // Drained on every poll while the job is live. Skipping this until the job
-      // looked "interesting" would lose the chunks emitted in the meantime --
-      // the buffer only hands each one over once.
-      const streamChunks =
+      // Read the request issued on the previous pass, then immediately issue the
+      // next one so it stays open across the status call and the wait that
+      // follows. A request opened and closed in milliseconds every few seconds
+      // only sees what happens to be buffered at that instant; forge keeps one
+      // in flight continuously, and that is the difference between reading this
+      // pod's progress and reading nothing from it.
+      // Where the progress actually is. These workers call RunPod's
+      // progress_update(), which surfaces the latest message on the *status*
+      // response -- "Running node 32: KSampler", "[comfy-log][enhance-step]
+      // node=32 item=2 step=5/30". /stream carries nothing for them, because
+      // that is for generator handlers and these are not, which is why it
+      // honestly answered with an empty list every time it was asked.
+      //
+      // Only the newest message is kept by RunPod, so a poll sees the current
+      // step rather than every step. That is what the UI wants anyway.
+      const statusChunks = streamReader && current.progress !== undefined
+        ? streamReader.read({ progress: current.progress })
+        : [];
+
+      // Still drained, for any worker that is a generator. Kept deliberately:
+      // it costs one request per poll and the presets do not all share an image.
+      const streamChunks = pendingStream ? await pendingStream : [];
+      pendingStream =
         streamReader && jobId && pendingStatuses.has(status)
-          ? await readStreamChunks(fetchImpl, endpoint, jobId, streamReader)
-          : [];
+          ? readStreamChunks(fetchImpl, endpoint, jobId, streamReader)
+          : undefined;
       try {
         await onPoll({
           status,
           delayMs: finiteNumber(current.delayTime),
           executionMs: finiteNumber(current.executionTime),
           workerId: stringFrom(current.workerId),
-          streamChunks,
+          // Status-reported progress first: it is the newest thing the worker
+          // said, so a caller taking the last recognisable entry gets the step
+          // that is actually running.
+          streamChunks: [...streamChunks, ...statusChunks],
         });
       } catch {
         // Progress reporting is decoration; losing it must not lose the render.
@@ -791,7 +816,10 @@ async function readStreamChunks(
     const response = await fetchImpl(withCacheBuster(endpoint.streamUrl(jobId)), {
       method: "GET",
       headers: runpodHeaders(),
-      signal: AbortSignal.timeout(15_000),
+      // Matches forge's 30s. Now that the request is deliberately left open
+      // across a poll interval, a shorter budget would abort a connection that
+      // is doing exactly what it should.
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
       // The difference between "this pod does not report progress" and "we are
@@ -800,7 +828,17 @@ async function readStreamChunks(
       reader.note(`stream request returned HTTP ${response.status}`);
       return [];
     }
-    return reader.read(await response.json());
+    const payload = await response.json();
+    const chunks = reader.read(payload);
+    // Until something parses, record what actually came back. "No chunks" says
+    // the parse found nothing; it does not say whether the body was empty or
+    // full of a shape this does not recognise, and guessing between those two
+    // has already cost several rounds. Deduped, and only while nothing parses,
+    // so a working stream logs this once at most.
+    if (!chunks.length) {
+      reader.note(`raw stream body: ${JSON.stringify(payload).slice(0, 400)}`);
+    }
+    return chunks;
   } catch (error) {
     reader.note(`stream request failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
