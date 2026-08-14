@@ -47,6 +47,34 @@ export function thumbnailMediaUrl(url: string | undefined, width: number) {
   }
 }
 
+/**
+ * Rewrites a video result URL to the rendition the browser can decode.
+ *
+ * Only the player uses this. Downloads deliberately keep pointing at the
+ * original, so what people save is the master the generator produced -- 4K HEVC
+ * included -- while what they watch in the tab is guaranteed to decode. The
+ * backend passes through anything already playable, so this is safe to apply to
+ * every video result rather than trying to guess the codec here.
+ */
+export function playableVideoUrl(url: string): string;
+export function playableVideoUrl(url: string | undefined): string | undefined;
+export function playableVideoUrl(url: string | undefined) {
+  if (!url || /^(data|blob):/i.test(url)) return url;
+  try {
+    const parsed = new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.origin);
+    if (parsed.pathname === "/api/media") {
+      parsed.pathname = "/api/media/playable";
+    } else if (/^\/api\/jobs\/[^/]+\/result-media$/.test(parsed.pathname)) {
+      parsed.searchParams.set("playable", "1");
+    } else {
+      return url;
+    }
+    return url.startsWith("/") ? `${parsed.pathname}${parsed.search}` : parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function fetchBackendClipboardImage() {
   const data = await apiRequest<{ image: BackendClipboardImage }>("/api/clipboard/image");
   return data.image;

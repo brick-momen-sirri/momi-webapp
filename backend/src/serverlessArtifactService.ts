@@ -8,6 +8,7 @@ import { projectFolderName } from "./projectFolderName.js";
 import { assertManifestRecordSafe, fallbackProjectFolder, readJsonFile, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache } from "./mediaService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
+import { warmPlayableVideo } from "./playableVideoService.js";
 import { warmThumbnails } from "./thumbnailService.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
 import type { Job, Project, Resolution, WorkflowModel } from "./types.js";
@@ -150,6 +151,16 @@ async function persistOneArtifact(
     // and the next request retries the encode.
     if (assetType === "image") {
       await warmThumbnails(target.filePath);
+    }
+
+    // Videos get the same treatment for playback compatibility, but off the
+    // critical path. Most results are already H.264 and this costs one ffprobe;
+    // the ones that are not (HEVC 4K, currently) take seconds to transcode, and
+    // the job is finished either way -- holding a completed render at "running"
+    // while a proxy encodes would trade this bug for a worse one. Whoever opens
+    // the result before the warm lands coalesces onto the same in-flight encode.
+    if (assetType === "video") {
+      void warmPlayableVideo(target.filePath);
     }
 
     const manifestRecord = buildManifestRecord({

@@ -25,6 +25,7 @@ import {
 } from "../httpMedia.js";
 import { getQueryValue } from "../httpQuery.js";
 import { canAccessJob, canCreateJobInProject, canViewProject, getVisibleJobForResult, isDemoAccount } from "../jobPermissions.js";
+import { getOrCreatePlayableVideo } from "../playableVideoService.js";
 import { getProject, getProjects } from "../projectService.js";
 import { safeSegment } from "../storageService.js";
 import { writeStreamAtomically } from "../streamingMediaService.js";
@@ -198,6 +199,69 @@ mediaRouter.get("/api/media/thumbnail", async (req, res) => {
   }
 });
 
+// A browser-playable rendition of a video result. Sources that already decode
+// everywhere stream through untouched; HEVC, 10-bit and 4:4:4 sources are served
+// as a cached H.264 copy. Falls back to the original whenever a rendition cannot
+// be produced -- that at least works for whoever does have a decoder, which is
+// strictly better than a 500.
+mediaRouter.get("/api/media/playable", async (req, res) => {
+  const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+  const access = await authorizeMediaRead(req, rawPath);
+  if (!access.ok) {
+    return res.status(access.status).json({ error: access.error });
+  }
+
+  await streamPlayableVideo(req, res, access.resolvedPath);
+});
+
+/**
+ * Streams `resolvedPath` as something a browser can decode.
+ *
+ * Shared by /api/media/playable and result-media's ?playable=1 so the two cannot
+ * drift; both have already authorized the path.
+ */
+async function streamPlayableVideo(req: express.Request, res: express.Response, resolvedPath: string) {
+  try {
+    const playable = await getOrCreatePlayableVideo(resolvedPath);
+    if (playable.kind === "rendition") {
+      res.setHeader("ETag", `"${playable.cacheKey}"`);
+      if (req.headers["if-none-match"] === `"${playable.cacheKey}"`) {
+        return res.status(304).end();
+      }
+      await streamLocalFile(req, res, playable.filePath, {
+        contentType: playable.contentType,
+        disposition: `inline; filename="${safeHeaderFileName(`${path.parse(resolvedPath).name}.mp4`)}"`,
+        // The cache key covers the source's mtime and size, so a re-rendered
+        // result yields a different ETag and a new rendition.
+        cacheControl: "private, max-age=604800, immutable",
+      });
+      return;
+    }
+
+    await streamLocalFile(req, res, resolvedPath, {
+      contentType: contentTypeFromFilePath(resolvedPath),
+      disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+    });
+  } catch (error) {
+    // Headers are already on the wire once streaming starts; there is nothing
+    // useful left to say, and appending JSON would corrupt the video.
+    if (res.headersSent) return res.destroy();
+    try {
+      await fs.access(resolvedPath);
+      console.warn(
+        `Could not build a playable rendition for ${path.basename(resolvedPath)}, serving original:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      await streamLocalFile(req, res, resolvedPath, {
+        contentType: contentTypeFromFilePath(resolvedPath),
+        disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+      });
+    } catch {
+      res.status(404).json({ error: "Media file not found" });
+    }
+  }
+}
+
 mediaRouter.get("/api/jobs/:jobId/result-file", async (req, res) => {
   try {
     const user = getRequestUser(req);
@@ -307,6 +371,14 @@ mediaRouter.get("/api/jobs/:jobId/result-media", async (req, res) => {
           }
         }
 
+        // ?playable=1 asks for something the browser can actually decode. Only
+        // the player sets it; the download route deliberately does not, so what
+        // gets saved stays the master the generator produced.
+        if (getQueryValue(req.query.playable) === "1") {
+          await streamPlayableVideo(req, res, safeLocalPath);
+          return;
+        }
+
         const contentType = contentTypeFromFilePath(safeLocalPath);
         await streamLocalFile(req, res, safeLocalPath, {
           contentType,
@@ -314,6 +386,7 @@ mediaRouter.get("/api/jobs/:jobId/result-media", async (req, res) => {
         });
         return;
       } catch {
+        if (res.headersSent) return res.destroy();
         return res.status(404).json({ error: "Result file not found" });
       }
     }

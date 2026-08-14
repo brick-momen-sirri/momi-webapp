@@ -42,7 +42,12 @@ export type MintedMediaAccessToken = {
 // Request paths that will accept a media token in place of a session. Anchored
 // and exact: a token must not work on /api/jobs (the list), only on the two
 // per-job binary reads, and not on anything under /api/media except the reads.
-const mediaTokenPaths = [/^\/api\/media$/, /^\/api\/media\/thumbnail$/, /^\/api\/jobs\/[^/]+\/result-(file|media)$/];
+const mediaTokenPaths = [
+  /^\/api\/media$/,
+  /^\/api\/media\/thumbnail$/,
+  /^\/api\/media\/playable$/,
+  /^\/api\/jobs\/[^/]+\/result-(file|media)$/,
+];
 
 export function isMediaTokenPath(pathname: string): boolean {
   return mediaTokenPaths.some((pattern) => pattern.test(pathname));

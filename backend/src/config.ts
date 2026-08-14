@@ -294,6 +294,41 @@ export const ffmpegPath = process.env.FFMPEG_PATH?.trim() || "ffmpeg";
 // Clips shorter than this yield no frame and fall back to frame 0.
 export const videoPosterSeekSeconds = Math.max(0, positiveNumber(process.env.VIDEO_POSTER_SEEK_SECONDS, 1));
 export const videoPosterTimeoutMs = positiveNumber(process.env.VIDEO_POSTER_TIMEOUT_MS, 20_000);
+export const ffprobePath = process.env.FFPROBE_PATH?.trim() || "ffprobe";
+
+// --- Playable video renditions ---
+// Not every provider returns something a browser can decode. ByteDance's 4K tier
+// hands back HEVC Main 10 tagged `hev1`, which Chrome and Firefox cannot play at
+// all, Safari and QuickTime refuse over the tag alone, and older GPUs cannot
+// decode because of the 10 bits -- so a finished 4K render looked like a broken
+// player to most of the people it was rendered for. The master stays exactly as
+// the provider sent it (that is what downloads deliver); the player is pointed at
+// an H.264 rendition built from it, cached the same way image thumbnails are.
+export const playableVideoCacheDir =
+  process.env.PLAYABLE_VIDEO_CACHE_DIR?.trim() || path.join(backendRoot, "data", "playable-video-cache");
+// One at a time by default. A 5s 4K transcode is a few seconds of saturated CPU,
+// and this box also runs live renders and the image encoder.
+export const playableVideoMaxConcurrency = Math.max(
+  1,
+  Math.floor(positiveNumber(process.env.PLAYABLE_VIDEO_MAX_CONCURRENCY, 1)),
+);
+// Resolution is preserved by default -- the proxy is what people watch, and
+// halving it would quietly downgrade the review copy of a 4K deliverable. Lower
+// this if transcode time on the box starts to hurt.
+export const playableVideoMaxHeight = Math.floor(boundedNumber(process.env.PLAYABLE_VIDEO_MAX_HEIGHT, 2160, 360, 4320));
+// Constant quality rather than a target bitrate: these are short clips whose
+// complexity varies enormously, and CRF spends bits where the motion is.
+export const playableVideoCrf = Math.floor(boundedNumber(process.env.PLAYABLE_VIDEO_CRF, 20, 14, 32));
+export const playableVideoPreset = process.env.PLAYABLE_VIDEO_PRESET?.trim() || "veryfast";
+export const playableVideoTimeoutMs = positiveNumber(process.env.PLAYABLE_VIDEO_TIMEOUT_MS, 20 * 60_000);
+export const playableVideoProbeTimeoutMs = positiveNumber(process.env.PLAYABLE_VIDEO_PROBE_TIMEOUT_MS, 30_000);
+// Its own budget, pruned on the same timer as the thumbnail cache. Video
+// renditions are two orders of magnitude larger than a WebP, so sharing one
+// budget would let a handful of them evict the entire image cache.
+export const playableVideoCacheMaxBytes = positiveNumber(
+  process.env.PLAYABLE_VIDEO_CACHE_MAX_BYTES,
+  16 * 1024 * 1024 * 1024,
+);
 export const memoryLogIntervalMs = positiveNumber(process.env.MEMORY_LOG_INTERVAL_MS, 15_000);
 export const mediaIndexRefreshMs = positiveNumber(process.env.MEDIA_INDEX_REFRESH_MS, 500);
 

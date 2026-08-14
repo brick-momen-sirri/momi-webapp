@@ -1,7 +1,7 @@
 import { AlertTriangle, ExternalLink, Maximize2, PlayCircle } from "lucide-react";
 import { type DragEvent, useState } from "react";
 import type { Job } from "../types";
-import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
+import { backendResultFileUrl, playableVideoUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { setResultImageDragData } from "../utils/resultDrag";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
@@ -177,7 +177,14 @@ export function JobPreview({ job }: JobPreviewProps) {
       ) : null}
       {result && isVideoOutput && !isGifMedia(result, job.fileName) ? (
         <video
-          src={withFirstFrameHint(result)}
+          // Not the raw result: some providers return codecs this element cannot
+          // decode (4K comes back as HEVC 10-bit), which showed up as a dead
+          // player for most viewers. The backend serves an H.264 copy for those
+          // and the original bytes for everything else. Downloads still get the
+          // master — see backendResultFileUrl.
+          // The frame hint goes on last: it is a fragment, and the rewrite above
+          // rebuilds the URL from its path and query alone.
+          src={withFirstFrameHint(playableVideoUrl(result))}
           // No image poster exists for video-only jobs, so fall back to the
           // video itself — the backend extracts a frame for it.
           poster={thumbnailMediaUrl(videoPoster ?? result, THUMBNAIL_WIDTH.preview) ?? undefined}
@@ -207,7 +214,10 @@ export function JobPreview({ job }: JobPreviewProps) {
       ) : null}
       {result && isVideoOutput ? (
         <a
-          href={result}
+          // Opening the raw file here lands on the browser's own player, which is
+          // the codec problem again with no UI of ours in the way. Same rendition
+          // the inline player uses; Download still hands over the master.
+          href={playableVideoUrl(result)}
           target="_blank"
           rel="noreferrer"
           className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-bold text-ink shadow-card transition hover:bg-white"

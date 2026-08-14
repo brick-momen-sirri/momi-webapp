@@ -16,6 +16,7 @@ import { backendProcessRole, isDispatcher } from "./processRole.js";
 
 import { createHealthWatchdog } from "./healthWatchdog.js";
 import { backupMediaViaAzcopy, startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
+import { prunePlayableVideoCache } from "./playableVideoService.js";
 import { pruneThumbnailCache } from "./thumbnailService.js";
 
 import {
@@ -264,6 +265,18 @@ async function boot() {
           if (result.deletedFiles > 0) {
             console.log(
               `Pruned thumbnail cache: removed ${result.deletedFiles} renditions (${Math.round(result.deletedBytes / 1048576)} MiB).`,
+            );
+          }
+        })
+        .catch(() => undefined);
+      // Same timer, separate budget: one video rendition outweighs a thousand
+      // WebPs, so a shared budget would let a few 4K proxies evict the whole
+      // image cache.
+      void prunePlayableVideoCache()
+        .then((result) => {
+          if (result.deletedFiles > 0) {
+            console.log(
+              `Pruned playable video cache: removed ${result.deletedFiles} renditions (${Math.round(result.deletedBytes / 1048576)} MiB).`,
             );
           }
         })
