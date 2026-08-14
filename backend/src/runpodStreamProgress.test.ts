@@ -130,17 +130,53 @@ test("the first real chunk is reported, with its parsed node ids", () => {
   assert.match(lines[0], /"32"/);
 });
 
-test("a persistently empty stream says so once, and only after several polls", () => {
+test("an empty stream is reported when polling ends, however short the job", () => {
+  // A poll-count threshold missed exactly the jobs that finish fastest, which is
+  // how a 23-second run against a warm worker produced no diagnosis at all.
   const reader = createStreamProgressReader("ge");
   const lines: string[] = [];
   const original = console.log;
   console.log = (message?: unknown) => void lines.push(String(message));
   try {
-    for (let index = 0; index < 20; index += 1) reader.read({ status: "IN_PROGRESS", stream: [] });
+    reader.read({ status: "IN_PROGRESS", stream: [] });
+    reader.read({ status: "IN_PROGRESS", stream: [] });
+    reader.summarize();
   } finally {
     console.log = original;
   }
 
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /appears not to stream/);
+  assert.match(lines[0], /does not stream/);
+  assert.match(lines[0], /2 poll/);
+});
+
+test("a stream that produced chunks is not reported as silent", () => {
+  const reader = createStreamProgressReader("ge");
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => void lines.push(String(message));
+  try {
+    reader.read({ stream: ["32 sampling tiles"] });
+    reader.summarize();
+  } finally {
+    console.log = original;
+  }
+
+  assert.equal(lines.length, 1, "the chunk line only; no contradicting silence claim");
+  assert.match(lines[0], /emitting progress/);
+});
+
+test("summarize says nothing when the stream was never read", () => {
+  // A job cancelled before its first poll has nothing to report either way.
+  const reader = createStreamProgressReader("ge");
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => void lines.push(String(message));
+  try {
+    reader.summarize();
+  } finally {
+    console.log = original;
+  }
+
+  assert.deepEqual(lines, []);
 });

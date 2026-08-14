@@ -353,6 +353,11 @@ async function resolveRunpodResponse(
         // Progress reporting is decoration; losing it must not lose the render.
       }
     }
+    // Past this point the job is no longer pending, so no further chunks can
+    // arrive. Reported here rather than on a poll count, so a job that finishes
+    // in seconds still says whether its worker streamed.
+    if (!pendingStatuses.has(status)) streamReader?.summarize();
+
     if (pendingStatuses.has(status)) {
       const jobId = runpodJobId(current);
       if (!jobId) {

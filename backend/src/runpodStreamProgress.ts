@@ -33,6 +33,12 @@ export type StreamProgressReader = {
    * preset appears to report no detail.
    */
   note: (message: string) => void;
+  /**
+   * Reports what the stream did overall. Call once when polling stops, whatever
+   * the outcome -- a job that never streamed should say so however briefly it
+   * ran.
+   */
+  summarize: () => void;
 };
 
 export type StreamProgressChunk = {
@@ -85,15 +91,17 @@ export function createStreamProgressReader(label = ""): StreamProgressReader {
         note(`emitting progress: ${chunks.length} chunk(s), nodeIds=${JSON.stringify(nodeIds)}, first=${JSON.stringify(sample)}`);
       } else if (!chunks.length && !reportedChunks) {
         emptyReads += 1;
-        // Enough polls to cover a cold start and the first real work. Still
-        // nothing by here means this worker does not report progress at all,
-        // which is a property of the pod rather than a fault to chase.
-        if (emptyReads === 8) {
-          note(`no progress chunks after ${emptyReads} polls; this worker appears not to stream`);
-        }
       }
 
       return chunks;
+    },
+    summarize() {
+      // Called once when polling ends, rather than after a fixed number of
+      // polls. A poll-count threshold silently misses exactly the jobs that
+      // finish quickly -- which is how this first failed to report anything at
+      // all on a 23-second run against a warm worker.
+      if (reportedChunks || emptyReads === 0) return;
+      note(`no progress chunks in ${emptyReads} poll(s); this worker does not stream`);
     },
   };
 }
