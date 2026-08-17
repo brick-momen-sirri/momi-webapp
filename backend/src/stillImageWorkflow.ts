@@ -715,6 +715,47 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
     "82": "Compositing result",
     "83": "Saving final image",
   },
+  // Derived from the exported graph rather than from forge, which has no table
+  // for this preset -- it drives a coarse three-stage bar off the profile in
+  // workflow_profiles.json instead. Only the nodes worth naming are listed;
+  // loaders and arithmetic helpers would make the trail noise.
+  "pro-upscaler": {
+    "99": "Loading the input image",
+    "105": "Resizing the image",
+    "77:77": "Loading the upscaler",
+    "77:79": "Loading the upscaler",
+    "77:78": "Upscaling with SeedVR",
+    "96:93": "Splitting into tiles",
+    "80:19": "Encoding tiles",
+    "80:12": "Sampling tiles",
+    "80:20": "Decoding tiles",
+    "80:14": "Collecting the tiles",
+    "81:13": "Reassembling the image",
+    "81:38": "Resizing the result",
+    "103": "Loading the upscale model",
+    "102": "Upscaling the image",
+    "97": "Saving final image",
+  },
+  "qwen-edit": {
+    "76": "Loading image 1",
+    "121": "Loading image 2",
+    "165": "Loading image 3",
+    "168": "Reading the image",
+    "142": "Loading the model",
+    "167": "Loading the LoRA",
+    "151": "Scaling image 1",
+    "160": "Scaling image 2",
+    "166": "Scaling image 3",
+    "149": "Encoding image 1",
+    "158": "Encoding image 2",
+    "163": "Encoding image 3",
+    "154": "Reading the prompt",
+    "161": "Reading the prompt",
+    "139": "Sampling",
+    "140": "Decoding the image",
+    "182": "Resizing the result",
+    "137": "Saving final image",
+  },
   "reference-generator": {
     "42": "Loading main image",
     "43": "Loading reference image",
@@ -738,6 +779,16 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
     "153": "Saving final image",
   },
 };
+
+/**
+ * The nodes a preset has labels for. Exported so a test can hold them against
+ * the real graph: a re-export that renumbers a node would otherwise leave the
+ * label silently unreachable, and the trail would quietly go blank for that step
+ * with nothing failing.
+ */
+export function stillImageLabelledNodeIds(categoryId: StillImageCategoryId) {
+  return Object.keys(NODE_STATUS_LABELS[categoryId] ?? {});
+}
 
 /** The human label for a node a worker is reporting on, if it has one. */
 export function stillImageNodeStatusLabel(categoryId: string, nodeId: string | undefined) {

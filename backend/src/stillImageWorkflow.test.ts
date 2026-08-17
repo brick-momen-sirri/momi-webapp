@@ -527,3 +527,34 @@ test("qwen edit always saves through the final crop", async () => {
   assert.deepEqual(link(graph, "182", "image"), ["140", 0]);
   assert.equal(value(graph, "182", "multiple_of"), 1);
 });
+
+test("every progress label points at a node the real graph contains", async () => {
+  // The labels are keyed by ComfyUI node id, which is a contract with the
+  // exported graph exactly like the input bindings are. A re-export that
+  // renumbers a node leaves its label unreachable, and the only symptom is a
+  // step quietly missing from the progress trail -- nothing throws. This is the
+  // check that turns that into a failure here instead.
+  const { stillImageLabelledNodeIds, stillImageNodeStatusLabel } = await import("./stillImageWorkflow.js");
+  const fs = await import("node:fs/promises");
+
+  for (const categoryId of ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"] as const) {
+    const graph = JSON.parse(await fs.readFile(stillImageWorkflowPath(categoryId), "utf8"));
+    const labelled = stillImageLabelledNodeIds(categoryId);
+    assert.ok(labelled.length > 0, `${categoryId} should label at least some nodes`);
+
+    for (const nodeId of labelled) {
+      assert.ok(graph[nodeId], `${categoryId} labels node ${nodeId}, which the exported graph does not contain`);
+      assert.ok(stillImageNodeStatusLabel(categoryId, nodeId), `${categoryId} node ${nodeId} resolves to a label`);
+    }
+  }
+});
+
+test("a subgraph node id resolves through its outer id when unlabelled", async () => {
+  const { stillImageNodeStatusLabel } = await import("./stillImageWorkflow.js");
+  // Nested ids arrive as "80:12". The exact id wins when it is listed...
+  assert.equal(stillImageNodeStatusLabel("pro-upscaler", "80:12"), "Sampling tiles");
+  // ...and an unlisted nested id falls back to its outer node rather than
+  // reporting nothing, which is how a re-nested graph degrades gracefully.
+  assert.equal(stillImageNodeStatusLabel("general-enhancement", "32:9"), "Sampling tiles");
+  assert.equal(stillImageNodeStatusLabel("general-enhancement", "9999"), undefined);
+});
