@@ -125,6 +125,19 @@ test("invalid provider inputs fail before any provider request", async () => {
   assert.equal(uploadRequests.length, before);
 });
 
+test("a remote video URL is refused for models that must re-encode to square pixels", async () => {
+  // Kling rejects non-square pixels, and the backend can only fix that on bytes
+  // it holds. Forwarding the link would fail at the provider, after paying.
+  await assert.rejects(
+    () => materializeRunpodInputVideo(job({ inputVideo: "https://cdn.example/source.mp4" }), klingModel, tempDir),
+    /needs an uploaded video/i,
+  );
+
+  // Unaffected models still forward the link untouched.
+  const remote = await materializeRunpodInputVideo(job({ inputVideo: "https://cdn.example/source.mp4" }), model, tempDir);
+  assert.equal(remote?.videos[0].url, "https://cdn.example/source.mp4");
+});
+
 function mediaUrl(filePath: string) {
   return `/api/media?path=${encodeURIComponent(filePath)}`;
 }
@@ -163,4 +176,12 @@ const model: WorkflowModel = {
   requiresStartEndFrames: false,
   outputType: "video",
   estimatedCredits: 1,
+};
+
+// Keeps the temp workflow fixture: the model is recognised from its id, so the
+// test does not depend on a real workflow file relative to the runner's cwd.
+const klingModel: WorkflowModel = {
+  ...model,
+  id: "brcik_api_kling_o3_video_edit",
+  name: "Kling O3 Video Edit",
 };

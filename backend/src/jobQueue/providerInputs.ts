@@ -24,7 +24,11 @@ import type { RunpodComfyImageInput } from "../runpodComfyService.js";
 import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "../runpodImageInlineService.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "../runpodInputUrlService.js";
 import { prepareRunpodInlineVideoFile } from "../runpodVideoInlineService.js";
-import { prepareRunpodVideoFile } from "../runpodVideoPreprocessService.js";
+import {
+  prepareRunpodVideoFile,
+  remoteVideoInputRejection,
+  requiresNormalizedVideoInput,
+} from "../runpodVideoPreprocessService.js";
 import { safeSegment } from "../storageService.js";
 import type { Job, WorkflowModel } from "../types.js";
 import { detectWorkflowLoadImageNames, detectWorkflowLoadVideoNames } from "../workflowService.js";
@@ -52,9 +56,16 @@ export async function materializeRunpodInputImages(job: Job, model: WorkflowMode
 
 export async function materializeRunpodInputVideo(job: Job, model: WorkflowModel, inputFolder: string) {
   if (!job.inputVideo) return undefined;
+  const filePath = localMediaFilePathFromUrl(job.inputVideo);
+  // Submission already rejects this shape; the dispatcher re-checks because a
+  // remote URL that slipped through would reach the provider unnormalized and
+  // fail there, after the request had been paid for. Checked before the workflow
+  // is read: nothing in it can make a link usable.
+  if (!filePath && requiresNormalizedVideoInput(model)) {
+    throw new Error(remoteVideoInputRejection(model));
+  }
   const expectedNames = await detectWorkflowLoadVideoNames(model);
   const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
-  const filePath = localMediaFilePathFromUrl(job.inputVideo);
   const safeFilePath = filePath ? await requireAllowedExistingMediaPath(filePath) : undefined;
   const preparedFilePath = safeFilePath ? await prepareRunpodVideoFile(safeFilePath, inputFolder, model) : undefined;
   return {

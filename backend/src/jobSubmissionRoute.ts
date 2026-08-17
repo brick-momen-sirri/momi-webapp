@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 
 import { getRequestUser } from "./authMiddleware.js";
+import { remoteVideoInputRejection, requiresNormalizedVideoInput } from "./runpodVideoPreprocessService.js";
 import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImageModels.js";
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
@@ -124,6 +125,13 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   if (model.requiredInputs.includes("resolution") && !resolution) {
     throw new JobSubmissionError("A resolution is required for this workflow.");
   }
+  // Kling O3 and Seedance 2.0 reference reject non-square pixels, so their input
+  // is re-encoded before dispatch. That needs the bytes on disk: an http(s) link
+  // would otherwise reach the provider untouched and fail there. Data URLs are
+  // fine -- externalizeJobInputMedia writes them to the job folder first.
+  if (inputVideo && !inputVideo.startsWith("data:") && requiresNormalizedVideoInput(model) && !isLocalMediaReference(inputVideo)) {
+    throw new JobSubmissionError(remoteVideoInputRejection(model));
+  }
   if (inputImages && model.imageSlotCount && inputImages.length > model.imageSlotCount) {
     throw new JobSubmissionError(`This workflow accepts at most ${model.imageSlotCount} input image(s).`);
   }
@@ -144,6 +152,16 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
     inputVideo,
     workflowOptions,
   };
+}
+
+// Only asks "does this name saved media", not whether the path is allowed --
+// validateJobMediaReferences owns that check and runs right after.
+function isLocalMediaReference(value: string) {
+  try {
+    return new URL(value, "http://127.0.0.1").pathname === "/api/media";
+  } catch {
+    return false;
+  }
 }
 
 function optionalClientRequestId(value: unknown) {

@@ -535,6 +535,35 @@ test("an image editing workflow with no text-only mode still requires an input i
   );
 });
 
+test("Kling O3 refuses a linked video but accepts saved media", () => {
+  const klingModel: WorkflowModel = {
+    ...model,
+    id: "brcik_api_kling_o3_video_edit",
+    name: "Kling O3 Video Edit",
+    workflowPath: "workflow/video_edit/Brcik_api_kling_o3_video_edit.json",
+    requiredInputs: ["prompt", "video", "resolution"],
+  };
+  const base = {
+    projectId: project.id,
+    modelId: klingModel.id,
+    prompt: "make it snow",
+    resolution: { width: 1920, height: 1080, label: "1080p" },
+  };
+
+  assert.throws(
+    () => validatedRequest({ ...base, inputVideo: "https://cdn.example/clip.mp4" }, klingModel, users.owner.id),
+    /needs an uploaded video/i,
+  );
+
+  const saved = "/api/media?path=C%3A%5Cuploads%5Cclip.mp4";
+  assert.equal(validatedRequest({ ...base, inputVideo: saved }, klingModel, users.owner.id).inputVideo, saved);
+
+  // Models with no square-pixel requirement keep taking links.
+  const linked = "https://cdn.example/clip.mp4";
+  const permissive: WorkflowModel = { ...klingModel, id: "safe_v2v", name: "Safe V2V", workflowPath: "safe_v2v.json" };
+  assert.equal(validatedRequest({ ...base, modelId: permissive.id, inputVideo: linked }, permissive, users.owner.id).inputVideo, linked);
+});
+
 async function call(body: unknown) {
   return rawCall(JSON.stringify(body));
 }
