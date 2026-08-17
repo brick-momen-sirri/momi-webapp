@@ -20,6 +20,7 @@ import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../ser
 import type { Job, Project, User } from "../types";
 import { cn } from "../utils/classNames";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
+import { ImageCompareSlider } from "./ImageCompareSlider";
 import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
@@ -296,38 +297,43 @@ function StillImageJobCard({
  * The image is not even requested until the card is near the viewport, so a
  * project with 50 results costs one small request per card the user actually
  * scrolls to rather than 50 originals up front.
+ *
+ * The viewer is the same one the Animation cards use. Every preset here is a
+ * before-and-after -- enhance, upscale, edit, transfer -- and judging one against
+ * a 128px input chip elsewhere on the card was never really possible.
  */
 function StillImageResult({ job, url }: { job: Job; url: string }) {
   const [containerRef, inView] = useNearViewport<HTMLDivElement>();
   const [fullscreenImage, setFullscreenImage] = useState<FullscreenImage | null>(null);
   const name = job.fileName ?? `${job.modelType} result`;
+  // Slot 1 for every preset: the main image for Reference Generator and Qwen
+  // Edit, whose later slots are a reference or a second subject rather than the
+  // thing being changed. Comparing against those would be meaningless.
+  const inputUrl = job.inputImages.filter(Boolean)[0];
+  // Matched renditions. Both sides are downscaled the same way so the comparison
+  // is like-for-like at screen size; Pro Upscaler's extra resolution is a
+  // question for the fullscreen preview's original, not for a card.
+  const beforeImage = inputUrl ? thumbnailMediaUrl(inputUrl, THUMBNAIL_WIDTH.fullscreen) : undefined;
+  const afterImage = thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen);
 
   return (
-    <div ref={containerRef} className="relative w-full overflow-hidden rounded-lg border border-line bg-stone-100">
+    <div ref={containerRef} className="relative w-full">
       {inView ? (
-        // Fills the card's width and takes whatever height the aspect ratio asks
-        // for, so a portrait render makes the card taller instead of being boxed
-        // into a fixed frame. `h-auto` with no cropping keeps the ratio exact.
-        //
-        // The viewport cap is the one limit: a very long vertical image would
-        // otherwise push the metadata below it off the bottom of a screen
-        // entirely. object-contain means the cap letterboxes rather than crops,
-        // and the fullscreen preview is there for the extreme cases.
-        <img
-          // 1440, the largest rendition. The card spans the panel and these are
-          // the studio's own renders being judged, so softness reads as a
-          // quality problem with the render itself. Still a rendition -- the
-          // original can be 100+ MB and is only ever fetched by Download.
-          src={thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen)}
-          alt={`Result for ${job.modelType}`}
-          loading="lazy"
-          decoding="async"
-          className="block h-auto max-h-[85vh] w-full object-contain"
+        // 1440, the largest rendition. The card spans the panel and these are the
+        // studio's own renders being judged, so softness reads as a quality
+        // problem with the render itself. Still a rendition -- the original can
+        // be 100+ MB and is only ever fetched by Download.
+        <ImageCompareSlider
+          beforeImage={beforeImage}
+          afterImage={afterImage}
+          beforeLabel="Input"
+          afterLabel="Result"
+          maxHeight="85vh"
         />
       ) : (
         // Only a placeholder height: the real one is unknown until the image
         // loads, and guessing would make the page jump twice instead of once.
-        <div className="flex min-h-[20rem] w-full items-center justify-center">
+        <div className="flex min-h-[20rem] w-full items-center justify-center overflow-hidden rounded-lg border border-line bg-stone-100">
           <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
             Result preview
           </span>
@@ -340,11 +346,14 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
           label="Open preview"
           onClick={() =>
             setFullscreenImage({
-              previewUrl: thumbnailMediaUrl(url, THUMBNAIL_WIDTH.fullscreen),
+              previewUrl: afterImage,
               name,
               downloadUrl: backendResultFileUrl(job.id, 0),
               // Un-downscaled, for the "View full resolution" button only.
               originalUrl: url,
+              // Carried through so the comparison survives going fullscreen,
+              // which is where it is worth the most.
+              beforeUrl: beforeImage,
             })
           }
         />

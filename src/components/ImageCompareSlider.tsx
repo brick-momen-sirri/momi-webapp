@@ -6,6 +6,24 @@ type ImageCompareSliderProps = {
   afterImage: string;
   beforeLabel?: string;
   afterLabel?: string;
+  /**
+   * Caps the viewer's height, e.g. "85vh".
+   *
+   * The box is otherwise sized purely by the result's aspect ratio, which is
+   * right for the 16:9-ish Animation results but not for a still: a portrait
+   * render at panel width is taller than the screen, and everything below it --
+   * including the metadata row -- ends up off the bottom. Both images are
+   * object-contain, so a cap letterboxes rather than crops, and they stay
+   * aligned with each other because they letterbox identically.
+   */
+  maxHeight?: string;
+  /**
+   * Which mode to open in. "result" everywhere the viewer is just looking at a
+   * card and may reach for C; "compare" where the caller has already asked for
+   * a comparison and mounting in result mode would look like the request did
+   * nothing. Ignored without a beforeImage, since there is nothing to compare.
+   */
+  defaultMode?: ViewerMode;
   onResultDragStart?: (event: DragEvent<HTMLImageElement>) => void;
 };
 
@@ -35,13 +53,15 @@ export function ImageCompareSlider({
   afterImage,
   beforeLabel = "Before",
   afterLabel = "Result",
+  maxHeight,
+  defaultMode = "result",
   onResultDragStart,
 }: ImageCompareSliderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isViewerHoveredRef = useRef(false);
   const isZPressedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
-  const [mode, setMode] = useState<ViewerMode>("result");
+  const [mode, setMode] = useState<ViewerMode>(beforeImage ? defaultMode : "result");
   const [position, setPosition] = useState(50);
   const [zoom, setZoom] = useState(1);
   const [aspectRatio, setAspectRatio] = useState("16 / 9");
@@ -238,6 +258,7 @@ export function ImageCompareSlider({
         }`}
         style={{
           aspectRatio,
+          maxHeight,
           overscrollBehavior: "contain",
           touchAction: mode === "compare" && canCompare ? "none" : "pan-y",
         }}

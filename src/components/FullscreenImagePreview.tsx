@@ -1,5 +1,7 @@
-import { Download, Loader2, ScanSearch, X } from "lucide-react";
+import { ChevronsLeftRight, Download, Loader2, ScanSearch, X } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { ImageCompareSlider } from "./ImageCompareSlider";
 
 export type FullscreenImage = {
   /**
@@ -18,6 +20,12 @@ export type FullscreenImage = {
    * button below.
    */
   originalUrl?: string;
+  /**
+   * The input this result was made from, as a rendition. Enables the compare
+   * mode below; callers with nothing meaningful to compare against (or more than
+   * one candidate) leave it out and the control does not appear.
+   */
+  beforeUrl?: string;
 };
 
 export function FullscreenImagePreview({ image, onClose }: { image: FullscreenImage; onClose: () => void }) {
@@ -27,6 +35,12 @@ export function FullscreenImagePreview({ image, onClose }: { image: FullscreenIm
   const [wantsOriginal, setWantsOriginal] = useState(false);
   const [originalLoaded, setOriginalLoaded] = useState(false);
   const [originalFailed, setOriginalFailed] = useState(false);
+  // Two separate modes rather than one combined view. Comparing is a question
+  // about renditions -- did this pass do what I wanted -- and full resolution is
+  // a question about pixels. Stacking the original inside a clipped comparison
+  // would also lose the thing the stack exists for: keeping something on screen
+  // while a 100 MB file arrives.
+  const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -48,6 +62,18 @@ export function FullscreenImagePreview({ image, onClose }: { image: FullscreenIm
       onClick={onClose}
     >
       <div className="absolute right-4 top-4 z-10 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+        {image.beforeUrl ? (
+          <button
+            type="button"
+            onClick={() => setComparing((value) => !value)}
+            aria-pressed={comparing}
+            className="flex h-10 items-center gap-2 rounded-md bg-white/90 px-3 text-sm font-bold text-ink shadow-card transition hover:bg-white"
+            title="Compare this result against the image it was made from"
+          >
+            <ChevronsLeftRight className="h-4 w-4" />
+            {comparing ? "Exit compare" : "Compare"}
+          </button>
+        ) : null}
         {image.downloadUrl ? (
           <a
             href={image.downloadUrl}
@@ -71,11 +97,24 @@ export function FullscreenImagePreview({ image, onClose }: { image: FullscreenIm
       </div>
 
       <div className="relative flex max-h-full max-w-full items-center justify-center" onClick={(event) => event.stopPropagation()}>
-        <img src={image.previewUrl} alt={image.name} decoding="async" className="max-h-full max-w-full object-contain" draggable={false} />
+        {comparing && image.beforeUrl ? (
+          <div className="w-[min(96vw,1600px)]">
+            <ImageCompareSlider
+              beforeImage={image.beforeUrl}
+              afterImage={image.previewUrl}
+              beforeLabel="Input"
+              afterLabel="Result"
+              maxHeight="80vh"
+              defaultMode="compare"
+            />
+          </div>
+        ) : (
+          <img src={image.previewUrl} alt={image.name} decoding="async" className="max-h-full max-w-full object-contain" draggable={false} />
+        )}
         {/* Stacked over the preview rather than replacing it, so the rendition
             stays on screen for however long a 100 MB original takes to arrive
             instead of the viewer staring at an empty frame. */}
-        {wantsOriginal && image.originalUrl ? (
+        {!comparing && wantsOriginal && image.originalUrl ? (
           <img
             src={image.originalUrl}
             alt={image.name}
@@ -88,7 +127,10 @@ export function FullscreenImagePreview({ image, onClose }: { image: FullscreenIm
         ) : null}
       </div>
 
-      {image.originalUrl ? (
+      {/* Hidden while comparing: the control belongs to the other mode, and the
+          slider's own hint row sits where it would. Any original already loaded
+          is still there on the way back. */}
+      {image.originalUrl && !comparing ? (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2" onClick={(event) => event.stopPropagation()}>
           {!wantsOriginal ? (
             <button

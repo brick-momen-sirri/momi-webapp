@@ -60,6 +60,71 @@ describe("FullscreenImagePreview", () => {
     expect(download).toHaveAttribute("download");
   });
 
+  // Compare is the other half of judging a still: the rendition question ("did
+  // this pass do what I wanted") rather than the pixel question the original
+  // answers. The two are deliberately separate modes.
+  describe("comparing against the input", () => {
+    const comparable = { ...image, beforeUrl: "/api/media/thumbnail?path=in.png&w=1440" };
+
+    it("offers no compare control when there is nothing to compare against", () => {
+      render(<FullscreenImagePreview image={image} onClose={() => {}} />);
+      expect(screen.queryByRole("button", { name: /compare/i })).not.toBeInTheDocument();
+    });
+
+    it("shows the result alone until compare is asked for", () => {
+      render(<FullscreenImagePreview image={comparable} onClose={() => {}} />);
+      expect(sources()).toEqual([comparable.previewUrl]);
+      expect(sources()).not.toContain(comparable.beforeUrl);
+    });
+
+    it("brings in the input, and puts it back away", async () => {
+      render(<FullscreenImagePreview image={comparable} onClose={() => {}} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+      // Both renditions, never an original: comparing is a question about the
+      // pass, not about pixels.
+      expect(sources()).toContain(comparable.beforeUrl);
+      expect(sources()).toContain(comparable.previewUrl);
+      expect(sources()).not.toContain(comparable.originalUrl);
+
+      await userEvent.click(screen.getByRole("button", { name: "Exit compare" }));
+      expect(sources()).toEqual([comparable.previewUrl]);
+    });
+
+    it("hides the full-resolution control while comparing, and restores it after", async () => {
+      // The two modes answer different questions, and stacking a 100 MB original
+      // inside a clipped comparison would lose the progressive load the stack
+      // exists for.
+      render(<FullscreenImagePreview image={comparable} onClose={() => {}} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+      expect(screen.queryByRole("button", { name: /view full resolution/i })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Exit compare" }));
+      expect(screen.getByRole("button", { name: /view full resolution/i })).toBeInTheDocument();
+    });
+
+    it("keeps an already-loaded original on the way back from comparing", async () => {
+      render(<FullscreenImagePreview image={comparable} onClose={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: /view full resolution/i }));
+      expect(sources()).toContain(comparable.originalUrl);
+
+      await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+      await userEvent.click(screen.getByRole("button", { name: "Exit compare" }));
+
+      // Not re-fetched and not thrown away -- the viewer already paid for it.
+      expect(sources()).toContain(comparable.originalUrl);
+    });
+
+    it("still closes on Escape while comparing", async () => {
+      const onClose = vi.fn();
+      render(<FullscreenImagePreview image={comparable} onClose={onClose} />);
+      await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+      await userEvent.keyboard("{Escape}");
+      expect(onClose).toHaveBeenCalled();
+    });
+  });
+
   it("closes on Escape", async () => {
     const onClose = vi.fn();
     render(<FullscreenImagePreview image={image} onClose={onClose} />);

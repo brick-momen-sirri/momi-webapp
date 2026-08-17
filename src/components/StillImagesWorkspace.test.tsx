@@ -85,7 +85,7 @@ describe("StillImagesWorkspace", () => {
     expect(screen.getByText("1 generated result")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Pro Upscaler" })).toBeInTheDocument();
     expect(screen.getByText("Camera 0012")).toBeInTheDocument();
-    const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
+    const result = screen.getByAltText("Result") as HTMLImageElement;
     expect(result.src).toContain("out.png");
     expect(screen.getByAltText("Still image input 1")).toBeInTheDocument();
   });
@@ -97,7 +97,7 @@ describe("StillImagesWorkspace", () => {
   it("shows a downscaled rendition on the card, never the original", () => {
     renderPanel([stillJob()]);
 
-    const result = screen.getByAltText("Result for Pro Upscaler") as HTMLImageElement;
+    const result = screen.getByAltText("Result") as HTMLImageElement;
     // 1440, the largest rendition: the card spans the panel and these renders
     // are being judged on quality, so a smaller one upscaled reads as a fault in
     // the render rather than in the preview.
@@ -109,6 +109,66 @@ describe("StillImagesWorkspace", () => {
     // jsdom does not reflect these as IDL properties, so read the attributes.
     expect(result.getAttribute("loading")).toBe("lazy");
     expect(result.getAttribute("decoding")).toBe("async");
+  });
+
+  // Every preset here is a before-and-after -- enhance, upscale, edit, transfer
+  // -- and the input used to be judgeable only as a 128px chip elsewhere on the
+  // card.
+  it("compares the result against the image it was made from", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    renderPanel([stillJob()]);
+
+    // Opens showing the result, same as an Animation card, with the input
+    // brought in on C rather than loaded for every card up front.
+    expect(screen.getByText(/press c to compare/i)).toBeInTheDocument();
+    expect(screen.queryByAltText("Input")).not.toBeInTheDocument();
+
+    await userEvent.hover(screen.getByRole("group", { name: /result image preview/i }));
+    await userEvent.keyboard("c");
+
+    const before = screen.getByAltText("Input") as HTMLImageElement;
+    // The same rendition width as the result, so the two are judged like for
+    // like at screen size rather than one being softer for a reason that has
+    // nothing to do with the render.
+    expect(before.getAttribute("src")).toBe("/api/media/thumbnail?path=in.png&w=1440");
+    expect(screen.getByRole("slider", { name: /before and result/i })).toBeInTheDocument();
+  });
+
+  it("compares against slot 1 when a preset takes several inputs", async () => {
+    // Qwen Edit's later slots are a reference or a second subject, not the thing
+    // being changed, so comparing against one would be meaningless.
+    const { default: userEvent } = await import("@testing-library/user-event");
+    renderPanel([
+      stillJob({
+        modelType: "Qwen Edit",
+        inputImages: ["/api/media?path=main.png", "/api/media?path=reference.png"],
+        workflowOptions: { stillImage: { categoryId: "qwen-edit", settings: { mode: "edit", imageCount: "2" } } },
+      }),
+    ]);
+
+    await userEvent.hover(screen.getByRole("group", { name: /result image preview/i }));
+    await userEvent.keyboard("c");
+
+    expect((screen.getByAltText("Input") as HTMLImageElement).getAttribute("src")).toBe(
+      "/api/media/thumbnail?path=main.png&w=1440",
+    );
+  });
+
+  it("carries the comparison into the fullscreen preview", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    renderPanel([stillJob()]);
+
+    await userEvent.click(screen.getByRole("button", { name: /open preview/i }));
+    const fullscreen = screen.getByRole("dialog", { name: /fullscreen image preview/i });
+    await userEvent.click(within(fullscreen).getByRole("button", { name: "Compare" }));
+
+    const sources = within(fullscreen)
+      .getAllByRole("img")
+      .map((node) => node.getAttribute("src"));
+    expect(sources).toContain("/api/media/thumbnail?path=in.png&w=1440");
+    expect(sources).toContain("/api/media/thumbnail?path=out.png&w=1440");
+    // Renditions on both sides; the original is still only ever an explicit ask.
+    expect(sources).not.toContain("/api/media?path=out.png");
   });
 
   it("carries the same action toolbar as an Animation card", async () => {
@@ -179,14 +239,14 @@ describe("StillImagesWorkspace", () => {
 
     expect(screen.getByText("This job failed")).toBeInTheDocument();
     expect(screen.getByText("Pod ran out of VRAM.")).toBeInTheDocument();
-    expect(screen.queryByAltText("Result for Pro Upscaler")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("Result")).not.toBeInTheDocument();
   });
 
   it("does not show a stale result image while a job is still running", () => {
     // resultUrl can be populated from a previous attempt on retry; only a completed
     // job should display one.
     renderPanel([stillJob({ status: "running" })]);
-    expect(screen.queryByAltText("Result for Pro Upscaler")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("Result")).not.toBeInTheDocument();
   });
 
   it("reports the phase a running job is actually in", () => {
