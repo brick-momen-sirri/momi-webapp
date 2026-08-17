@@ -5,6 +5,7 @@ import type { UploadedImage } from "../types";
 import { getImageSize, isNearAspectRatio, outputSizeForResolution } from "../utils/imageCrop";
 import { createClientId } from "../utils/id";
 import { getResultImageDragData, type ResultImageDragData } from "../utils/resultDrag";
+import { revokeImageObjectUrls } from "../utils/uploadedImage";
 import { CropModal, type CropSaveResult } from "./CropModal";
 
 type ImageUploaderProps = {
@@ -540,13 +541,6 @@ function decodeHtmlEntities(value: string) {
 // Release blob: URLs created by buildUploadedImage/CropModal once an image
 // leaves its slot, so long editing sessions don't accumulate detached blobs.
 // Only blob: URLs are revoked; server (/api/media) and data: URLs are left alone.
-function revokeImageObjectUrls(image: UploadedImage | undefined) {
-  if (!image) return;
-  for (const url of [image.url, image.croppedUrl]) {
-    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-  }
-}
-
 function dedupeFiles(files: File[]) {
   const seen = new Set<string>();
   return files.filter((file) => {
@@ -688,7 +682,9 @@ function UploadSlot({
 }: UploadSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const source = useCroppedImage ? (image?.croppedUrl ?? image?.url) : image?.url;
+  // previewUrl is display-only and never replaces a crop, which is a local
+  // object URL of the exact pixels that will be submitted.
+  const source = useCroppedImage && image?.croppedUrl ? image.croppedUrl : (image?.previewUrl ?? image?.url);
   const tooSmall = Boolean(
     requiresLandscape &&
     image?.width &&

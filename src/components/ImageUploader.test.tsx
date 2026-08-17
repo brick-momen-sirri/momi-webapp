@@ -147,6 +147,28 @@ describe("existing images", () => {
     expect(screen.getByText(/beta\.png/)).toBeInTheDocument();
   });
 
+  it("shows previewUrl instead of the image itself when one is supplied", () => {
+    // A still image result chained into the next preset is a 4K-10K PNG that can
+    // pass 100 MB. The slot is a ~200px box, so displaying the submitted url
+    // there would decode the whole original to fill a thumbnail.
+    // The slot preview is decorative -- the file name beside it is what is
+    // announced -- so it carries an empty alt and has no img role to query by.
+    const { container } = renderUploader({
+      images: [image({ name: "enhanced.png", url: "/api/media?path=enhanced.png", previewUrl: "/api/media/thumbnail?path=enhanced.png&w=240" })],
+    });
+
+    const preview = container.querySelector("img");
+    expect(preview?.getAttribute("src")).toBe("/api/media/thumbnail?path=enhanced.png&w=240");
+    expect(preview?.getAttribute("src")).not.toBe("/api/media?path=enhanced.png");
+  });
+
+  it("falls back to the image url when there is no preview", () => {
+    // A locally chosen file is already an object URL, so there is nothing to
+    // downscale and nothing extra to fetch.
+    const { container } = renderUploader({ images: [image({ name: "shot.png", url: "blob:local" })] });
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:local");
+  });
+
   it("removing an image reports the remaining list upward", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

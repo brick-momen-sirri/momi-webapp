@@ -171,6 +171,114 @@ describe("StillImagesWorkspace", () => {
     expect(sources).not.toContain("/api/media?path=out.png");
   });
 
+  // The archviz chain is enhance-then-upscale, and walking it used to mean
+  // downloading a 100 MB PNG and uploading the same bytes back.
+  it("sends a result on to whichever preset the artist picks", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const onUseAsInput = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob()]}
+        onUseAsInput={onUseAsInput}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /use as input/i }));
+
+    // Every preset is offered: the target is the decision, and defaulting to
+    // whichever one the left panel happens to show would be wrong as often as
+    // it was right.
+    const menu = screen.getByRole("menu", { name: /send this result to a preset/i });
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(4);
+
+    await userEvent.click(within(menu).getByRole("menuitem", { name: /qwen edit/i }));
+
+    expect(onUseAsInput).toHaveBeenCalledTimes(1);
+    expect(onUseAsInput.mock.calls[0][1]).toBe("qwen-edit");
+    expect(onUseAsInput.mock.calls[0][0].id).toBe("job_still_1");
+    // Closes behind the choice, so the result is visible again.
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes the send menu on Escape without sending anything", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const onUseAsInput = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob()]}
+        onUseAsInput={onUseAsInput}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /use as input/i }));
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onUseAsInput).not.toHaveBeenCalled();
+  });
+
+  it("omits the send control when the host does not wire chaining", () => {
+    renderPanel([stillJob()]);
+    expect(screen.queryByRole("button", { name: /use as input/i })).not.toBeInTheDocument();
+  });
+
+  it("refuses to chain a result that belongs to another project", async () => {
+    // With All projects selected this panel lists every project's results, and
+    // the server only accepts an input that sits inside the submitting project's
+    // own folder. Offering the send would produce a failure at Generate, after
+    // everything else had been set up.
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const onUseAsInput = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob({ projectId: "prj_other" })]}
+        onUseAsInput={onUseAsInput}
+      />,
+    );
+
+    const send = screen.getByRole("button", { name: /use as input/i });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAttribute("title", expect.stringMatching(/belongs to another project/i));
+
+    await userEvent.click(send);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onUseAsInput).not.toHaveBeenCalled();
+  });
+
+  it("refuses to chain when no project is selected to submit into", () => {
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob()]}
+        onUseAsInput={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /use as input/i })).toBeDisabled();
+  });
+
   it("carries the same action toolbar as an Animation card", async () => {
     const onDownload = vi.fn();
     render(

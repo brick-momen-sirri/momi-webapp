@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UploadedImage } from "../../types";
+import { revokeImageObjectUrls } from "../../utils/uploadedImage";
 import { normalizeStillImageSeedInput } from "./seed";
 import {
   createInitialStillImagesState,
@@ -47,6 +48,29 @@ export function useStillImagesForm() {
   }
 
   /**
+   * Select a preset and drop an image into its first slot.
+   *
+   * What chaining a result into the next preset needs. Unlike loadCategoryState
+   * this preserves everything else that preset is holding -- its settings, its
+   * prompt, its other slots -- because the artist is carrying one image across,
+   * not restoring a saved job.
+   *
+   * Slot 1 always: it is the main image for every preset, and the later slots
+   * are references rather than the thing being worked on.
+   */
+  function useResultAsInput(categoryId: StillImageCategoryId, image: UploadedImage) {
+    setSelectedCategoryId(categoryId);
+    setStateByCategory((current) => {
+      const images = [...current[categoryId].images];
+      // Whatever it displaces may be a locally chosen file, whose bytes stay in
+      // the tab until its object URL is released.
+      revokeImageObjectUrls(images[0]);
+      images[0] = image;
+      return { ...current, [categoryId]: { ...current[categoryId], images } };
+    });
+  }
+
+  /**
    * Select a preset and replace what the form holds for it, in one update.
    *
    * What "Reuse settings" needs: switching category first and then writing the
@@ -57,14 +81,19 @@ export function useStillImagesForm() {
    */
   function loadCategoryState(categoryId: StillImageCategoryId, state: Partial<StillImageCategoryState>) {
     setSelectedCategoryId(categoryId);
-    setStateByCategory((current) => ({
-      ...current,
-      [categoryId]: {
-        ...createInitialStillImagesState()[categoryId],
-        ...state,
-        seed: normalizeStillImageSeedInput(state.seed ?? ""),
-      },
-    }));
+    setStateByCategory((current) => {
+      // The restored images replace whatever the preset was holding, and a
+      // locally chosen file keeps its bytes in the tab until it is released.
+      current[categoryId].images.forEach(revokeImageObjectUrls);
+      return {
+        ...current,
+        [categoryId]: {
+          ...createInitialStillImagesState()[categoryId],
+          ...state,
+          seed: normalizeStillImageSeedInput(state.seed ?? ""),
+        },
+      };
+    });
   }
 
   return {
@@ -81,5 +110,6 @@ export function useStillImagesForm() {
     setTargetFolderId,
     setSaveNumber,
     loadCategoryState,
+    useResultAsInput,
   };
 }

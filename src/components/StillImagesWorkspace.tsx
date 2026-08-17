@@ -12,7 +12,11 @@ import {
   UserRound,
 } from "lucide-react";
 import { useState } from "react";
-import type { StillImageCategoryDefinition, StillImageCategoryState } from "../features/still-images/stillImageCategories";
+import type {
+  StillImageCategoryDefinition,
+  StillImageCategoryId,
+  StillImageCategoryState,
+} from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
 import { useNearViewport } from "../features/jobs/useNearViewport";
@@ -24,6 +28,7 @@ import { ImageCompareSlider } from "./ImageCompareSlider";
 import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
+import { UseAsInputMenu } from "./UseAsInputMenu";
 
 type StillImagesWorkspaceProps = {
   category: StillImageCategoryDefinition;
@@ -42,6 +47,8 @@ type StillImagesWorkspaceProps = {
   archiveView?: boolean;
   favoriteJobIds?: Set<string>;
   canReuseSettings?: (job: Job) => boolean;
+  /** Chain this result into another preset as its first input. */
+  onUseAsInput?: (job: Job, categoryId: StillImageCategoryId) => void;
   onDownload?: (job: Job) => void;
   onCopyImage?: (job: Job) => void;
   onReuseSettings?: (job: Job) => void;
@@ -93,6 +100,7 @@ export function StillImagesWorkspace({
               key={job.id}
               job={job}
               project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
+              selectedProject={selectedProject}
               userName={users.find((user) => user.id === job.userId)?.name ?? userName}
               actions={actions}
             />
@@ -117,11 +125,14 @@ type StillImageActions = Omit<StillImagesWorkspaceProps, "category" | "state" | 
 function StillImageJobCard({
   job,
   project,
+  selectedProject,
   userName,
   actions,
 }: {
   job: Job;
   project?: Project;
+  /** Where a new job would be submitted, which is not always this job's project. */
+  selectedProject?: Project;
   userName: string;
   actions: StillImageActions;
 }) {
@@ -240,7 +251,12 @@ function StillImageJobCard({
 
         <section className="result-section mt-4">
           {resultUrl && job.status === "completed" ? (
-            <StillImageResult job={job} url={resultUrl} />
+            <StillImageResult
+              job={job}
+              url={resultUrl}
+              onUseAsInput={actions.onUseAsInput}
+              chainDisabledReason={chainBlockedReason(job, selectedProject)}
+            />
           ) : isJobWorking(job.status) ? (
             <div className="flex min-h-72 w-full flex-col items-center justify-center rounded-lg border border-dashed border-line bg-mist/60 px-6">
               <JobProgress job={job} />
@@ -302,7 +318,33 @@ function StillImageJobCard({
  * before-and-after -- enhance, upscale, edit, transfer -- and judging one against
  * a 128px input chip elsewhere on the card was never really possible.
  */
-function StillImageResult({ job, url }: { job: Job; url: string }) {
+/**
+ * Why this result cannot be chained into the next preset, if it cannot.
+ *
+ * The server accepts a saved-media input only when the file sits inside the
+ * submitting project's own folder, and with All projects selected this panel
+ * lists results from every project. Without this the menu would offer a send
+ * that fails at Generate, after the artist had set everything else up.
+ */
+function chainBlockedReason(job: Job, selectedProject?: Project) {
+  if (!selectedProject) return "Select a project before sending a result to a preset.";
+  if (job.projectId !== selectedProject.id) {
+    return "This result belongs to another project. Open that project to use it as an input.";
+  }
+  return undefined;
+}
+
+function StillImageResult({
+  job,
+  url,
+  onUseAsInput,
+  chainDisabledReason,
+}: {
+  job: Job;
+  url: string;
+  onUseAsInput?: (job: Job, categoryId: StillImageCategoryId) => void;
+  chainDisabledReason?: string;
+}) {
   const [containerRef, inView] = useNearViewport<HTMLDivElement>();
   const [fullscreenImage, setFullscreenImage] = useState<FullscreenImage | null>(null);
   const name = job.fileName ?? `${job.modelType} result`;
@@ -341,6 +383,15 @@ function StillImageResult({ job, url }: { job: Job; url: string }) {
       )}
 
       <ResultOverlayActions>
+        {/* Chaining costs nothing: the result is already saved project media, so
+            the next job is submitted against the same path on disk rather than a
+            re-upload of a file that never left the server. */}
+        {onUseAsInput ? (
+          <UseAsInputMenu
+            onSelect={(categoryId) => onUseAsInput(job, categoryId)}
+            disabledReason={chainDisabledReason}
+          />
+        ) : null}
         <ResultOverlayButton
           icon={<Maximize2 className="h-4 w-4" />}
           label="Open preview"

@@ -247,6 +247,17 @@ export type UploadedImage = {
   id: string;
   name: string;
   url: string;
+  /**
+   * What an upload slot should display, when that is not the same thing as what
+   * should be submitted.
+   *
+   * Set when `url` names saved media that is too large to put in a 200px slot --
+   * a still image result chained into the next preset is a 4K-10K PNG, and
+   * showing the original there would decode a hundred megabytes to fill a
+   * thumbnail. Locally chosen files have no need for it: their `url` is already
+   * a local object URL.
+   */
+  previewUrl?: string;
   croppedUrl?: string;
   cropRequired?: boolean;
   cropSettings?: {

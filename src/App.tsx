@@ -49,8 +49,10 @@ import { useNotifications } from "./features/notifications/useNotifications";
 import { useProjectActions, type ConfirmDialogState } from "./features/projects/useProjectActions";
 import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
 import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
+import { chainableResultImage } from "./features/still-images/chainResult";
 import { isStillImageJob } from "./features/still-images/jobSection";
 import { reusableStillImageJob } from "./features/still-images/reuseStillImageJob";
+import { STILL_IMAGE_CATEGORIES, type StillImageCategoryId } from "./features/still-images/stillImageCategories";
 import { useStillImagesForm } from "./features/still-images/useStillImagesForm";
 import { useStillImagesSubmission } from "./features/still-images/useStillImagesSubmission";
 import { mergeJobs } from "./features/workspace/workspaceUtils";
@@ -339,6 +341,26 @@ function App() {
     );
   }
 
+  /**
+   * Chain a still image result into the next preset.
+   *
+   * Nothing is fetched or re-uploaded: the result is already saved project media
+   * and the submission path forwards a saved-media URL untouched, so the next
+   * job runs against the same file on disk. Walking this chain by hand meant
+   * downloading a 100 MB PNG and uploading it back.
+   */
+  function handleUseStillResultAsInput(job: Job, categoryId: StillImageCategoryId) {
+    const image = chainableResultImage(job);
+    if (!image) {
+      showToast("This result is not ready to use as an input yet.", "info");
+      return;
+    }
+
+    stillImagesForm.useResultAsInput(categoryId, image);
+    const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === categoryId);
+    showToast(`Loaded into ${preset?.label ?? "the preset"} as the first input.`);
+  }
+
   async function handleReuseJobSettings(job: Job) {
     if (isStillImageJob(job)) {
       await handleReuseStillImageSettings(job);
@@ -557,6 +579,7 @@ function App() {
               // carry no model, resolution or duration, which is most of what
               // canReuseJobSettings looks for.
               canReuseSettings={(job) => Boolean(reusableStillImageJob(job))}
+              onUseAsInput={handleUseStillResultAsInput}
               onDownload={handleDownloadJobResult}
               onCopyImage={handleCopyJobImage}
               onReuseSettings={handleReuseJobSettings}
