@@ -1,4 +1,4 @@
-import { CheckCircle2, ImageIcon, Info, LockKeyhole, Play, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Play, SlidersHorizontal } from "lucide-react";
 import type { Project, UploadedImage } from "../types";
 import { cn } from "../utils/classNames";
 import {
@@ -28,6 +28,7 @@ type StillImagesSettingsPanelProps = {
   onCategoryChange: (categoryId: StillImageCategoryId) => void;
   onImagesChange: (images: UploadedImage[]) => void;
   onPromptChange: (prompt: string) => void;
+  onSeedChange: (seed: string) => void;
   onSettingChange: (settingId: string, value: StillImageSettingValue) => void;
   onTargetFolderChange: (folderId: string) => void;
   onSaveNumberChange: (value: string) => void;
@@ -46,6 +47,7 @@ export function StillImagesSettingsPanel({
   onCategoryChange,
   onImagesChange,
   onPromptChange,
+  onSeedChange,
   onSettingChange,
   onTargetFolderChange,
   onSaveNumberChange,
@@ -180,6 +182,45 @@ export function StillImagesSettingsPanel({
       ) : null}
 
       {category.id !== "qwen-edit" ? settingsCard : null}
+
+      {/* Empty is the normal state: the server draws a seed and records it on the
+          job. A value here is almost always one restored from an earlier result
+          through Reuse settings, to render that take again. */}
+      <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
+        <div className="mb-3 flex items-center gap-2">
+          <Dices className="h-4 w-4 text-stone-500" />
+          <h2 className="text-sm font-semibold">Seed</h2>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Seed"
+            value={state.seed}
+            onChange={(event) => onSeedChange(event.target.value)}
+            placeholder="New seed each run"
+            className="h-10 min-w-0 flex-1 rounded-md border border-line bg-white px-3 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+          />
+          <button
+            type="button"
+            onClick={() => onSeedChange("")}
+            disabled={!state.seed}
+            className={cn(
+              "h-10 shrink-0 rounded-md border px-3 text-xs font-semibold transition",
+              state.seed
+                ? "border-line bg-white text-stone-700 hover:border-accent hover:text-accent"
+                : "cursor-not-allowed border-line bg-stone-50 text-stone-300",
+            )}
+          >
+            Clear
+          </button>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-stone-500">
+          {state.seed
+            ? "This exact seed will be used, so the same inputs and settings reproduce that render."
+            : "A new seed is drawn for each run and saved on the result, so any render can be reproduced later."}
+        </p>
+      </section>
 
       <ResultNamingControl label="Camera number" value={saveNumber} onChange={onSaveNumberChange} />
       <ResultDestinationControl

@@ -210,6 +210,13 @@ export type WorkflowOptions = {
   // never be set on an Animation job.
   stillImage?: {
     categoryId: string;
+    /**
+     * The master seed the preset's samplers were derived from. Submitting it
+     * again with the same settings and inputs reproduces the render; omitting it
+     * asks the server to mint one. Absent on jobs submitted before seeds were
+     * persisted.
+     */
+    seed?: number;
     settings: Record<string, string | number | boolean>;
   };
 };

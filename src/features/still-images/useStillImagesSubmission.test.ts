@@ -94,6 +94,32 @@ describe("useStillImagesSubmission", () => {
     expect(settings.enhancement).toBe(false);
   });
 
+  it("sends a seed only when one was asked for", async () => {
+    const { hook } = setup();
+
+    await act(async () => {
+      await hook.result.current.submit({
+        projectId: "prj_1",
+        categoryId: "pro-upscaler",
+        categoryState: { ...state["pro-upscaler"], images: [image("a")], seed: "4242" },
+        targetFolderId: "",
+        saveNumber: "0000",
+      });
+      // An empty field means a new render, not a repeat: the server mints a seed
+      // and records it on the job.
+      await hook.result.current.submit({
+        projectId: "prj_1",
+        categoryId: "pro-upscaler",
+        categoryState: { ...state["pro-upscaler"], images: [image("a")], seed: "" },
+        targetFolderId: "",
+        saveNumber: "0000",
+      });
+    });
+
+    expect(createBackendJob.mock.calls[0][0].workflowOptions.stillImage.seed).toBe(4242);
+    expect(createBackendJob.mock.calls[1][0].workflowOptions.stillImage.seed).toBeUndefined();
+  });
+
   it("omits the prompt for a preset that has no prompt field", async () => {
     const { hook } = setup();
 

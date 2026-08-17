@@ -50,6 +50,7 @@ import { useProjectActions, type ConfirmDialogState } from "./features/projects/
 import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
 import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
 import { isStillImageJob } from "./features/still-images/jobSection";
+import { reusableStillImageJob } from "./features/still-images/reuseStillImageJob";
 import { useStillImagesForm } from "./features/still-images/useStillImagesForm";
 import { useStillImagesSubmission } from "./features/still-images/useStillImagesSubmission";
 import { mergeJobs } from "./features/workspace/workspaceUtils";
@@ -305,7 +306,45 @@ function App() {
     },
   );
 
+  /**
+   * Put a still image result's preset back into the Still Images form.
+   *
+   * Separate from the Animation path below, which restores a model, resolution
+   * and duration -- a preset has none of those, and run against a still image job
+   * it rewrote the Animation panel and restored none of the sliders the render
+   * actually used.
+   */
+  async function handleReuseStillImageSettings(job: Job) {
+    const reusable = reusableStillImageJob(job);
+    if (!reusable) {
+      showToast("This result does not have reusable settings saved.", "info");
+      return;
+    }
+
+    showToast("Loading saved settings...", "info");
+
+    // Slots come from the restored settings, not from the job's image count: Qwen
+    // Edit's mode decides how many the form will draw, and a mismatch would leave
+    // an image in a slot the panel no longer shows.
+    const images = await rehydrateJobInputImages(job, reusable.slotCount);
+    stillImagesForm.loadCategoryState(reusable.categoryId, { ...reusable.state, images });
+
+    const savedNumber = reusableSaveNumber(job);
+    if (savedNumber !== undefined) stillImagesForm.setSaveNumber(normalizeSaveNumber(savedNumber));
+
+    showToast(
+      reusable.state.seed
+        ? `Loaded settings and seed ${reusable.state.seed}. Generating again reproduces this result.`
+        : "Loaded settings from previous result. This result predates seeds, so the render will differ.",
+    );
+  }
+
   async function handleReuseJobSettings(job: Job) {
+    if (isStillImageJob(job)) {
+      await handleReuseStillImageSettings(job);
+      return;
+    }
+
     if (!canReuseJobSettings(job, models)) {
       showToast("This result does not have reusable settings saved.", "info");
       return;
@@ -461,6 +500,7 @@ function App() {
                 onCategoryChange={stillImagesForm.setSelectedCategoryId}
                 onImagesChange={stillImagesForm.setImages}
                 onPromptChange={stillImagesForm.setPrompt}
+                onSeedChange={stillImagesForm.setSeed}
                 onSettingChange={stillImagesForm.setSetting}
                 onTargetFolderChange={stillImagesForm.setTargetFolderId}
                 onSaveNumberChange={stillImagesForm.setSaveNumber}
@@ -513,7 +553,10 @@ function App() {
               projects={projects}
               archiveView={showArchivedJobs}
               favoriteJobIds={favoriteJobIds}
-              canReuseSettings={(job) => canReuseJobSettings(job, models)}
+              // Judged by the preset reader, not the Animation one: these jobs
+              // carry no model, resolution or duration, which is most of what
+              // canReuseJobSettings looks for.
+              canReuseSettings={(job) => Boolean(reusableStillImageJob(job))}
               onDownload={handleDownloadJobResult}
               onCopyImage={handleCopyJobImage}
               onReuseSettings={handleReuseJobSettings}

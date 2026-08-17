@@ -45,6 +45,16 @@ export type StillImageCategoryDefinition = {
  */
 export type StillImageOptions = {
   categoryId: StillImageCategoryId;
+  /**
+   * The master seed every sampler in the graph is derived from, so a run can be
+   * reproduced exactly by submitting it again.
+   *
+   * Optional only for jobs recorded before seeds were persisted: those replay
+   * with a fresh random seed, which is what they did when they were submitted.
+   * normalizeStillImageOptions mints one for everything new, so any job accepted
+   * from now on carries it.
+   */
+  seed?: number;
   settings: Record<string, StillImageSettingValue>;
 };
 

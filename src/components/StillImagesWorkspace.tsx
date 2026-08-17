@@ -130,6 +130,7 @@ function StillImageJobCard({
   const inputImages = job.inputImages.filter(Boolean);
   const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
   const qwenMode = job.workflowOptions?.stillImage?.settings?.mode;
+  const seed = job.workflowOptions?.stillImage?.seed;
 
   return (
     <article className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
@@ -265,7 +266,7 @@ function StillImageJobCard({
         </section>
       </div>
 
-      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <MetadataItem label="Status" value={job.status} />
         <MetadataItem label="Workflow" value={job.modelType} />
         {/* Who submitted it. Projects are studio-wide, so a result in the list is
@@ -273,6 +274,9 @@ function StillImageJobCard({
         <MetadataItem label="User" value={userName} />
         <MetadataItem label="Input" value={`${inputImages.length} image${inputImages.length === 1 ? "" : "s"}`} />
         <MetadataItem label="Camera" value={saveNumber} />
+        {/* What Reuse settings puts back in the form to render this take again.
+            Older results predate seeds being recorded and show a dash. */}
+        <MetadataItem label="Seed" value={seed === undefined ? "--" : String(seed)} />
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
         <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
       </div>

@@ -21,6 +21,7 @@ function StillImagesHarness() {
         onCategoryChange={form.setSelectedCategoryId}
         onImagesChange={form.setImages}
         onPromptChange={form.setPrompt}
+        onSeedChange={form.setSeed}
         onSettingChange={form.setSetting}
         onTargetFolderChange={form.setTargetFolderId}
         onSaveNumberChange={form.setSaveNumber}
@@ -98,6 +99,37 @@ describe("StillImagesSettingsPanel", () => {
     await user.selectOptions(mode, "edit");
     await user.selectOptions(screen.getByLabelText("Image count"), "3");
     expect(screen.getByLabelText("Upload Image 3")).toBeInTheDocument();
+  });
+
+  it("holds a seed per preset and refuses what the server would reject", async () => {
+    const user = userEvent.setup();
+    render(<StillImagesHarness />);
+
+    const seed = () => screen.getByRole("textbox", { name: "Seed" });
+    // Empty is the normal state: the server draws one and records it on the job.
+    expect(seed()).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
+
+    // Seeds get pasted out of a card's metadata row, so the field takes what a
+    // paste brings with it rather than rejecting the whole thing.
+    await user.type(seed(), "seed 1-234");
+    expect(seed()).toHaveValue("1234");
+
+    // Clamped here rather than at submission, which is after the artist has set
+    // up the inputs and pressed Generate.
+    await user.clear(seed());
+    await user.type(seed(), "99999999999");
+    expect(seed()).toHaveValue("4294967295");
+
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    expect(seed()).toHaveValue("");
+
+    // Per preset, like the prompt and the sliders next to it.
+    await user.type(seed(), "77");
+    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "General Enhancement" }));
+    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("77");
   });
 
   it("reveals the body and face enhancement sliders behind their checkbox", async () => {

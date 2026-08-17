@@ -31,6 +31,7 @@ import {
   type StillImageOptions,
   type StillImageSettingValue,
 } from "./stillImageCategories.js";
+import { randomStillImageSeed, stillImageSeedSequence } from "./stillImageSeed.js";
 
 export type StillImageGraph = Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
 
@@ -87,7 +88,11 @@ export type StillImageBuildInput = {
    * presets, raw base64 for inline_base64 ones.
    */
   images: string[];
-  /** Injected so tests can assert on seeds instead of racing randomness. */
+  /**
+   * Overrides the seed sequence the job's master seed would produce. Injected so
+   * tests can assert on seeds directly; production leaves it unset so the render
+   * stays reproducible from what is persisted on the job.
+   */
   nextSeed?: () => number;
 };
 
@@ -98,8 +103,6 @@ type ResolvedBuildInput = {
   imageCount: number;
   nextSeed: () => number;
 };
-
-const MAX_SEED = 999_999_999_999;
 
 export function stillImagePreset(categoryId: StillImageCategoryId): StillImagePreset {
   const preset = PRESETS[categoryId];
@@ -203,7 +206,11 @@ export async function buildStillImageWorkflow(input: StillImageBuildInput): Prom
     prompt: (input.prompt ?? "").trim(),
     images: input.images,
     imageCount,
-    nextSeed: input.nextSeed ?? randomSeed,
+    // Derived from the job's own master seed, so resubmitting that seed with the
+    // same settings and inputs reproduces this render. A job recorded before
+    // seeds were persisted has none; those keep the old behaviour of a fresh
+    // roll per run.
+    nextSeed: input.nextSeed ?? stillImageSeedSequence(input.options.seed ?? randomStillImageSeed()),
   });
 
   return graph;
@@ -249,10 +256,6 @@ function set(graph: StillImageGraph, nodeId: string, input: string, value: unkno
 function connect(graph: StillImageGraph, targetId: string, input: string, sourceId: string, outputIndex = 0) {
   nodeInputs(graph, sourceId);
   nodeInputs(graph, targetId)[input] = [sourceId, outputIndex];
-}
-
-function randomSeed() {
-  return Math.floor(Math.random() * MAX_SEED);
 }
 
 /**

@@ -2,24 +2,61 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
+import { isStillImageSeed, STILL_IMAGE_MAX_SEED } from "./stillImageSeed.js";
 
 // These settings become ComfyUI node parameters. Anything that gets through here
 // unchecked either fails deep inside a graph, where the error means nothing to an
 // artist, or renders at a strength nobody chose.
 
+/** A fixed master seed, so a whole-object assertion is not racing randomness. */
+const mintSeed = () => 4242;
+
 test("fills every visible setting from the catalogue defaults", () => {
-  const options = normalizeStillImageOptions({ categoryId: "pro-upscaler" });
+  const options = normalizeStillImageOptions({ categoryId: "pro-upscaler" }, mintSeed);
   assert.deepEqual(options, {
     categoryId: "pro-upscaler",
+    seed: 4242,
     settings: { engine: "normal", upscale: "x2", enhancement: true, creativity: 30 },
   });
 });
 
 test("a missing settings object is the same as an empty one", () => {
   assert.deepEqual(
-    normalizeStillImageOptions({ categoryId: "pro-upscaler", settings: {} }),
-    normalizeStillImageOptions({ categoryId: "pro-upscaler" }),
+    normalizeStillImageOptions({ categoryId: "pro-upscaler", settings: {} }, mintSeed),
+    normalizeStillImageOptions({ categoryId: "pro-upscaler" }, mintSeed),
   );
+});
+
+// -- seeds -------------------------------------------------------------------
+//
+// The seed is what makes a result reproducible: it is persisted on the job, shown
+// on the card, and sent back to render the same take again. A request that came
+// away without one would be a render nobody could repeat.
+
+test("mints a seed when the caller does not name one", () => {
+  const options = normalizeStillImageOptions({ categoryId: "qwen-edit" });
+  assert.equal(isStillImageSeed(options.seed), true, `minted seed out of range: ${options.seed}`);
+});
+
+test("keeps a caller's seed, which is how a result is reproduced", () => {
+  const options = normalizeStillImageOptions({ categoryId: "qwen-edit", seed: 1234 }, mintSeed);
+  assert.equal(options.seed, 1234);
+});
+
+test("seed 0 is a seed, not a missing one", () => {
+  // Falsy but valid. Treating it as absent would silently re-roll the one seed an
+  // artist is most likely to type by hand.
+  assert.equal(normalizeStillImageOptions({ categoryId: "qwen-edit", seed: 0 }, mintSeed).seed, 0);
+});
+
+test("rejects a seed that is not a whole number in range", () => {
+  for (const seed of [-1, 1.5, STILL_IMAGE_MAX_SEED + 1, "1234", null]) {
+    assert.throws(
+      () => normalizeStillImageOptions({ categoryId: "qwen-edit", seed }, mintSeed),
+      /seed must be a whole number/,
+      `accepted ${JSON.stringify(seed)}`,
+    );
+  }
 });
 
 test("caller values override defaults", () => {

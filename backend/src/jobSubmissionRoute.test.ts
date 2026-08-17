@@ -9,6 +9,7 @@ import type { AuthenticatedRequest } from "./authMiddleware.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { createJobSubmissionHandler, validatedRequest } from "./jobSubmissionRoute.js";
 import { isStillImageCategoryId } from "./stillImageCategories.js";
+import { isStillImageSeed } from "./stillImageSeed.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
 
@@ -344,11 +345,28 @@ test("a still image submission persists the normalized options, not the caller's
   assert.equal(createRequests.length, 1);
   // creativity is hidden while enhancement is off, so it must not have survived;
   // engine was never sent, so its default must have been filled in.
-  assert.deepEqual(createRequests[0].workflowOptions?.stillImage, {
-    categoryId: "pro-upscaler",
-    settings: { engine: "normal", upscale: "x4", enhancement: false },
-  });
+  const persisted = createRequests[0].workflowOptions?.stillImage;
+  assert.equal(persisted?.categoryId, "pro-upscaler");
+  assert.deepEqual(persisted?.settings, { engine: "normal", upscale: "x4", enhancement: false });
+  // Minted here even though the caller named no seed: a render nobody can
+  // reproduce is the thing the seed exists to prevent.
+  assert.equal(isStillImageSeed(persisted?.seed), true, `no usable seed was persisted: ${persisted?.seed}`);
   assert.equal(providerTripwire.calls, 0);
+});
+
+test("a caller's seed survives onto the job, which is how a result is re-rendered", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler", settings: {}, seed: 4242 }));
+
+  assert.equal(response.status, 201);
+  assert.equal(createRequests[0].workflowOptions?.stillImage?.seed, 4242);
+});
+
+test("a seed the graph could not use is a 400, not a silent re-roll", async () => {
+  const response = await call(stillBody({ categoryId: "pro-upscaler", settings: {}, seed: -1 }));
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /seed must be a whole number/);
+  assert.equal(createRequests.length, 0);
 });
 
 test("still image options survive onto the created job", async () => {

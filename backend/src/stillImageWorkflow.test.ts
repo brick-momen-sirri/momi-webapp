@@ -217,6 +217,52 @@ test("general enhancement always takes the generated mask route", async () => {
   assert.deepEqual(link(graph, "13", "mask"), ["85", 0]);
 });
 
+// -- reproducibility ---------------------------------------------------------
+//
+// The tests below build without injecting nextSeed, which is what production
+// does: the draws come from the job's own master seed.
+
+test("the same job seed rebuilds the same graph seeds", async () => {
+  const options = normalizeStillImageOptions({ categoryId: "general-enhancement", settings: {} }, () => 9_876_543);
+  const seedNodes: Array<[string, string]> = [
+    ["32", "seed"],
+    ["26", "noise_seed"],
+    ["52", "seed"],
+    ["54", "seed"],
+  ];
+
+  const first = await buildStillImageWorkflow({ options, images: ["a"], prompt: "p" });
+  const second = await buildStillImageWorkflow({ options, images: ["a"], prompt: "p" });
+
+  assert.deepEqual(
+    seedNodes.map(([node, input]) => value(first, node, input)),
+    seedNodes.map(([node, input]) => value(second, node, input)),
+    "re-rendering a saved seed must reproduce the render, not roll a new one",
+  );
+});
+
+test("a different job seed renders differently", async () => {
+  const build = async (seed: number) =>
+    buildStillImageWorkflow({
+      options: normalizeStillImageOptions({ categoryId: "qwen-edit", settings: {} }, () => seed),
+      images: ["a"],
+      prompt: "p",
+    });
+
+  assert.notEqual(value(await build(11), "141", "noise_seed"), value(await build(12), "141", "noise_seed"));
+});
+
+test("a job recorded before seeds existed still renders", async () => {
+  // Everything already on disk looks like this. It cannot be reproduced -- there
+  // is nothing to reproduce it from -- but it must not fail to build.
+  const graph = await buildStillImageWorkflow({
+    options: { categoryId: "qwen-edit", settings: { mode: "edit", imageCount: "1" } },
+    images: ["a"],
+    prompt: "p",
+  });
+  assert.equal(typeof value(graph, "141", "noise_seed"), "number");
+});
+
 test("general enhancement randomizes all four seeds", async () => {
   const graph = await build("general-enhancement", {}, ["BASE64DATA"]);
   assert.deepEqual(

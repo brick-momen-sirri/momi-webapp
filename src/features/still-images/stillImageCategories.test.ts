@@ -21,7 +21,7 @@ import {
 type Settings = Record<string, StillImageSettingValue>;
 
 function state(settings: Settings): StillImageCategoryState {
-  return { images: [], prompt: "", settings };
+  return { images: [], prompt: "", seed: "", settings };
 }
 
 const slotCases: Array<[StillImageCategoryId, Settings, number]> = [

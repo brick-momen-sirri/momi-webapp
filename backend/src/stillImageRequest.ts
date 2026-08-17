@@ -21,16 +21,29 @@ import {
   type StillImageSettingDefinition,
   type StillImageSettingValue,
 } from "./stillImageCategories.js";
+import { isStillImageSeed, randomStillImageSeed, STILL_IMAGE_MAX_SEED } from "./stillImageSeed.js";
 
 export type { StillImageOptions };
 
-export function normalizeStillImageOptions(value: unknown): StillImageOptions {
+/**
+ * @param mintSeed Draws the master seed when the caller did not name one.
+ *   Injected so tests can assert on a fixed seed instead of racing randomness.
+ */
+export function normalizeStillImageOptions(value: unknown, mintSeed: () => number = randomStillImageSeed): StillImageOptions {
   const options = plainRecord(value, "stillImage options");
 
   if (!isStillImageCategoryId(options.categoryId)) {
     throw new Error("stillImage categoryId is not a known still image preset.");
   }
   const category = getStillImageCategory(options.categoryId);
+
+  // A caller-supplied seed is how "run that again" works: the client sends back
+  // the seed off an earlier job. Anything else mints one, so every job accepted
+  // from here on is reproducible whether or not the artist thought about it.
+  if (options.seed !== undefined && !isStillImageSeed(options.seed)) {
+    throw new Error(`stillImage seed must be a whole number between 0 and ${STILL_IMAGE_MAX_SEED}.`);
+  }
+  const seed = options.seed === undefined ? mintSeed() : (options.seed as number);
 
   const provided = options.settings == null ? {} : plainRecord(options.settings, "stillImage settings");
   const definitions = new Map(category.settings.map((setting) => [setting.id, setting]));
@@ -54,7 +67,7 @@ export function normalizeStillImageOptions(value: unknown): StillImageOptions {
     settings[setting.id] = resolved[setting.id];
   }
 
-  return { categoryId: category.id, settings };
+  return { categoryId: category.id, seed, settings };
 }
 
 /**

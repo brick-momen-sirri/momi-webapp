@@ -57,6 +57,15 @@ export type StillImageModeGuidance = {
 export type StillImageCategoryState = {
   images: UploadedImage[];
   prompt: string;
+  /**
+   * The master seed to render with, as typed. Empty means "draw a new one",
+   * which is what every run did before seeds were exposed; a value here is
+   * usually one restored from an earlier result to reproduce it.
+   *
+   * Kept as a string rather than a number so the field can be empty and so a
+   * half-typed value does not have to round-trip through NaN.
+   */
+  seed: string;
   settings: Record<string, StillImageSettingValue>;
 };
 
@@ -73,7 +82,7 @@ export const STILL_IMAGE_CATEGORIES: ReadonlyArray<StillImageCategoryDefinition>
     prompt: {
       label: "Enhancement prompt",
       placeholder: "Describe the details or finish you want to preserve or enhance...",
-      hint: "Optional guidance for the future enhancement workflow.",
+      hint: "Optional. Guides the enhancement passes; leave empty to let the captioner describe the image on its own.",
     },
     settings: [
       { id: "generalEnhance", label: "Enable general enhancement", kind: "checkbox", defaultValue: true },
@@ -214,7 +223,7 @@ export const STILL_IMAGE_CATEGORIES: ReadonlyArray<StillImageCategoryDefinition>
     prompt: {
       label: "Edit prompt",
       placeholder: "Describe the edit or target result...",
-      hint: "Use natural instruction language. The prompt stays local until backend integration is added.",
+      hint: "Use natural instruction language. Ignored by Raw Enhancement, which drives itself from the captioner.",
     },
     settings: [
       {
@@ -283,6 +292,7 @@ function createInitialCategoryState(category: StillImageCategoryDefinition): Sti
   return {
     images: [],
     prompt: "",
+    seed: "",
     settings: Object.fromEntries(category.settings.map((setting) => [setting.id, setting.defaultValue])),
   };
 }

@@ -5,6 +5,7 @@ import type { Job, UploadedImage } from "../../types";
 import { createClientId } from "../../utils/id";
 // Shared media helper; features/jobs uses the same one for the Animation path.
 import { uploadJobMediaUrl } from "../generation/generationUtils";
+import { submittableStillImageSeed } from "./seed";
 import {
   getStillImageCategory,
   shouldShowStillImagePrompt,
@@ -78,6 +79,11 @@ export function useStillImagesSubmission(options: { onJobCreated: (job: Job) => 
           workflowOptions: {
             stillImage: {
               categoryId: input.categoryId,
+              // Omitted unless the artist asked for a particular seed, which is
+              // normally one restored from an earlier result. The server mints
+              // one either way and records it on the job, so the render stays
+              // reproducible without anyone having to think about it.
+              seed: submittableStillImageSeed(input.categoryState.seed),
               // Only the settings the artist can currently see. The server drops
               // hidden ones anyway; sending them would just be noise.
               settings: Object.fromEntries(
