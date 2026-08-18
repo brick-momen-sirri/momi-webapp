@@ -282,6 +282,21 @@ export type RunpodJobProgress = {
   phaseStartedAt: string;
 };
 
+/**
+ * RunPod's own account of a finished run.
+ *
+ * Written from the last poll that reported each figure, terminal poll included --
+ * `executionTime` is only final once the job leaves IN_PROGRESS.
+ */
+export type RunpodJobTiming = {
+  /** Worker time on the job. The billable part, and what pod pricing multiplies. */
+  executionMs?: number;
+  /** How long RunPod held the job before a worker took it. Queue wait, not spend. */
+  delayMs?: number;
+  /** Which worker ran it, for tracing a slow or broken pod. */
+  workerId?: string;
+};
+
 export type Job = {
   id: string;
   clientRequestId?: string;
@@ -296,6 +311,16 @@ export type Job = {
   runpodStatus?: string;
   runpodSubmissionState?: "preparing" | "submitting" | "submitted";
   runpodProgress?: RunpodJobProgress;
+  /**
+   * What RunPod reported about the run itself, kept after it finished.
+   *
+   * runpodProgress carries the same numbers while a job is in flight, but it is
+   * deleted on completion -- a finished card must not claim a worker is still busy
+   * on it. These are the durable copies: `executionMs` is what podRuntimeCost
+   * prices for the Still Images presets, and `delayMs` and `workerId` are what an
+   * operator needs to tell "the pod was slow" from "the queue was long".
+   */
+  runpodTiming?: RunpodJobTiming;
   projectId: string;
   folderId?: string | null;
   folderName?: string;

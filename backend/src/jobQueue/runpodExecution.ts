@@ -10,6 +10,7 @@ import {
   isCreditExemptJob,
 } from "../creditUsageAccounting.js";
 import { logMemory } from "../memoryLogger.js";
+import { mergeRunpodTiming, POD_RUNTIME_SOURCE, podRuntimeCredits } from "../podRuntimeCost.js";
 import { projectFolderName } from "../projectFolderName.js";
 import { getProject } from "../projectService.js";
 import {
@@ -125,6 +126,13 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
      * for a number the client can derive from phaseStartedAt on its own.
      */
     const onPoll = async (observation: Parameters<NonNullable<Parameters<typeof runComfyWorkflowOnRunpod>[0]["onPoll"]>>[0]) => {
+      // Before the phase check, so the terminal poll counts. That poll is the only
+      // one carrying a final executionTime -- while a job is IN_PROGRESS the figure
+      // is whatever had elapsed so far -- and it is the one this returns early on.
+      // Kept on the job rather than in a local: it has to survive the deletion of
+      // runpodProgress on completion, and a failed run's timing is worth reading too.
+      recordRunpodTiming(job, observation);
+
       const phase = observation.status === "IN_QUEUE" ? "queued" : observation.status === "IN_PROGRESS" ? "running" : undefined;
       if (!phase) return;
       const previous = job.runpodProgress;
@@ -214,6 +222,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
 
     const creditUsage = result.creditUsage ?? estimateFallbackCreditUsage(model, workflow, job.durationSeconds, job.resolution);
     job.creditUsage = creditUsage;
+    applyPodRuntimeCostToJob(job);
     applyAccountingCreditsToJob(job);
     job.outputType = selectedMedia.some((item) => item.isVideo) ? "video" : job.outputType;
 
@@ -282,6 +291,10 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       } else {
         job.errorMessage = error instanceof Error ? error.message : "Unknown RunPod job error";
       }
+      // A run that failed after four minutes on the pod cost the same as one that
+      // succeeded in four minutes. Priced from whatever execution time RunPod had
+      // reported, which is nothing at all for a job that never reached a worker.
+      applyPodRuntimeCostToJob(job);
       applyAccountingCreditsToJob(job);
     }
     logMemory(canceled || error instanceof RunpodComfyCanceledError ? "job-canceled" : "job-failed", job.id);
@@ -378,6 +391,27 @@ function setJobPhase(
     completedSteps: completedSteps.length ? completedSteps : undefined,
     phaseStartedAt: (options.keepStartedAt && previous?.phaseStartedAt) || new Date().toISOString(),
   };
+}
+
+function recordRunpodTiming(job: Job, observation: { delayMs?: number; executionMs?: number; workerId?: string }) {
+  const timing = mergeRunpodTiming(job.runpodTiming, observation);
+  if (timing) job.runpodTiming = timing;
+}
+
+/**
+ * Price the pod time a Still Images job used, when it can be measured.
+ *
+ * Left alone when something already measured this job's spend -- the company
+ * balance delta, where that is enabled, watches real money leave the account over a
+ * window the job had to itself, which is the stronger claim of the two.
+ */
+function applyPodRuntimeCostToJob(job: Job) {
+  if (job.creditsActual !== undefined) return;
+  const credits = podRuntimeCredits(job);
+  if (credits == null) return;
+  job.creditsActual = credits;
+  job.creditsActualSource = POD_RUNTIME_SOURCE;
+  job.creditsUsed = credits;
 }
 
 function applyAccountingCreditsToJob(job: Job) {

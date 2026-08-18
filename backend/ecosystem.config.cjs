@@ -49,6 +49,22 @@ const commonEnv = {
   RUNPOD_ENDPOINT_ID_PRO_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER || "",
   RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR: process.env.RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR || "",
   RUNPOD_ENDPOINT_ID_QWEN_EDIT: process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT || "",
+  // What a second on each of those pods costs, in USD (see podRuntimeCost.ts).
+  //
+  // These are what turn a Still Images run from "uncosted" into measured spend:
+  // RunPod reports the worker time, and this is the only missing half of the
+  // multiplication. Left empty the run still completes and still reports "--",
+  // which is deliberate -- a made-up rate would put a fabricated figure into every
+  // credit total, which is the reason these presets were excluded to begin with.
+  //
+  // Set the shared rate, or a per-preset one where the endpoints differ in GPU
+  // class; the per-preset value wins. Take the figure from the endpoint's GPU
+  // pricing in the RunPod console, not from a guess at the tier.
+  STILL_IMAGE_POD_USD_PER_SECOND: process.env.STILL_IMAGE_POD_USD_PER_SECOND || "",
+  STILL_IMAGE_POD_USD_PER_SECOND_GENERAL_ENHANCEMENT: process.env.STILL_IMAGE_POD_USD_PER_SECOND_GENERAL_ENHANCEMENT || "",
+  STILL_IMAGE_POD_USD_PER_SECOND_PRO_UPSCALER: process.env.STILL_IMAGE_POD_USD_PER_SECOND_PRO_UPSCALER || "",
+  STILL_IMAGE_POD_USD_PER_SECOND_REFERENCE_GENERATOR: process.env.STILL_IMAGE_POD_USD_PER_SECOND_REFERENCE_GENERATOR || "",
+  STILL_IMAGE_POD_USD_PER_SECOND_QWEN_EDIT: process.env.STILL_IMAGE_POD_USD_PER_SECOND_QWEN_EDIT || "",
 };
 
 const processSafety = {

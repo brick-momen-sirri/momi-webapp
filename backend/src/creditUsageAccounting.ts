@@ -1,21 +1,49 @@
+import { POD_RUNTIME_SOURCE } from "./podRuntimeCost.js";
 import type { CreditBalanceSnapshot, CreditUsageSummary, Job } from "./types.js";
 
 export const COMPANY_BALANCE_DELTA_SOURCE = "company_balance_delta";
 
 /**
- * Still Images presets are excluded from credit accounting entirely.
+ * A Still Images preset is excluded from credit accounting until its cost has
+ * actually been measured.
  *
- * These four run on their own pods, which return no usage figures, so the only
- * number ever available for them is the flat per-preset estimate in
- * stillImageModels. Counting an estimate as spend inflates every total it lands
- * in -- workspace, project, monthly dashboard -- with a figure nobody measured.
- * They report "--" in the UI instead.
+ * These four run on their own pods, which return no usage figures. The only number
+ * available for a run nobody measured is the flat per-preset estimate in
+ * stillImageModels, and counting an estimate as spend inflates every total it lands
+ * in -- workspace, project, monthly dashboard -- with a figure nobody checked. Such
+ * a job reports "--", as all of them used to.
  *
- * This is the single gate for that: every total is derived from either this
- * function or the job.creditsUsed it decides to leave in place.
+ * What changed is that a measured figure now exists for some of them: RunPod
+ * reports the worker time, and podRuntimeCost turns it into credits at the
+ * endpoint's configured per-second price. That is a measurement, not an estimate,
+ * so excluding it would understate real spend as badly as the estimate overstated
+ * it -- and it would keep the pods invisible, which was the actual problem.
+ *
+ * Note the asymmetry this leaves with the external Credit Tracker: that sync needs
+ * a provider credit_usage row, which these pods never produce, so measured pod
+ * spend is counted here and still filed nowhere there.
+ *
+ * This is the single gate: every total is derived from either this function or the
+ * job.creditsUsed it decides to leave in place.
  */
-export function isCreditExemptJob(job: Pick<Job, "workflowOptions">) {
-  return Boolean(job.workflowOptions?.stillImage);
+export function isCreditExemptJob(job: Pick<Job, "workflowOptions" | "creditsActual" | "creditsActualSource">) {
+  if (!job.workflowOptions?.stillImage) return false;
+  return !hasMeasuredSpend(job);
+}
+
+/**
+ * Whether a figure on this job was measured rather than estimated.
+ *
+ * The two measured sources: pod runtime, which multiplies the worker time RunPod
+ * reported by the endpoint's price, and the company balance delta, which reads the
+ * account balance moving across a window this job had to itself. Everything else
+ * that can land in creditsActual is a projection and must not lift the exemption.
+ */
+export function hasMeasuredSpend(job: Pick<Job, "creditsActual" | "creditsActualSource">) {
+  if (job.creditsActualSource !== POD_RUNTIME_SOURCE && job.creditsActualSource !== COMPANY_BALANCE_DELTA_SOURCE) {
+    return false;
+  }
+  return positiveNumber(job.creditsActual) != null;
 }
 
 export function creditsSpentForAccounting(
