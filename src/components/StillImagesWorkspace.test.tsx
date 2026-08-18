@@ -64,6 +64,41 @@ function renderPanel(jobs: Job[]) {
   );
 }
 
+// These pods return no usage figures, so a cost on one of these cards is only ever
+// there because RunPod reported worker time and the endpoint had a price. The "--"
+// case is the one worth protecting: it is the difference between "this run was free"
+// and "nobody measured this run".
+describe("measured pod cost", () => {
+  it("shows the cost and worker time of a priced run", () => {
+    renderPanel([
+      stillJob({
+        creditsActual: 42,
+        creditsActualSource: "pod_runtime",
+        runpodTiming: { executionMs: 98_000, delayMs: 4_000 },
+      }),
+    ]);
+
+    expect(screen.getByText("42 cr")).toBeInTheDocument();
+    // Worker time only. The 4s it spent queued is not billed and is not added in.
+    expect(screen.getByText("1m 38s")).toBeInTheDocument();
+  });
+
+  it("reports an unmeasured run as uncosted rather than free", () => {
+    renderPanel([stillJob({ creditsEstimated: 24 })]);
+
+    const cost = screen.getByText("Cost").closest("div");
+    expect(cost).toHaveTextContent("--");
+    // The flat per-preset estimate must not be dressed up as a cost.
+    expect(screen.queryByText("24 cr")).toBeNull();
+  });
+
+  it("ignores a creditsActual that did not come from measured pod time", () => {
+    renderPanel([stillJob({ creditsActual: 99, creditsActualSource: "local_estimate" })]);
+
+    expect(screen.queryByText("99 cr")).toBeNull();
+  });
+});
+
 describe("StillImagesWorkspace", () => {
   it("shows an empty state and a zero count when nothing has been generated", () => {
     renderPanel([]);

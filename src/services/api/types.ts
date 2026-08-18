@@ -52,6 +52,7 @@ export type BackendJob = {
   status: Job["status"];
   cancelRequested?: boolean;
   runpodProgress?: Job["runpodProgress"];
+  runpodTiming?: Job["runpodTiming"];
   inputImages: string[];
   inputVideo?: string;
   resultUrls: string[];

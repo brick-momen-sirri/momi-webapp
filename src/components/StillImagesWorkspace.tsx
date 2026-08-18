@@ -18,6 +18,7 @@ import type {
   StillImageCategoryState,
 } from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
+import { formatPodRuntime, measuredPodCredits } from "../features/still-images/podRuntimeCost";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
@@ -145,6 +146,8 @@ function StillImageJobCard({
   const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
   const qwenMode = job.workflowOptions?.stillImage?.settings?.mode;
   const seed = job.workflowOptions?.stillImage?.seed;
+  const podCredits = measuredPodCredits(job);
+  const podRuntime = formatPodRuntime(job);
 
   return (
     <article className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
@@ -286,7 +289,7 @@ function StillImageJobCard({
         </section>
       </div>
 
-      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         <MetadataItem label="Status" value={job.status} />
         <MetadataItem label="Workflow" value={job.modelType} />
         {/* Who submitted it. Projects are studio-wide, so a result in the list is
@@ -299,6 +302,22 @@ function StillImageJobCard({
         <MetadataItem label="Seed" value={seed === undefined ? "--" : String(seed)} />
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
         <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
+        {/* Measured, or nothing. These pods return no usage figures, so a cost
+            exists only where RunPod reported worker time and the endpoint has a
+            per-second price configured; anything else would be the old flat
+            estimate wearing a cost label. */}
+        <MetadataItem
+          label="Cost"
+          value={podCredits === undefined ? "--" : `${podCredits} cr`}
+          hint={
+            podCredits === undefined
+              ? "Not measured: this pod reported no worker time, or no per-second price is configured for the preset."
+              : "Priced from the worker time RunPod reported for this run."
+          }
+        />
+        {/* Worker time, not the wall clock on the card: a job also waits in RunPod's
+            queue, and that wait is not billed. */}
+        <MetadataItem label="Pod time" value={podRuntime ?? "--"} hint="Time a worker spent on this job." />
       </div>
     </article>
   );
@@ -512,9 +531,9 @@ function EmptyState({
   );
 }
 
-function MetadataItem({ label, value }: { label: string; value: string }) {
+function MetadataItem({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="min-w-0 rounded-md bg-mist/70 px-2 py-1.5">
+    <div className="min-w-0 rounded-md bg-mist/70 px-2 py-1.5" title={hint}>
       <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
         {label === "Project" || label === "Folder" ? <Folder className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}
         {label}

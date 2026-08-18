@@ -1,4 +1,5 @@
 import { isStillImageJob } from "../../features/still-images/jobSection";
+import { measuredPodCredits } from "../../features/still-images/podRuntimeCost";
 import type { Job, MediaResolution, ModelType, Project } from "../../types";
 import { backendResultMediaUrl, resolveMediaUrl } from "./mediaAccess";
 import type { AuthUser, BackendJob, BackendWorkflowModel } from "./types";
@@ -108,6 +109,7 @@ export function mapJob(job: BackendJob): Job {
     status: job.status,
     cancelRequested: job.cancelRequested,
     runpodProgress: job.runpodProgress,
+    runpodTiming: job.runpodTiming,
     inputImages,
     inputVideo,
     resultUrls,
@@ -153,12 +155,15 @@ function jobHasUnsavedRemoteMedia(job: BackendJob) {
 }
 
 function mappedCreditsUsed(job: BackendJob) {
-  // Still Images presets are exempt from credit accounting (isCreditExemptJob on
-  // the backend). Gated here, at the boundary, so no consumer has to remember:
-  // the backend stops writing creditsUsed for these, but creditUsage lingers on
-  // jobs that ran before the exemption and the branches below would happily
-  // resurrect a number from its estimate.
-  if (isStillImageJob(job)) return undefined;
+  // Still Images presets are exempt from credit accounting until their cost has
+  // been measured (isCreditExemptJob on the backend). Gated here, at the boundary,
+  // so no consumer has to remember: the backend writes no creditsUsed for an
+  // unmeasured one, but creditUsage lingers on jobs that ran before the exemption
+  // and the branches below would happily resurrect a number from its estimate.
+  //
+  // A measured figure is let through. It is priced from the worker time RunPod
+  // reported for this job, so it is spend, not a projection.
+  if (isStillImageJob(job)) return measuredPodCredits(job);
 
   const actualCredits = nonNegativeNumber(job.creditsActual);
   if (actualCredits != null) return actualCredits;

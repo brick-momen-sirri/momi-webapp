@@ -181,6 +181,14 @@ export type Job = {
   workflowOptions?: WorkflowOptions;
   videoLength?: string;
   runpodProgress?: RunpodJobProgress;
+  /**
+   * What RunPod reported about the run, kept after it finished.
+   *
+   * `executionMs` is the billed part -- worker time -- and is what the backend
+   * prices a Still Images preset from. `delayMs` is queue wait, which nobody pays
+   * for; the two together are how a slow pod is told from a long queue.
+   */
+  runpodTiming?: { executionMs?: number; delayMs?: number; workerId?: string };
   creditsEstimated?: number;
   creditsUsed?: number;
   creditsActual?: number;
