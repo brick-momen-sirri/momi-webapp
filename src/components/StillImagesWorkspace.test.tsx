@@ -172,17 +172,35 @@ describe("the destination chip", () => {
 // case is the one worth protecting: it is the difference between "this run was free"
 // and "nobody measured this run".
 describe("measured pod cost", () => {
-  it("shows the cost and worker time of a priced run", () => {
+  it("shows the cost, the worker time and the GPU that set the rate", () => {
     renderPanel([
       stillJob({
         creditsActual: 42,
         creditsActualSource: "pod_runtime",
-        runpodTiming: { executionMs: 98_000, delayMs: 4_000 },
+        runpodTiming: {
+          executionMs: 98_000,
+          delayMs: 4_000,
+          gpuTypeId: "NVIDIA GeForce RTX 5090",
+          usdPerSecond: 0.0004174,
+        },
       }),
     ]);
 
     expect(screen.getByText("42 cr")).toBeInTheDocument();
     // Worker time only. The 4s it spent queued is not billed and is not added in.
+    expect(screen.getByText("1m 38s")).toBeInTheDocument();
+    // The endpoint accepts several GPU classes at different rates, so which one ran
+    // it is the explanation for the number beside it.
+    expect(screen.getByText("GeForce RTX 5090")).toBeInTheDocument();
+  });
+
+  it("reports an unidentified GPU without pretending the run was free", () => {
+    // Ran, but the worker was torn down before its GPU could be resolved.
+    renderPanel([stillJob({ runpodTiming: { executionMs: 98_000 } })]);
+
+    expect(screen.getByText("GPU").closest("div")).toHaveTextContent("--");
+    expect(screen.getByText("Cost").closest("div")).toHaveTextContent("--");
+    // The worker time is still known and still worth showing.
     expect(screen.getByText("1m 38s")).toBeInTheDocument();
   });
 

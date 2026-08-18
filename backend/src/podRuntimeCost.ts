@@ -8,17 +8,23 @@
 // counting an unmeasured estimate as spend would inflate every total it landed in,
 // they were excluded from accounting entirely and displayed "--".
 //
-// RunPod does report the one fact that matters: how long a worker spent on the job.
-// `executionTime` comes back on the status response, which the poller already reads
-// (runpodComfyService's onPoll). Multiply it by the endpoint's per-second price and
-// the result is measured, not guessed.
+// Two facts make a measured figure possible. RunPod reports how long a worker spent
+// on the job (executionTime, on the status response the poller already reads), and
+// it will name the GPU behind that worker (see runpodWorkerGpu). Seconds times the
+// GPU's rate is a measurement, not a guess.
 //
-// The price is configuration, deliberately with no default. A rate depends on the
-// GPU class each endpoint runs, which this code cannot know; inventing one would
-// reintroduce exactly the fabricated-number problem the exemption existed to avoid.
-// With no rate configured a job stays uncosted and still reports "--".
+// The rate has to be per GPU rather than per endpoint, because an endpoint is
+// configured with a list of acceptable GPU classes and the worker that takes the job
+// decides which one it runs on. All four Still Images endpoints are configured for
+// two or three, and they are not close in price.
+//
+// Where the rates come from: /v1/billing/endpoints returns billed `amount` and
+// `timeBilledMs` grouped by GPU, so the account's own invoices give the rate
+// directly. Over the 30 days to 2026-08-18, across 198 daily buckets and five
+// endpoints, each GPU's implied rate held to within 0.5% -- these are not list
+// prices scraped off a page, they are what was charged.
 
-import { STILL_IMAGE_CATEGORY_IDS } from "./stillImageCategories.js";
+import { runpodApiKey } from "./config.js";
 import type { Job, RunpodJobTiming } from "./types.js";
 
 /**
@@ -27,7 +33,7 @@ import type { Job, RunpodJobTiming } from "./types.js";
  * Distinct from COMPANY_BALANCE_DELTA_SOURCE: that one infers spend from the
  * company balance moving, which is only trustworthy when a job had the whole
  * RunPod account to itself. This one is a direct product of this job's own
- * execution time and needs no such window.
+ * execution time and the GPU it ran on, and needs no such window.
  */
 export const POD_RUNTIME_SOURCE = "pod_runtime";
 
@@ -35,24 +41,48 @@ export const POD_RUNTIME_SOURCE = "pod_runtime";
 const CREDITS_PER_USD = 211;
 
 /**
- * Per-second USD price for a preset's pod.
+ * USD per second by RunPod gpuTypeId, measured from billed invoices.
  *
- * `STILL_IMAGE_POD_USD_PER_SECOND` sets the rate for every preset;
- * `STILL_IMAGE_POD_USD_PER_SECOND_PRO_UPSCALER` and friends override one. The
- * presets do not share a GPU class -- Pro Upscaler runs SeedVR plus a tiled Flux
- * pass -- so the per-preset form is the one to expect in practice.
+ * Derived as amount / (timeBilledMs / 1000) per daily bucket over the 30 days to
+ * 2026-08-18; the range each figure was observed in is noted beside it. Re-derive
+ * with the same query when RunPod repricings land, or override without a deploy
+ * through RUNPOD_GPU_USD_PER_SECOND.
+ *
+ * Deliberately NOT taken from the worker's own costPerHr, which reads low: a PRO
+ * 6000 MIG worker reported 0.59/h against a billed 0.656-0.675/h.
  */
-const podUsdPerSecond: Readonly<Record<string, number>> = Object.fromEntries(
-  STILL_IMAGE_CATEGORY_IDS.map((categoryId) => [
-    categoryId,
-    positiveRate(process.env[`STILL_IMAGE_POD_USD_PER_SECOND_${envSuffix(categoryId)}`]) ??
-      positiveRate(process.env.STILL_IMAGE_POD_USD_PER_SECOND) ??
-      0,
-  ]).filter(([, rate]) => rate),
-);
+const MEASURED_GPU_USD_PER_SECOND: Readonly<Record<string, number>> = {
+  // $3.315-3.320/h
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition": 0.0009215,
+  // $1.501-1.508/h
+  "NVIDIA GeForce RTX 5090": 0.0004174,
+  // $1.159-1.161/h
+  "NVIDIA A40": 0.0003221,
+  // $0.656-0.675/h
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb": 0.0001844,
+};
 
-export function podUsdPerSecondForCategory(categoryId: string) {
-  return podUsdPerSecond[categoryId] ?? 0;
+/**
+ * Overrides and additions, as `gpuTypeId=usdPerSecond` pairs separated by semicolons.
+ *
+ * Semicolons because a gpuTypeId contains spaces and dots but never one of those.
+ * A GPU absent from both this and the table above prices nothing at all, which is
+ * the point: an endpoint that starts scheduling onto a GPU nobody has priced should
+ * report an uncosted run rather than a figure invented from a neighbour's rate.
+ */
+const gpuUsdPerSecond: Readonly<Record<string, number>> = {
+  ...MEASURED_GPU_USD_PER_SECOND,
+  ...parseGpuRateOverrides(process.env.RUNPOD_GPU_USD_PER_SECOND),
+};
+
+export function gpuUsdPerSecondFor(gpuTypeId: string | undefined) {
+  if (!gpuTypeId) return 0;
+  return gpuUsdPerSecond[gpuTypeId] ?? 0;
+}
+
+/** Every GPU this build can price, in a stable order. */
+export function pricedGpuTypeIds() {
+  return Object.keys(gpuUsdPerSecond).sort();
 }
 
 /**
@@ -68,45 +98,60 @@ export function podUsdPerSecondForCategory(categoryId: string) {
  */
 export function mergeRunpodTiming(
   previous: RunpodJobTiming | undefined,
-  observation: { delayMs?: number; executionMs?: number; workerId?: string },
+  observation: { delayMs?: number; executionMs?: number; workerId?: string; gpuTypeId?: string; gpuCostPerHr?: number },
 ): RunpodJobTiming | undefined {
   const timing: RunpodJobTiming = {
     executionMs: positiveMs(observation.executionMs) ?? previous?.executionMs,
     delayMs: positiveMs(observation.delayMs) ?? previous?.delayMs,
     workerId: observation.workerId ?? previous?.workerId,
+    gpuTypeId: observation.gpuTypeId ?? previous?.gpuTypeId,
+    gpuCostPerHr: observation.gpuCostPerHr ?? previous?.gpuCostPerHr,
+    usdPerSecond: previous?.usdPerSecond,
   };
-  const known = timing.executionMs !== undefined || timing.delayMs !== undefined || timing.workerId !== undefined;
+  const known = Object.values(timing).some((value) => value !== undefined);
   return known ? timing : undefined;
 }
+
+export type PodRuntimeCost = {
+  credits: number;
+  usd: number;
+  usdPerSecond: number;
+  gpuTypeId: string;
+};
 
 /**
  * The measured cost of a job's pod time, or undefined when it cannot be measured.
  *
- * Undefined covers three honest gaps, all of which must stay uncosted rather than
- * fall back to an estimate: the job did not run on a priced pod, no rate is
- * configured for its preset, and RunPod reported no execution time (which happens
- * when a job fails before a worker picks it up).
+ * Undefined covers four honest gaps, all of which must stay uncosted rather than
+ * fall back to an estimate: the job did not run on one of our own pods; RunPod
+ * reported no execution time (a job that failed before a worker took it); the worker
+ * was gone before its GPU could be resolved; or that GPU has no rate.
  *
  * Only `executionMs` is priced. RunPod's `delayTime` is queue wait, which is not
  * ours to pay for; it is recorded next to this for operators reading a slow run,
  * not billed. Note that a cold start lands inside the worker's own accounting
  * rather than here, so this is a floor on the true cost, not a ceiling.
  */
-export function podRuntimeCredits(job: Pick<Job, "workflowOptions" | "runpodTiming">) {
-  const categoryId = job.workflowOptions?.stillImage?.categoryId;
-  if (!categoryId) return undefined;
-
-  const usdPerSecond = podUsdPerSecondForCategory(categoryId);
-  if (!usdPerSecond) return undefined;
+export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming">): PodRuntimeCost | undefined {
+  if (!job.workflowOptions?.stillImage) return undefined;
 
   const executionMs = job.runpodTiming?.executionMs;
   if (typeof executionMs !== "number" || !Number.isFinite(executionMs) || executionMs <= 0) return undefined;
 
+  const gpuTypeId = job.runpodTiming?.gpuTypeId;
+  const usdPerSecond = gpuUsdPerSecondFor(gpuTypeId);
+  if (!gpuTypeId || !usdPerSecond) return undefined;
+
   const usd = (executionMs / 1000) * usdPerSecond;
-  const credits = Math.round(usd * CREDITS_PER_USD);
-  // A run too short to round up to one credit is still a real run, and reporting
-  // it as 0 would be read as "not costed" rather than "cost about nothing".
-  return Math.max(1, credits);
+  // A run too short to round up to one credit is still a real run, and reporting it
+  // as 0 would be read as "not costed" rather than "cost about nothing".
+  const credits = Math.max(1, Math.round(usd * CREDITS_PER_USD));
+  return { credits, usd, usdPerSecond, gpuTypeId };
+}
+
+/** Just the credits, for callers that only need the figure. */
+export function podRuntimeCredits(job: Pick<Job, "workflowOptions" | "runpodTiming">) {
+  return podRuntimeCost(job)?.credits;
 }
 
 /** Whether this job's spend was measured rather than estimated. */
@@ -119,15 +164,30 @@ export function hasMeasuredPodRuntimeCost(job: Pick<Job, "creditsActual" | "cred
   );
 }
 
-function envSuffix(categoryId: string) {
-  return categoryId.replaceAll("-", "_").toUpperCase();
+/** Whether a GPU lookup is worth attempting at all. */
+export function podRuntimePricingConfigured() {
+  return Boolean(runpodApiKey) && Object.keys(gpuUsdPerSecond).length > 0;
+}
+
+function parseGpuRateOverrides(value: string | undefined) {
+  const overrides: Record<string, number> = {};
+  for (const entry of (value ?? "").split(";")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.lastIndexOf("=");
+    const gpuTypeId = separator > 0 ? trimmed.slice(0, separator).trim() : "";
+    const rate = separator > 0 ? Number(trimmed.slice(separator + 1).trim()) : NaN;
+    if (!gpuTypeId || !Number.isFinite(rate) || rate <= 0) {
+      // Loudly ignored. A typo here silently reverts a GPU to its built-in rate, or
+      // leaves it unpriced, and neither is visible in any number afterwards.
+      console.warn(`Ignoring unparseable RUNPOD_GPU_USD_PER_SECOND entry: ${trimmed}`);
+      continue;
+    }
+    overrides[gpuTypeId] = rate;
+  }
+  return overrides;
 }
 
 function positiveMs(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function positiveRate(value: string | undefined) {
-  const parsed = Number((value ?? "").trim());
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }

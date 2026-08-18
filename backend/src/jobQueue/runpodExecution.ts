@@ -10,7 +10,13 @@ import {
   isCreditExemptJob,
 } from "../creditUsageAccounting.js";
 import { logMemory } from "../memoryLogger.js";
-import { mergeRunpodTiming, POD_RUNTIME_SOURCE, podRuntimeCredits } from "../podRuntimeCost.js";
+import {
+  mergeRunpodTiming,
+  POD_RUNTIME_SOURCE,
+  podRuntimeCost,
+  podRuntimePricingConfigured,
+} from "../podRuntimeCost.js";
+import { resolveRunpodWorkerGpu } from "../runpodWorkerGpu.js";
 import { projectFolderName } from "../projectFolderName.js";
 import { getProject } from "../projectService.js";
 import {
@@ -132,6 +138,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       // Kept on the job rather than in a local: it has to survive the deletion of
       // runpodProgress on completion, and a failed run's timing is worth reading too.
       recordRunpodTiming(job, observation);
+      await recordRunpodWorkerGpu(job, observation.workerId);
 
       const phase = observation.status === "IN_QUEUE" ? "queued" : observation.status === "IN_PROGRESS" ? "running" : undefined;
       if (!phase) return;
@@ -399,6 +406,27 @@ function recordRunpodTiming(job: Job, observation: { delayMs?: number; execution
 }
 
 /**
+ * Note which GPU the worker on this job turned out to have.
+ *
+ * Asked here, mid-run, and not at settle: RunPod answers for a worker only while it
+ * exists, and a serverless worker is torn down after its idle timeout. The first
+ * poll that names one is the safest moment there is.
+ *
+ * One await, once per job, and only for a preset that could be priced. The lookup
+ * caches by worker id -- a warm worker takes job after job -- carries its own
+ * timeout and never throws, so the worst it can do to a render is delay one poll.
+ */
+async function recordRunpodWorkerGpu(job: Job, workerId: string | undefined) {
+  if (!workerId || job.runpodTiming?.gpuTypeId) return;
+  if (!job.workflowOptions?.stillImage || !podRuntimePricingConfigured()) return;
+
+  const gpu = await resolveRunpodWorkerGpu(workerId);
+  if (!gpu) return;
+  const timing = mergeRunpodTiming(job.runpodTiming, { gpuTypeId: gpu.gpuTypeId, gpuCostPerHr: gpu.costPerHr });
+  if (timing) job.runpodTiming = timing;
+}
+
+/**
  * Price the pod time a Still Images job used, when it can be measured.
  *
  * Left alone when something already measured this job's spend -- the company
@@ -407,11 +435,15 @@ function recordRunpodTiming(job: Job, observation: { delayMs?: number; execution
  */
 function applyPodRuntimeCostToJob(job: Job) {
   if (job.creditsActual !== undefined) return;
-  const credits = podRuntimeCredits(job);
-  if (credits == null) return;
-  job.creditsActual = credits;
+  const cost = podRuntimeCost(job);
+  if (!cost) return;
+  job.creditsActual = cost.credits;
   job.creditsActualSource = POD_RUNTIME_SOURCE;
-  job.creditsUsed = credits;
+  job.creditsUsed = cost.credits;
+  // The seconds and the GPU are already on the job; this is the third term, so a
+  // figure can be checked -- or re-derived after a repricing -- without guessing
+  // which rate was in force when it ran.
+  job.runpodTiming = { ...job.runpodTiming, usdPerSecond: cost.usdPerSecond };
 }
 
 function applyAccountingCreditsToJob(job: Job) {

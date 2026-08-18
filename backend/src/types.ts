@@ -295,6 +295,31 @@ export type RunpodJobTiming = {
   delayMs?: number;
   /** Which worker ran it, for tracing a slow or broken pod. */
   workerId?: string;
+  /**
+   * The GPU that worker turned out to have, resolved from its id while the run was
+   * still in flight (runpodWorkerGpu). What podRuntimeCost prices against: an
+   * endpoint accepts several GPU classes and the worker picks, so the same preset
+   * costs 2.2x more on one than another.
+   *
+   * Absent when the lookup could not answer -- a worker already torn down, or no
+   * RunPod API key -- which leaves the run uncosted rather than priced from a guess.
+   */
+  gpuTypeId?: string;
+  /**
+   * That worker's own hourly rate, as it reported it.
+   *
+   * Recorded for reference and deliberately not billed against: it reads low. A PRO
+   * 6000 MIG worker reported 0.59/h where billing charged 0.656-0.675/h for the same
+   * GPU. The rate table in podRuntimeCost, derived from invoices, is authoritative.
+   */
+  gpuCostPerHr?: number;
+  /**
+   * The rate this run was actually priced at, in USD per second.
+   *
+   * Written only when a cost was recorded. Seconds, GPU and rate together make the
+   * figure on the card checkable, and re-derivable after RunPod reprices a GPU.
+   */
+  usdPerSecond?: number;
 };
 
 export type Job = {

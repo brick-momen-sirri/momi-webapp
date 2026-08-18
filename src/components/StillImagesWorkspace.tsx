@@ -21,7 +21,12 @@ import type {
   StillImageCategoryState,
 } from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
-import { formatPodRuntime, measuredPodCredits } from "../features/still-images/podRuntimeCost";
+import {
+  formatPodRuntime,
+  gpuDisplayName,
+  measuredPodCredits,
+  podCostExplanation,
+} from "../features/still-images/podRuntimeCost";
 import {
   DEFAULT_STILL_IMAGE_RESULT_FILTERS,
   filterStillImageJobs,
@@ -433,6 +438,7 @@ function StillImageJobCard({
   const seed = job.workflowOptions?.stillImage?.seed;
   const podCredits = measuredPodCredits(job);
   const podRuntime = formatPodRuntime(job);
+  const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
 
   return (
     <article id={stillJobCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
@@ -574,7 +580,7 @@ function StillImageJobCard({
         </section>
       </div>
 
-      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid gap-2 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         <MetadataItem label="Status" value={job.status} />
         <MetadataItem label="Workflow" value={job.modelType} />
         {/* Who submitted it. Projects are studio-wide, so a result in the list is
@@ -588,21 +594,25 @@ function StillImageJobCard({
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
         <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
         {/* Measured, or nothing. These pods return no usage figures, so a cost
-            exists only where RunPod reported worker time and the endpoint has a
-            per-second price configured; anything else would be the old flat
+            exists only where RunPod reported worker time and the GPU behind the
+            worker is one we have a rate for; anything else would be the old flat
             estimate wearing a cost label. */}
         <MetadataItem
           label="Cost"
           value={podCredits === undefined ? "--" : `${podCredits} cr`}
-          hint={
-            podCredits === undefined
-              ? "Not measured: this pod reported no worker time, or no per-second price is configured for the preset."
-              : "Priced from the worker time RunPod reported for this run."
-          }
+          hint={podCostExplanation(job)}
         />
         {/* Worker time, not the wall clock on the card: a job also waits in RunPod's
             queue, and that wait is not billed. */}
         <MetadataItem label="Pod time" value={podRuntime ?? "--"} hint="Time a worker spent on this job." />
+        {/* Which GPU the endpoint happened to schedule this onto, and therefore what
+            it was priced at. The endpoints accept two or three classes each, so this
+            is the difference between an 8-credit run and an 18-credit one. */}
+        <MetadataItem
+          label="GPU"
+          value={gpu ?? "--"}
+          hint={gpu ? job.runpodTiming?.gpuTypeId : "The worker's GPU was not identified for this run."}
+        />
       </div>
     </article>
   );

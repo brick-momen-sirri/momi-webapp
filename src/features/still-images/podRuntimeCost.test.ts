@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatPodRuntime, measuredPodCredits, POD_RUNTIME_SOURCE } from "./podRuntimeCost";
+import {
+  formatPodRuntime,
+  gpuDisplayName,
+  measuredPodCredits,
+  POD_RUNTIME_SOURCE,
+  podCostExplanation,
+} from "./podRuntimeCost";
 
 // The source string is a contract with the server: it is what separates a measured
 // cost from a projection, and this side only ever recognises it. Asserted here the
@@ -43,5 +49,38 @@ describe("formatPodRuntime", () => {
     // A job that failed before a worker picked it up, so there is no worker time.
     expect(formatPodRuntime({ runpodTiming: { delayMs: 5_000 } })).toBeUndefined();
     expect(formatPodRuntime({})).toBeUndefined();
+  });
+});
+
+describe("gpuDisplayName", () => {
+  it("drops the vendor prefix every GPU shares", () => {
+    expect(gpuDisplayName("NVIDIA GeForce RTX 5090")).toBe("GeForce RTX 5090");
+    expect(gpuDisplayName("NVIDIA RTX PRO 6000 Blackwell Server Edition")).toBe("RTX PRO 6000 Blackwell Server Edition");
+    expect(gpuDisplayName("  ")).toBeUndefined();
+    expect(gpuDisplayName(undefined)).toBeUndefined();
+  });
+});
+
+// The same preset legitimately costs two different amounts, because its endpoint
+// accepts several GPU classes and the worker decides. Saying so on the card is what
+// stops that looking like a bug.
+describe("podCostExplanation", () => {
+  it("names the seconds, the GPU and the rate behind a cost", () => {
+    const explanation = podCostExplanation({
+      creditsActual: 19,
+      creditsActualSource: POD_RUNTIME_SOURCE,
+      runpodTiming: { executionMs: 100_000, gpuTypeId: "NVIDIA RTX PRO 6000 Blackwell Server Edition", usdPerSecond: 0.0009215 },
+    });
+
+    expect(explanation).toContain("1m 40s of worker time");
+    expect(explanation).toContain("on RTX PRO 6000 Blackwell Server Edition");
+    expect(explanation).toContain("$0.0009215/s");
+  });
+
+  it("says why an uncosted run is uncosted", () => {
+    // Three different gaps, one message: no worker time, no identified GPU, or no
+    // rate for it. All of them mean "nobody measured this", not "it was free".
+    const explanation = podCostExplanation({ runpodTiming: { executionMs: 100_000 } });
+    expect(explanation).toContain("Not measured");
   });
 });

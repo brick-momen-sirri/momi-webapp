@@ -49,22 +49,19 @@ const commonEnv = {
   RUNPOD_ENDPOINT_ID_PRO_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER || "",
   RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR: process.env.RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR || "",
   RUNPOD_ENDPOINT_ID_QWEN_EDIT: process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT || "",
-  // What a second on each of those pods costs, in USD (see podRuntimeCost.ts).
+  // Optional per-GPU rate overrides for pricing a Still Images run, as
+  // `gpuTypeId=usdPerSecond` pairs separated by semicolons (see podRuntimeCost.ts).
   //
-  // These are what turn a Still Images run from "uncosted" into measured spend:
-  // RunPod reports the worker time, and this is the only missing half of the
-  // multiplication. Left empty the run still completes and still reports "--",
-  // which is deliberate -- a made-up rate would put a fabricated figure into every
-  // credit total, which is the reason these presets were excluded to begin with.
+  // Not required: the rates that ship in the code were measured from this account's
+  // own invoices via /v1/billing/endpoints, and a GPU absent from both stays
+  // uncosted rather than being priced from a neighbour's rate. Set this to correct a
+  // repricing, or to price a GPU an endpoint has newly started scheduling onto,
+  // without waiting for a deploy. Example:
+  //   RUNPOD_GPU_USD_PER_SECOND="NVIDIA GeForce RTX 5090=0.0004174;NVIDIA A40=0.0003221"
   //
-  // Set the shared rate, or a per-preset one where the endpoints differ in GPU
-  // class; the per-preset value wins. Take the figure from the endpoint's GPU
-  // pricing in the RunPod console, not from a guess at the tier.
-  STILL_IMAGE_POD_USD_PER_SECOND: process.env.STILL_IMAGE_POD_USD_PER_SECOND || "",
-  STILL_IMAGE_POD_USD_PER_SECOND_GENERAL_ENHANCEMENT: process.env.STILL_IMAGE_POD_USD_PER_SECOND_GENERAL_ENHANCEMENT || "",
-  STILL_IMAGE_POD_USD_PER_SECOND_PRO_UPSCALER: process.env.STILL_IMAGE_POD_USD_PER_SECOND_PRO_UPSCALER || "",
-  STILL_IMAGE_POD_USD_PER_SECOND_REFERENCE_GENERATOR: process.env.STILL_IMAGE_POD_USD_PER_SECOND_REFERENCE_GENERATOR || "",
-  STILL_IMAGE_POD_USD_PER_SECOND_QWEN_EDIT: process.env.STILL_IMAGE_POD_USD_PER_SECOND_QWEN_EDIT || "",
+  // Re-derive rather than guess: the billing API reports amount and timeBilledMs
+  // grouped by gpuTypeId, and their ratio is the rate that was actually charged.
+  RUNPOD_GPU_USD_PER_SECOND: process.env.RUNPOD_GPU_USD_PER_SECOND || "",
 };
 
 const processSafety = {

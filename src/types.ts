@@ -188,7 +188,16 @@ export type Job = {
    * prices a Still Images preset from. `delayMs` is queue wait, which nobody pays
    * for; the two together are how a slow pod is told from a long queue.
    */
-  runpodTiming?: { executionMs?: number; delayMs?: number; workerId?: string };
+  runpodTiming?: {
+    executionMs?: number;
+    delayMs?: number;
+    workerId?: string;
+    /** The GPU the worker turned out to have, which is what set the rate. */
+    gpuTypeId?: string;
+    gpuCostPerHr?: number;
+    /** USD per second the run was priced at, present only once it was costed. */
+    usdPerSecond?: number;
+  };
   creditsEstimated?: number;
   creditsUsed?: number;
   creditsActual?: number;

@@ -26,6 +26,34 @@ export function measuredPodCredits(job: Pick<Job, "creditsActual" | "creditsActu
 }
 
 /**
+ * Why a run cost what it did: the seconds, the GPU, and the rate.
+ *
+ * Worth spelling out on the card, because the same preset legitimately costs two
+ * different amounts. Its endpoint accepts several GPU classes and the worker that
+ * takes the job decides which one -- 2.2x apart at the extremes -- so "18 credits
+ * here, 8 there" is the system working, not a bug to go hunting.
+ */
+export function podCostExplanation(job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming">) {
+  const credits = measuredPodCredits(job);
+  if (credits === undefined) {
+    return "Not measured: no worker time was reported, the worker was gone before its GPU could be identified, or that GPU has no rate.";
+  }
+
+  const runtime = formatPodRuntime(job);
+  const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
+  const rate = job.runpodTiming?.usdPerSecond;
+  const parts = [runtime && `${runtime} of worker time`, gpu && `on ${gpu}`, rate && `at $${rate}/s`].filter(Boolean);
+  return parts.length ? `Priced from ${parts.join(" ")}.` : "Priced from the worker time RunPod reported for this run.";
+}
+
+/** RunPod's gpuTypeId without the vendor prefix, which is the same on all of them. */
+export function gpuDisplayName(gpuTypeId: string | undefined) {
+  const trimmed = (gpuTypeId ?? "").trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/^NVIDIA\s+/i, "").replace(/^AMD\s+/i, "");
+}
+
+/**
  * How long the worker spent on the job, as "1m 38s".
  *
  * The billed figure, and not the same thing as wall-clock time on the card: a job
