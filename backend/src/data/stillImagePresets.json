@@ -1,0 +1,135 @@
+{
+  "$comment": [
+    "The Still Images preset catalogue: the single source of everything a request is",
+    "judged against -- preset ids, setting ids, kinds, defaults, range bounds, select",
+    "option values, visibility rules, image slot counts and whether a prompt is taken.",
+    "",
+    "Read by backend/src/stillImageCategories.ts, which validates against it, and by",
+    "src/features/still-images/stillImageCategories.ts, which layers labels, hints and",
+    "icons on top. It used to be two hand-maintained TypeScript tables kept honest by",
+    "asserting the same truth table on both sides: widen a range in one and the server",
+    "rejected a value the UI happily offered. Data cannot drift from itself.",
+    "",
+    "JSON rather than a shared module because the two sides cannot import each other's",
+    "code: backend/ compiles with rootDir \"src\" and NodeNext specifiers, the app tree",
+    "is bundler-resolved and pulls in lucide. Both can read a file, and this one lives",
+    "under backend/src so tsc emits it into dist alongside the code that reads it.",
+    "",
+    "Option labels stay on the UI side, keyed by these values. Changing a value here is",
+    "a data migration: jobs already recorded carry the old one."
+  ],
+  "presets": [
+    {
+      "id": "general-enhancement",
+      "imageSlots": 1,
+      "acceptsPrompt": true,
+      "settings": [
+        { "id": "generalEnhance", "kind": "checkbox", "defaultValue": true },
+        { "id": "details", "kind": "range", "defaultValue": 1, "minimum": 0, "maximum": 2, "step": 0.05 },
+        {
+          "id": "generalDenoise",
+          "kind": "range",
+          "defaultValue": 0.1,
+          "minimum": 0,
+          "maximum": 0.45,
+          "step": 0.01,
+          "visibleWhen": { "settingId": "generalEnhance", "equals": true }
+        },
+        { "id": "advancedDetails", "kind": "checkbox", "defaultValue": false },
+        {
+          "id": "detailPass",
+          "kind": "range",
+          "defaultValue": 0.35,
+          "minimum": 0,
+          "maximum": 0.7,
+          "step": 0.01,
+          "visibleWhen": { "settingId": "advancedDetails", "equals": true }
+        },
+        {
+          "id": "sharpen",
+          "kind": "range",
+          "defaultValue": 0.4,
+          "minimum": 0,
+          "maximum": 1,
+          "step": 0.01,
+          "visibleWhen": { "settingId": "advancedDetails", "equals": true }
+        },
+        { "id": "bodyEnhance", "kind": "checkbox", "defaultValue": false },
+        {
+          "id": "bodyDenoise",
+          "kind": "range",
+          "defaultValue": 0.2,
+          "minimum": 0,
+          "maximum": 0.3,
+          "step": 0.01,
+          "visibleWhen": { "settingId": "bodyEnhance", "equals": true }
+        },
+        {
+          "id": "faceDenoise",
+          "kind": "range",
+          "defaultValue": 0.2,
+          "minimum": 0,
+          "maximum": 0.3,
+          "step": 0.01,
+          "visibleWhen": { "settingId": "bodyEnhance", "equals": true }
+        }
+      ]
+    },
+    {
+      "id": "pro-upscaler",
+      "imageSlots": 1,
+      "acceptsPrompt": false,
+      "settings": [
+        { "id": "engine", "kind": "select", "defaultValue": "normal", "options": ["normal", "super-fast"] },
+        { "id": "upscale", "kind": "select", "defaultValue": "x2", "options": ["x2", "x4"] },
+        { "id": "enhancement", "kind": "checkbox", "defaultValue": true },
+        {
+          "id": "creativity",
+          "kind": "range",
+          "defaultValue": 30,
+          "minimum": 10,
+          "maximum": 40,
+          "step": 5,
+          "visibleWhen": { "settingId": "enhancement", "equals": true }
+        }
+      ]
+    },
+    {
+      "id": "reference-generator",
+      "imageSlots": 2,
+      "acceptsPrompt": false,
+      "settings": [
+        { "id": "colorStrength", "kind": "range", "defaultValue": 0.9, "minimum": 0, "maximum": 1, "step": 0.01 },
+        { "id": "creativity", "kind": "range", "defaultValue": 0.5, "minimum": 0, "maximum": 1, "step": 0.01 },
+        { "id": "structureStrength", "kind": "range", "defaultValue": 0.8, "minimum": 0, "maximum": 1, "step": 0.01 },
+        { "id": "enhancement", "kind": "checkbox", "defaultValue": true },
+        {
+          "id": "colorMatch",
+          "kind": "checkbox",
+          "defaultValue": false,
+          "visibleWhen": { "settingId": "enhancement", "equals": true }
+        }
+      ]
+    },
+    {
+      "id": "qwen-edit",
+      "imageSlots": 1,
+      "acceptsPrompt": true,
+      "settings": [
+        {
+          "id": "mode",
+          "kind": "select",
+          "defaultValue": "edit",
+          "options": ["edit", "reference-transfer", "consistency", "raw-enhancement"]
+        },
+        {
+          "id": "imageCount",
+          "kind": "select",
+          "defaultValue": "1",
+          "options": ["1", "2", "3"],
+          "visibleWhen": { "settingId": "mode", "equals": "edit" }
+        }
+      ]
+    }
+  ]
+}

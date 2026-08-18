@@ -5,6 +5,8 @@ import {
   acceptsStillImagePrompt,
   getStillImageCategory,
   isStillImageCategoryId,
+  STILL_IMAGE_CATEGORIES,
+  STILL_IMAGE_CATEGORY_IDS,
   stillImageSlotCount,
   visibleStillImageSettings,
   type StillImageCategoryId,
@@ -12,9 +14,11 @@ import {
 } from "./stillImageCategories.js";
 
 // The same cases are asserted in src/features/still-images/stillImageCategories.test.ts
-// against the frontend catalogue. These two files are the drift alarm for a pair
-// that cannot share a module: if a range bound, an option value, a slot rule or a
-// prompt rule changes on one side only, one of the two suites fails.
+// against the UI's reading of the catalogue. The table itself is now shared -- both
+// sides read data/stillImagePresets.json -- so what these two suites still guard is
+// the part that cannot be shared: the slot, prompt and visibility rules, which are
+// code and are mirrored. If one side's rule changes alone, one of the two suites
+// fails.
 //
 // Keep the tables below in the same order as the frontend copy so a diff between
 // the two files reads cleanly.
@@ -160,6 +164,56 @@ test("every range setting has both bounds and every select has options", () => {
       }
       if (setting.kind === "checkbox") {
         assert.equal(typeof setting.defaultValue, "boolean", `${where} default must be a boolean`);
+      }
+    }
+  }
+});
+
+// The table is data now, so the shape checks that used to be guaranteed by writing
+// it as TypeScript have to happen at load. Every one of these would otherwise reach
+// a ComfyUI node as a parameter of the wrong type, or as a default the server itself
+// rejects the moment an untouched preset is submitted.
+test("the shared table holds every preset, and holds them in a usable shape", () => {
+  assert.deepEqual(
+    STILL_IMAGE_CATEGORIES.map((category) => category.id),
+    [...STILL_IMAGE_CATEGORY_IDS],
+  );
+
+  for (const category of STILL_IMAGE_CATEGORIES) {
+    assert.ok(category.imageSlots >= 1, `${category.id} has no image slot`);
+    assert.equal(typeof category.acceptsPrompt, "boolean", `${category.id} acceptsPrompt`);
+
+    const ids = category.settings.map((setting) => setting.id);
+    assert.equal(new Set(ids).size, ids.length, `${category.id} lists a setting twice`);
+
+    for (const setting of category.settings) {
+      const label = `${category.id}.${setting.id}`;
+      assert.ok(["checkbox", "range", "select"].includes(setting.kind), `${label} kind`);
+
+      if (setting.kind === "select") {
+        assert.ok(setting.options?.length, `${label} has no options`);
+        // validatedSetting in stillImageRequest checks a submitted value against
+        // these, so a default outside them is a preset that cannot be submitted
+        // untouched.
+        assert.ok(setting.options?.includes(String(setting.defaultValue)), `${label} default is not an option`);
+      }
+
+      if (setting.kind === "checkbox") {
+        assert.equal(typeof setting.defaultValue, "boolean", `${label} default`);
+      }
+
+      if (setting.kind === "range") {
+        assert.equal(typeof setting.defaultValue, "number", `${label} default`);
+        assert.equal(typeof setting.minimum, "number", `${label} minimum`);
+        assert.equal(typeof setting.maximum, "number", `${label} maximum`);
+        const value = Number(setting.defaultValue);
+        assert.ok(value >= setting.minimum! && value <= setting.maximum!, `${label} default is outside its bounds`);
+      }
+
+      // A visibility rule pointing at a setting that does not exist hides the
+      // control forever, and the server would then drop it from every request.
+      if (setting.visibleWhen) {
+        assert.ok(ids.includes(setting.visibleWhen.settingId), `${label} depends on a setting that is not in this preset`);
       }
     }
   }

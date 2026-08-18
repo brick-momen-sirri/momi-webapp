@@ -1,17 +1,41 @@
 // The Still Images preset catalogue, as the server needs it for validation.
 //
-// MUST stay in step with src/features/still-images/stillImageCategories.ts. That
-// file owns the UI: labels, hints, icons, instruction copy. This one owns only
-// what a request can be judged against -- setting ids, kinds, defaults, ranges,
-// option values, visibility rules, and how many image slots a preset takes.
+// The table itself is data/stillImagePresets.json, which the UI reads too. It used
+// to be duplicated: this file held the validation table and
+// src/features/still-images/stillImageCategories.ts held its own copy with labels
+// attached, and the two were kept honest by asserting the same truth table on both
+// sides -- widen a range in one and the server rejected a value the UI happily
+// offered. There is now one table, and this file only gives it types and the rules
+// that read it.
 //
-// The two files are deliberately not shared through a package: backend/ compiles
-// with rootDir "src" and cannot reach into the app tree, and the frontend copy
-// pulls in lucide icons the server has no use for. Following the precedent set by
-// creditEstimator.ts and saveNumber.ts/jobFilters.ts, the pair is kept honest by
-// asserting the same truth table on both sides -- see stillImageCategories.test.ts
-// and its counterpart in src/features/still-images/. A drift in a range bound or
-// an option value fails one of them.
+// The rules below are still mirrored on the UI side, because the two cannot import
+// each other's code (rootDir "src" and NodeNext specifiers here, bundler resolution
+// and lucide there). They are three small functions rather than a hundred-line
+// table, and stillImageCategories.test.ts asserts them against their counterparts.
+//
+// Ports the General Enhancement controls from momi-forge (General_Enhancement_v04.py,
+// graph workflow_api_flux_dev_1.19). Field names differ; the graph wiring will
+// need the correspondence:
+//   generalEnhance   -> general_enhance          (routing)
+//   details          -> details                  -> 37.strength_model
+//   generalDenoise   -> general_denoise          -> 32.denoise
+//   advancedDetails  -> advance_details          (routing)
+//   detailPass       -> additional_detail_pass   -> 23.denoise
+//   sharpen          -> sharpen                  -> 74.blend_factor
+//   bodyEnhance      -> body_enhance             (routing)
+//   bodyDenoise      -> body_enhancement_denoise -> 52.denoise
+//   faceDenoise      -> face_enhancement_denoise -> 54.denoise
+//
+// The three checkboxes are not graph booleans -- each rewires which branch feeds
+// the save node, over an 8-case matrix. See GENERAL_ENHANCEMENT_WORKFLOW_README.md
+// in momi-forge.
+//
+// Deliberately not ported: the mask editor. forge exposes mask_b64 and
+// has_drawn_mask, which route 13.mask between nodes 85 and 88. This UI has no
+// mask surface, so the wiring must always take the generated-mask route
+// (13.mask <- 85), the same as forge's has_drawn_mask = false.
+
+import presets from "./data/stillImagePresets.json" with { type: "json" };
 
 export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit";
 
@@ -65,141 +89,65 @@ export const STILL_IMAGE_CATEGORY_IDS: readonly StillImageCategoryId[] = [
   "qwen-edit",
 ];
 
-export const STILL_IMAGE_CATEGORIES: readonly StillImageCategoryDefinition[] = [
-  {
-    // Ports the General Enhancement controls from momi-forge (General_Enhancement_v04.py,
-    // graph workflow_api_flux_dev_1.19). Field names differ; the graph wiring will
-    // need the correspondence:
-    //   generalEnhance   -> general_enhance          (routing)
-    //   details          -> details                  -> 37.strength_model
-    //   generalDenoise   -> general_denoise          -> 32.denoise
-    //   advancedDetails  -> advance_details          (routing)
-    //   detailPass       -> additional_detail_pass   -> 23.denoise
-    //   sharpen          -> sharpen                  -> 74.blend_factor
-    //   bodyEnhance      -> body_enhance             (routing)
-    //   bodyDenoise      -> body_enhancement_denoise -> 52.denoise
-    //   faceDenoise      -> face_enhancement_denoise -> 54.denoise
-    //
-    // The three checkboxes are not graph booleans -- each rewires which branch feeds
-    // the save node, over an 8-case matrix. See GENERAL_ENHANCEMENT_WORKFLOW_README.md
-    // in momi-forge.
-    //
-    // Deliberately not ported: the mask editor. forge exposes mask_b64 and
-    // has_drawn_mask, which route 13.mask between nodes 85 and 88. This UI has no
-    // mask surface, so the wiring must always take the generated-mask route
-    // (13.mask <- 85), the same as forge's has_drawn_mask = false.
-    id: "general-enhancement",
-    imageSlots: 1,
-    acceptsPrompt: true,
-    settings: [
-      { id: "generalEnhance", kind: "checkbox", defaultValue: true },
-      { id: "details", kind: "range", defaultValue: 1, minimum: 0, maximum: 2, step: 0.05 },
-      {
-        id: "generalDenoise",
-        kind: "range",
-        defaultValue: 0.1,
-        minimum: 0,
-        maximum: 0.45,
-        step: 0.01,
-        visibleWhen: { settingId: "generalEnhance", equals: true },
-      },
-      { id: "advancedDetails", kind: "checkbox", defaultValue: false },
-      {
-        id: "detailPass",
-        kind: "range",
-        defaultValue: 0.35,
-        minimum: 0,
-        maximum: 0.7,
-        step: 0.01,
-        visibleWhen: { settingId: "advancedDetails", equals: true },
-      },
-      {
-        id: "sharpen",
-        kind: "range",
-        defaultValue: 0.4,
-        minimum: 0,
-        maximum: 1,
-        step: 0.01,
-        visibleWhen: { settingId: "advancedDetails", equals: true },
-      },
-      { id: "bodyEnhance", kind: "checkbox", defaultValue: false },
-      {
-        id: "bodyDenoise",
-        kind: "range",
-        defaultValue: 0.2,
-        minimum: 0,
-        maximum: 0.3,
-        step: 0.01,
-        visibleWhen: { settingId: "bodyEnhance", equals: true },
-      },
-      {
-        id: "faceDenoise",
-        kind: "range",
-        defaultValue: 0.2,
-        minimum: 0,
-        maximum: 0.3,
-        step: 0.01,
-        visibleWhen: { settingId: "bodyEnhance", equals: true },
-      },
-    ],
-  },
-  {
-    id: "pro-upscaler",
-    imageSlots: 1,
-    acceptsPrompt: false,
-    settings: [
-      { id: "engine", kind: "select", defaultValue: "normal", options: ["normal", "super-fast"] },
-      { id: "upscale", kind: "select", defaultValue: "x2", options: ["x2", "x4"] },
-      { id: "enhancement", kind: "checkbox", defaultValue: true },
-      {
-        id: "creativity",
-        kind: "range",
-        defaultValue: 30,
-        minimum: 10,
-        maximum: 40,
-        step: 5,
-        visibleWhen: { settingId: "enhancement", equals: true },
-      },
-    ],
-  },
-  {
-    id: "reference-generator",
-    imageSlots: 2,
-    acceptsPrompt: false,
-    settings: [
-      { id: "colorStrength", kind: "range", defaultValue: 0.9, minimum: 0, maximum: 1, step: 0.01 },
-      { id: "creativity", kind: "range", defaultValue: 0.5, minimum: 0, maximum: 1, step: 0.01 },
-      { id: "structureStrength", kind: "range", defaultValue: 0.8, minimum: 0, maximum: 1, step: 0.01 },
-      { id: "enhancement", kind: "checkbox", defaultValue: true },
-      {
-        id: "colorMatch",
-        kind: "checkbox",
-        defaultValue: false,
-        visibleWhen: { settingId: "enhancement", equals: true },
-      },
-    ],
-  },
-  {
-    id: "qwen-edit",
-    imageSlots: 1,
-    acceptsPrompt: true,
-    settings: [
-      {
-        id: "mode",
-        kind: "select",
-        defaultValue: "edit",
-        options: ["edit", "reference-transfer", "consistency", "raw-enhancement"],
-      },
-      {
-        id: "imageCount",
-        kind: "select",
-        defaultValue: "1",
-        options: ["1", "2", "3"],
-        visibleWhen: { settingId: "mode", equals: "edit" },
-      },
-    ],
-  },
-];
+/**
+ * The catalogue, as read from the shared table.
+ *
+ * Asserted rather than parsed: this file ships with the JSON and tsc emits the two
+ * together, so a shape mismatch is a broken build, not untrusted input. What the
+ * cast cannot check -- that every id is a known preset, every kind is a real kind,
+ * and every default falls inside its own bounds -- assertCatalogueShape does, once,
+ * at load. A malformed table would otherwise surface as a graph parameter that is
+ * quietly the wrong type.
+ */
+export const STILL_IMAGE_CATEGORIES: readonly StillImageCategoryDefinition[] = assertCatalogueShape(
+  presets.presets as unknown as StillImageCategoryDefinition[],
+);
+
+function assertCatalogueShape(categories: StillImageCategoryDefinition[]) {
+  const seen = new Set<string>();
+  for (const category of categories) {
+    if (!isStillImageCategoryId(category.id)) {
+      throw new Error(`stillImagePresets.json names an unknown preset: ${String(category.id)}`);
+    }
+    if (seen.has(category.id)) throw new Error(`stillImagePresets.json lists ${category.id} twice.`);
+    seen.add(category.id);
+    if (!Number.isInteger(category.imageSlots) || category.imageSlots < 1) {
+      throw new Error(`stillImagePresets.json gives ${category.id} an impossible imageSlots.`);
+    }
+    for (const setting of category.settings) {
+      assertSettingShape(category.id, setting);
+    }
+  }
+  const missing = STILL_IMAGE_CATEGORY_IDS.filter((id) => !seen.has(id));
+  if (missing.length) throw new Error(`stillImagePresets.json is missing presets: ${missing.join(", ")}`);
+  return categories;
+}
+
+function assertSettingShape(categoryId: string, setting: StillImageSettingDefinition) {
+  const label = `${categoryId} setting ${setting.id}`;
+  if (setting.kind === "select") {
+    if (!setting.options?.length) throw new Error(`${label} is a select with no options.`);
+    if (!setting.options.includes(String(setting.defaultValue))) {
+      throw new Error(`${label} defaults to a value that is not one of its options.`);
+    }
+    return;
+  }
+  if (setting.kind === "checkbox") {
+    if (typeof setting.defaultValue !== "boolean") throw new Error(`${label} is a checkbox with a non-boolean default.`);
+    return;
+  }
+  // Range. The bounds are what protect the graph from a value it cannot use, so a
+  // default outside them would be a preset that fails the moment it is submitted
+  // untouched.
+  const { defaultValue, minimum, maximum } = setting;
+  if (typeof defaultValue !== "number" || minimum === undefined || maximum === undefined) {
+    throw new Error(`${label} is a range without a numeric default and bounds.`);
+  }
+  if (minimum > maximum) throw new Error(`${label} has a minimum above its maximum.`);
+  if (defaultValue < minimum || defaultValue > maximum) {
+    throw new Error(`${label} defaults to ${defaultValue}, outside its own ${minimum}..${maximum} bounds.`);
+  }
+}
 
 export function isStillImageCategoryId(value: unknown): value is StillImageCategoryId {
   return typeof value === "string" && STILL_IMAGE_CATEGORY_IDS.includes(value as StillImageCategoryId);
