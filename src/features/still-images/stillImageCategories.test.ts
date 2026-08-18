@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getStillImageCategory,
+  STILL_IMAGE_CATEGORIES,
   shouldShowStillImagePrompt,
   stillImageSlotCount,
   visibleStillImageSettings,
@@ -11,9 +12,11 @@ import {
 } from "./stillImageCategories";
 
 // The same cases are asserted in backend/src/stillImageCategories.test.ts against
-// the server's copy of this catalogue. These two files are the drift alarm for a
-// pair that cannot share a module: if a range bound, an option value, a slot rule
-// or a prompt rule changes on one side only, one of the two suites fails.
+// the server's reading of the catalogue. The table itself is now shared -- both
+// sides read backend/src/data/stillImagePresets.json -- so what these two suites
+// still guard is the part that cannot be shared: the slot, prompt and visibility
+// rules, which are code and are mirrored. If one side's rule changes alone, one of
+// the two suites fails.
 //
 // Keep the tables below in the same order as the backend copy so a diff between
 // the two files reads cleanly.
@@ -174,5 +177,48 @@ describe("still image catalogue shape", () => {
         expect(ids, `${categoryId}.${setting.id} visibleWhen`).toContain(setting.visibleWhen.settingId);
       }
     }
+  });
+});
+
+// The wording lives here and the data lives in the shared table, so the merge is
+// where the two can disagree. A missing label would otherwise ship a control
+// reading "faceDenoise", or a dropdown offering "raw-enhancement".
+describe("the shared preset table", () => {
+  it("gives every preset, setting and option its UI wording", () => {
+    for (const category of STILL_IMAGE_CATEGORIES) {
+      expect(category.label).toBeTruthy();
+      expect(category.shortDescription).toBeTruthy();
+      expect(category.instructions).toBeTruthy();
+      for (const setting of category.settings) {
+        expect(setting.label, `${category.id}.${setting.id}`).toBeTruthy();
+        for (const option of setting.options ?? []) {
+          expect(option.label, `${category.id}.${setting.id}.${option.value}`).toBeTruthy();
+          // The value is what the server validates against, so wording may never
+          // replace it.
+          expect(option.value).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it("takes bounds and defaults from the table rather than restating them", () => {
+    // Spot-checked against stillImagePresets.json: these are the values the server
+    // enforces, and reading them from the same file is the whole point.
+    const details = getStillImageCategory("general-enhancement").settings.find((setting) => setting.id === "details");
+    expect(details).toMatchObject({ kind: "range", defaultValue: 1, minimum: 0, maximum: 2, step: 0.05 });
+
+    const upscale = getStillImageCategory("pro-upscaler").settings.find((setting) => setting.id === "upscale");
+    expect(upscale?.options?.map((option) => option.value)).toEqual(["x2", "x4"]);
+    expect(upscale?.options?.map((option) => option.label)).toEqual(["2x", "4x"]);
+  });
+
+  it("offers a prompt field only where the preset accepts one", () => {
+    // acceptsPrompt in the shared table decides this, and the server rejects a
+    // prompt on a preset that does not take one -- so a field drawn here that the
+    // table forbids would be a 400 the artist only meets at Generate.
+    expect(getStillImageCategory("general-enhancement").prompt).toBeDefined();
+    expect(getStillImageCategory("qwen-edit").prompt).toBeDefined();
+    expect(getStillImageCategory("pro-upscaler").prompt).toBeUndefined();
+    expect(getStillImageCategory("reference-generator").prompt).toBeUndefined();
   });
 });

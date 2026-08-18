@@ -1,20 +1,22 @@
 // The Still Images preset catalogue, as the UI needs it.
 //
-// The validation-relevant half MUST stay in step with backend/src/stillImageCategories.ts:
-// setting ids, kinds, defaults, range bounds, select option values, visibility
-// rules, and the slot/prompt rules below. This file owns the presentation on top
-// of that -- labels, hints, icons, instruction copy -- which the server has no
-// use for.
+// The table is backend/src/data/stillImagePresets.json, which the server validates
+// against. It used to be duplicated here with labels attached, and the two copies
+// were kept honest by asserting the same truth table on both sides -- widen a range
+// in one and the server rejected a value this UI happily offered. This file now
+// reads the same data and adds only what the server has no use for: labels, hints,
+// icons, instruction copy and option wording.
 //
-// The pair cannot share a module: backend/ compiles with rootDir "src" and cannot
-// reach into the app tree, and this copy pulls in lucide. Following the precedent
-// of creditEstimator.ts and saveNumber.ts/jobFilters.ts, the two are kept honest
-// by asserting the same truth table on both sides -- see the sibling test file and
-// backend/src/stillImageCategories.test.ts. Widen a range here without widening it
-// there and the server rejects a value this UI happily offers.
+// Read from backend/src rather than a neutral shared folder because backend/
+// compiles with rootDir "src" and cannot reach outside it, while this side is
+// bundler-resolved and can read anything inside the repo. Data only -- the two
+// still cannot import each other's code, which is why the slot and prompt rules at
+// the bottom are mirrored (and asserted against their counterparts in
+// backend/src/stillImageCategories.test.ts).
 
 import { ImageIcon, Images, ScanSearch, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import presets from "../../../backend/src/data/stillImagePresets.json";
 import type { UploadedImage } from "../../types";
 
 export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit";
@@ -71,188 +73,172 @@ export type StillImageCategoryState = {
 
 export type StillImagesState = Record<StillImageCategoryId, StillImageCategoryState>;
 
-export const STILL_IMAGE_CATEGORIES: ReadonlyArray<StillImageCategoryDefinition> = [
-  {
-    id: "general-enhancement",
+/** How a setting is worded. Purely presentational; the server never sees any of it. */
+type SettingPresentation = {
+  label: string;
+  hint?: string;
+  /** Wording for each option value in the shared table, keyed by that value. */
+  optionLabels?: Record<string, string>;
+};
+
+type CategoryPresentation = {
+  label: string;
+  shortDescription: string;
+  instructions: string;
+  icon: LucideIcon;
+  prompt?: StillImageCategoryDefinition["prompt"];
+  settings: Record<string, SettingPresentation>;
+};
+
+const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
+  "general-enhancement": {
     label: "General Enhancement",
     shortDescription: "Refine detail, clarity, faces, and overall image quality.",
     instructions: "Upload one image, optionally describe the desired finish, then adjust enhancement strength.",
     icon: Sparkles,
-    imageSlots: 1,
     prompt: {
       label: "Enhancement prompt",
       placeholder: "Describe the details or finish you want to preserve or enhance...",
       hint: "Optional. Guides the enhancement passes; leave empty to let the captioner describe the image on its own.",
     },
-    settings: [
-      { id: "generalEnhance", label: "Enable general enhancement", kind: "checkbox", defaultValue: true },
-      { id: "details", label: "Details", kind: "range", defaultValue: 1, minimum: 0, maximum: 2, step: 0.05 },
-      {
-        id: "generalDenoise",
-        label: "General enhance",
-        kind: "range",
-        defaultValue: 0.1,
-        minimum: 0,
-        maximum: 0.45,
-        step: 0.01,
-        visibleWhen: { settingId: "generalEnhance", equals: true },
-      },
-      { id: "advancedDetails", label: "Advanced details", kind: "checkbox", defaultValue: false },
-      {
-        id: "detailPass",
-        label: "Additional detail pass",
-        kind: "range",
-        defaultValue: 0.35,
-        minimum: 0,
-        maximum: 0.7,
-        step: 0.01,
-        visibleWhen: { settingId: "advancedDetails", equals: true },
-      },
-      {
-        id: "sharpen",
-        label: "Sharpen",
-        kind: "range",
-        defaultValue: 0.4,
-        minimum: 0,
-        maximum: 1,
-        step: 0.01,
-        visibleWhen: { settingId: "advancedDetails", equals: true },
-      },
-      { id: "bodyEnhance", label: "Enable body enhancement", kind: "checkbox", defaultValue: false },
-      {
-        id: "bodyDenoise",
-        label: "Body enhancement",
-        kind: "range",
-        defaultValue: 0.2,
-        minimum: 0,
-        maximum: 0.3,
-        step: 0.01,
-        hint: "Strength of the body and person detail pass.",
-        visibleWhen: { settingId: "bodyEnhance", equals: true },
-      },
-      {
-        id: "faceDenoise",
-        label: "Face enhancement",
-        kind: "range",
-        defaultValue: 0.2,
-        minimum: 0,
-        maximum: 0.3,
-        step: 0.01,
-        hint: "Strength of the face detail pass.",
-        visibleWhen: { settingId: "bodyEnhance", equals: true },
-      },
-    ],
+    settings: {
+      generalEnhance: { label: "Enable general enhancement" },
+      details: { label: "Details" },
+      generalDenoise: { label: "General enhance" },
+      advancedDetails: { label: "Advanced details" },
+      detailPass: { label: "Additional detail pass" },
+      sharpen: { label: "Sharpen" },
+      bodyEnhance: { label: "Enable body enhancement" },
+      bodyDenoise: { label: "Body enhancement", hint: "Strength of the body and person detail pass." },
+      faceDenoise: { label: "Face enhancement", hint: "Strength of the face detail pass." },
+    },
   },
-  {
-    id: "pro-upscaler",
+  "pro-upscaler": {
     label: "Pro Upscaler",
     shortDescription: "Increase resolution with optional detail enhancement.",
     instructions: "Upload one source image and choose the upscale and enhancement preferences.",
     icon: ScanSearch,
-    imageSlots: 1,
-    settings: [
-      {
-        id: "engine",
-        label: "Engine",
-        kind: "select",
-        defaultValue: "normal",
-        options: [
-          { label: "Normal", value: "normal" },
-          { label: "Super Fast", value: "super-fast" },
-        ],
-      },
-      {
-        id: "upscale",
-        label: "Upscale value",
-        kind: "select",
-        defaultValue: "x2",
-        options: [
-          { label: "2x", value: "x2" },
-          { label: "4x", value: "x4" },
-        ],
-      },
-      { id: "enhancement", label: "Enable enhancement", kind: "checkbox", defaultValue: true },
-      {
-        id: "creativity",
-        label: "Creativity",
-        kind: "range",
-        defaultValue: 30,
-        minimum: 10,
-        maximum: 40,
-        step: 5,
-        visibleWhen: { settingId: "enhancement", equals: true },
-      },
-    ],
+    settings: {
+      engine: { label: "Engine", optionLabels: { normal: "Normal", "super-fast": "Super Fast" } },
+      upscale: { label: "Upscale value", optionLabels: { x2: "2x", x4: "4x" } },
+      enhancement: { label: "Enable enhancement" },
+      creativity: { label: "Creativity" },
+    },
   },
-  {
-    id: "reference-generator",
+  "reference-generator": {
     label: "Reference Generator",
     shortDescription: "Transfer visual qualities from a reference image.",
     instructions: "Upload a main image and a reference image, then balance color, creativity, and structure.",
     icon: Images,
-    imageSlots: 2,
-    settings: [
-      { id: "colorStrength", label: "Color strength", kind: "range", defaultValue: 0.9, minimum: 0, maximum: 1, step: 0.01 },
-      { id: "creativity", label: "Creativity", kind: "range", defaultValue: 0.5, minimum: 0, maximum: 1, step: 0.01 },
-      {
-        id: "structureStrength",
-        label: "Structure strength",
-        kind: "range",
-        defaultValue: 0.8,
-        minimum: 0,
-        maximum: 1,
-        step: 0.01,
-      },
-      { id: "enhancement", label: "Enable enhancement", kind: "checkbox", defaultValue: true },
-      {
-        id: "colorMatch",
-        label: "Color match",
-        kind: "checkbox",
-        defaultValue: false,
-        visibleWhen: { settingId: "enhancement", equals: true },
-      },
-    ],
+    settings: {
+      colorStrength: { label: "Color strength" },
+      creativity: { label: "Creativity" },
+      structureStrength: { label: "Structure strength" },
+      enhancement: { label: "Enable enhancement" },
+      colorMatch: { label: "Color match" },
+    },
   },
-  {
-    id: "qwen-edit",
+  "qwen-edit": {
     label: "Qwen Edit",
     shortDescription: "Apply prompt-guided edits using up to three images.",
     instructions: "Choose the number of input images, upload them, and describe the intended edit.",
     icon: ImageIcon,
-    imageSlots: 1,
     prompt: {
       label: "Edit prompt",
       placeholder: "Describe the edit or target result...",
       hint: "Use natural instruction language. Ignored by Raw Enhancement, which drives itself from the captioner.",
     },
-    settings: [
-      {
-        id: "mode",
+    settings: {
+      mode: {
         label: "Mode",
-        kind: "select",
-        defaultValue: "edit",
-        options: [
-          { label: "Edit", value: "edit" },
-          { label: "Reference Transfer", value: "reference-transfer" },
-          { label: "Consistency", value: "consistency" },
-          { label: "Raw Enhancement", value: "raw-enhancement" },
-        ],
+        optionLabels: {
+          edit: "Edit",
+          "reference-transfer": "Reference Transfer",
+          consistency: "Consistency",
+          "raw-enhancement": "Raw Enhancement",
+        },
       },
-      {
-        id: "imageCount",
-        label: "Image count",
-        kind: "select",
-        defaultValue: "1",
-        options: [
-          { label: "1 image", value: "1" },
-          { label: "2 images", value: "2" },
-          { label: "3 images", value: "3" },
-        ],
-        visibleWhen: { settingId: "mode", equals: "edit" },
-      },
-    ],
+      imageCount: { label: "Image count", optionLabels: { "1": "1 image", "2": "2 images", "3": "3 images" } },
+    },
   },
-];
+};
+
+/** The shape of one entry in the shared table, which carries no wording. */
+type SharedSetting = {
+  id: string;
+  kind: StillImageSettingDefinition["kind"];
+  defaultValue: StillImageSettingValue;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+  options?: string[];
+  visibleWhen?: { settingId: string; equals: StillImageSettingValue };
+};
+
+type SharedCategory = {
+  id: string;
+  imageSlots: number;
+  acceptsPrompt: boolean;
+  settings: SharedSetting[];
+};
+
+export const STILL_IMAGE_CATEGORIES: ReadonlyArray<StillImageCategoryDefinition> = (
+  presets.presets as unknown as SharedCategory[]
+).map(buildCategory);
+
+/**
+ * One preset, as the shared table plus this file's wording.
+ *
+ * Throws rather than falling back to the raw id. A setting the artist sees labelled
+ * "faceDenoise", or a mode option reading "raw-enhancement", is a bug that ships
+ * silently -- and the catalogue is a module constant, so this fires the moment
+ * anything imports it, including every test in this directory.
+ */
+function buildCategory(shared: SharedCategory): StillImageCategoryDefinition {
+  const presentation = PRESENTATION[shared.id as StillImageCategoryId];
+  if (!presentation) {
+    throw new Error(`stillImagePresets.json has a preset with no UI wording: ${shared.id}`);
+  }
+
+  return {
+    id: shared.id as StillImageCategoryId,
+    label: presentation.label,
+    shortDescription: presentation.shortDescription,
+    instructions: presentation.instructions,
+    icon: presentation.icon,
+    imageSlots: shared.imageSlots,
+    // Only where the preset actually takes one: the field is drawn from this, and
+    // the server rejects a prompt on a preset whose acceptsPrompt is false.
+    prompt: shared.acceptsPrompt ? presentation.prompt : undefined,
+    settings: shared.settings.map((setting) => buildSetting(shared.id, setting, presentation)),
+  };
+}
+
+function buildSetting(
+  categoryId: string,
+  shared: SharedSetting,
+  presentation: CategoryPresentation,
+): StillImageSettingDefinition {
+  const wording = presentation.settings[shared.id];
+  if (!wording) throw new Error(`stillImagePresets.json setting ${categoryId}.${shared.id} has no UI wording.`);
+
+  return {
+    id: shared.id,
+    label: wording.label,
+    hint: wording.hint,
+    kind: shared.kind,
+    defaultValue: shared.defaultValue,
+    minimum: shared.minimum,
+    maximum: shared.maximum,
+    step: shared.step,
+    options: shared.options?.map((value) => {
+      const label = wording.optionLabels?.[value];
+      if (!label) throw new Error(`stillImagePresets.json option ${categoryId}.${shared.id}.${value} has no UI wording.`);
+      return { label, value };
+    }),
+    visibleWhen: shared.visibleWhen,
+  };
+}
 
 const QWEN_MODE_GUIDANCE: Record<string, StillImageModeGuidance> = {
   edit: {
