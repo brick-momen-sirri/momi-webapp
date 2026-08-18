@@ -48,3 +48,6 @@ test-results/
 Thumbs.db
 *.swp
 *.swo
+
+# Node diagnostic reports (--report-on-fatalerror), written only on a crash.
+backend/diagnostic-reports/

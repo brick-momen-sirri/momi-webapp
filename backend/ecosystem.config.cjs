@@ -58,6 +58,34 @@ const processSafety = {
   // and flush job state before PM2 sends SIGKILL (default is only 1600ms).
   kill_timeout: 32000,
   max_memory_restart: "1500M",
+  // Diagnostic reports, because this deployment dies without leaving evidence.
+  //
+  // Six processes have exited with 3221226505 (0xC0000409, the Windows fail-fast
+  // code) since 2026-07-14 -- momi-backend twice, momi-web once, momi-dispatcher
+  // three times, the last two on 2026-08-17. Every one of them left nothing to
+  // work from: no JS stack in the pm2 error log, no Application event, no WER
+  // dump. PM2 restarted each within seconds, which is why six went unnoticed.
+  //
+  // Be clear about what this does and does not buy. Measured on this host with
+  // these flags: a V8 fatal error (heap exhaustion) writes a report, an uncaught
+  // exception writes a report, and process.abort() writes nothing. None of the
+  // three reproduces 3221226505 -- they exit 134, 1 and 134. Since stderr does
+  // reach the pm2 error log and a V8 fatal error prints a long stack there, the
+  // silence at both crashes is evidence that the real fault is a native or CRT
+  // fail-fast below the JS layer, which is exactly the path the reporter cannot
+  // hook. So these flags are cheap coverage for the failure modes they do catch,
+  // not a fix for the one being hunted. Catching that needs a post-mortem native
+  // dump: WER LocalDumps for node.exe, which is an HKLM change made by hand.
+  //
+  // Reports are a few hundred KB and only on a crash. Reading one:
+  // report.<date>.<time>.<pid>.0.001.json in the directory below, where
+  // "header.trigger" says which flag fired and javascriptStack/nativeStack say
+  // where.
+  node_args: [
+    "--report-on-fatalerror",
+    "--report-uncaught-exception",
+    "--report-directory=C:/Momi-Animation/backend/diagnostic-reports",
+  ],
 };
 
 const sharedStateEnv = {
