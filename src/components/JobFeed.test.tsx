@@ -331,6 +331,50 @@ describe("archive view", () => {
   });
 });
 
+// The switch Still Images already had. Both sections now render the same control
+// from the same component, so "consistent" is structural rather than a promise.
+describe("list and grid layout", () => {
+  it("swaps the cards for a contact sheet and back", async () => {
+    const user = userEvent.setup();
+    renderFeed([job({ id: "a", prompt: "a tower at dusk", status: "completed" })]);
+
+    // A card carries the prompt, the inputs and the whole toolbar; a tile does not.
+    expect(screen.getByText("a tower at dusk")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Grid" }));
+    const tile = screen.getByRole("button", { name: "Show this result in the full card" });
+    expect(screen.queryByText("a tower at dusk")).toBeNull();
+
+    await user.click(tile);
+    expect(screen.getByText("a tower at dusk")).toBeInTheDocument();
+    // Addressable, so the panel can scroll to the card the tile opened rather than
+    // dropping the artist at the top of the feed.
+    expect(document.getElementById("result-card-a")).toBeInTheDocument();
+  });
+
+  it("starts in the card layout", () => {
+    // The default stays what it has always been: nobody's feed changes shape on
+    // upgrade.
+    renderFeed([job({ id: "a", prompt: "a tower at dusk" })]);
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("the archive switch", () => {
+  it("asks the host to switch views, in either direction", async () => {
+    const user = userEvent.setup();
+    const onToggleArchiveView = vi.fn();
+    renderFeed([job()], { onToggleArchiveView });
+
+    // Already active, so pressing Active is a no-op rather than a toggle.
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(onToggleArchiveView).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Archived" }));
+    expect(onToggleArchiveView).toHaveBeenCalledOnce();
+  });
+});
+
 describe("job actions", () => {
   it("offers cancel on a running job and passes it to the handler", async () => {
     const user = userEvent.setup();

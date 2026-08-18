@@ -576,6 +576,7 @@ function App() {
               users={workspaceUsers}
               projects={projects}
               archiveView={showArchivedJobs}
+              onToggleArchiveView={handleToggleArchivedView}
               favoriteJobIds={favoriteJobIds}
               // Judged by the preset reader, not the Animation one: these jobs
               // carry no model, resolution or duration, which is most of what

@@ -1,19 +1,4 @@
-import {
-  AlertTriangle,
-  Calendar,
-  CheckCircle2,
-  Download,
-  Folder,
-  Hash,
-  ImageIcon,
-  Images,
-  Loader2,
-  LayoutGrid,
-  Maximize2,
-  Rows3,
-  Search,
-  UserRound,
-} from "lucide-react";
+import { AlertTriangle, Calendar, Download, Folder, Hash, ImageIcon, Images, Maximize2, Search, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   StillImageCategoryDefinition,
@@ -42,12 +27,14 @@ import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
-import { cn } from "../utils/classNames";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
 import { ImageCompareSlider } from "./ImageCompareSlider";
 import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
+import { ResultTile } from "./ResultTile";
+import { resultCardElementId } from "../utils/resultCard";
+import { ArchiveViewToggle, JobStatusBadge, ResultLayoutToggle, type ResultLayout } from "./ResultViewControls";
 import { UseAsInputMenu } from "./UseAsInputMenu";
 
 type StillImagesWorkspaceProps = {
@@ -65,6 +52,8 @@ type StillImagesWorkspaceProps = {
   // download, archive or move.
   projects?: Project[];
   archiveView?: boolean;
+  /** Switches the panel between active results and the archive, as Animation does. */
+  onToggleArchiveView?: () => void;
   favoriteJobIds?: Set<string>;
   canReuseSettings?: (job: Job) => boolean;
   /** Chain this result into another preset as its first input. */
@@ -96,7 +85,7 @@ export function StillImagesWorkspace({
   const CategoryIcon = category.icon;
   const targetFolder = selectedProject?.folders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
   const [filters, setFilters] = useState(DEFAULT_STILL_IMAGE_RESULT_FILTERS);
-  const [layout, setLayout] = useState<StillImageResultLayout>("list");
+  const [layout, setLayout] = useState<ResultLayout>("list");
   // Which card to land on after leaving the grid.
   const [focusJobId, setFocusJobId] = useState<string | null>(null);
   const visibleJobs = useMemo(() => filterStillImageJobs(jobs, filters), [jobs, filters]);
@@ -110,7 +99,7 @@ export function StillImagesWorkspace({
     // Left set rather than cleared here: a stale id costs nothing, because this only
     // re-runs when the layout or the chosen card changes, and clearing it would be a
     // state write from inside an effect for no gain.
-    const card = document.getElementById(stillJobCardElementId(focusJobId));
+    const card = document.getElementById(resultCardElementId(focusJobId));
     card?.scrollIntoView?.({ block: "start" });
   }, [layout, focusJobId]);
 
@@ -131,9 +120,20 @@ export function StillImagesWorkspace({
                 Saving to {targetFolder.name}
               </span>
             ) : null}
-            <span className="text-sm font-semibold text-stone-500">{resultCountLabel(visibleJobs.length, jobs.length, filtering)}</span>
+            <span className="text-sm font-semibold text-stone-500">
+              {resultCountLabel(visibleJobs.length, jobs.length, filtering)}
+            </span>
           </div>
-          <StillImageResultLayoutToggle layout={layout} onChange={setLayout} />
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {/* The same control the Animation feed carries, from the same component,
+                so the two sections cannot drift apart on what "Archived" looks like
+                or does. Absent when the host does not wire it, which keeps the panel
+                usable in tests and previews. */}
+            {actions.onToggleArchiveView ? (
+              <ArchiveViewToggle archiveView={actions.archiveView ?? false} onToggle={actions.onToggleArchiveView} />
+            ) : null}
+            <ResultLayoutToggle layout={layout} onChange={setLayout} />
+          </div>
         </div>
         {jobs.length ? (
           <StillImageResultFilterBar
@@ -151,9 +151,11 @@ export function StillImagesWorkspace({
           // for a scannable contact sheet, and a tile switches back to the cards.
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {visibleJobs.map((job) => (
-              <StillImageResultTile
+              <ResultTile
                 key={job.id}
                 job={job}
+                label={job.modelType}
+                chip={job.workflowOptions?.save?.cameraNumber}
                 onOpen={() => {
                   setFocusJobId(job.id);
                   setLayout("list");
@@ -205,50 +207,6 @@ export function StillImagesWorkspace({
 function resultCountLabel(shown: number, total: number, filtering: boolean) {
   if (filtering) return `${shown} of ${total} result${total === 1 ? "" : "s"}`;
   return `${total} result${total === 1 ? "" : "s"}`;
-}
-
-type StillImageResultLayout = "list" | "grid";
-
-/** Ties a grid tile to the card it opens. */
-function stillJobCardElementId(jobId: string) {
-  return `still-job-${jobId}`;
-}
-
-function StillImageResultLayoutToggle({
-  layout,
-  onChange,
-}: {
-  layout: StillImageResultLayout;
-  onChange: (layout: StillImageResultLayout) => void;
-}) {
-  const options = [
-    { value: "list", label: "List", icon: Rows3 },
-    { value: "grid", label: "Grid", icon: LayoutGrid },
-  ] as const;
-
-  return (
-    <div className="flex shrink-0 items-center gap-1 rounded-md border border-line bg-mist/60 p-1">
-      {options.map((option) => {
-        const Icon = option.icon;
-        const selected = option.value === layout;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            aria-pressed={selected}
-            className={cn(
-              "flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition",
-              selected ? "bg-white text-ink shadow-card" : "text-stone-500 hover:text-ink",
-            )}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 const FILTER_SELECT_CLASS =
@@ -337,64 +295,6 @@ function StillImageResultFilterBar({
   );
 }
 
-/**
- * One result as a contact-sheet tile.
- *
- * The card rendition, not the original: scrolling a grid of fifty must cost fifty
- * small requests, because these files routinely pass 100 MB and nothing in this
- * panel may ever load one.
- */
-function StillImageResultTile({ job, onOpen }: { job: Job; onOpen: () => void }) {
-  const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === job.workflowOptions?.stillImage?.categoryId);
-  const PresetIcon = preset?.icon ?? ImageIcon;
-  const resultUrl = job.resultUrl ?? job.thumbnailUrl;
-  const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
-
-  return (
-    <article className="overflow-hidden rounded-lg border border-line bg-white shadow-card">
-      <button
-        type="button"
-        onClick={onOpen}
-        // Labelled explicitly: the tile's only content is the result image, whose
-        // alt text is a filename, so without this the control announces itself as
-        // "20260814_pro-upscaler_1234_cam-12_v001.png".
-        aria-label="Show this result in the full card"
-        title="Show this result in the full card"
-        className="block aspect-[4/3] w-full overflow-hidden bg-stone-100"
-      >
-        {resultUrl && job.status === "completed" ? (
-          <img
-            src={thumbnailMediaUrl(resultUrl, THUMBNAIL_WIDTH.grid)}
-            alt={job.fileName ?? `${job.modelType} result`}
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-stone-400">
-            {isJobWorking(job.status) ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : job.status === "failed" || job.status === "canceled" ? (
-              <AlertTriangle className="h-5 w-5" />
-            ) : (
-              <PresetIcon className="h-5 w-5" />
-            )}
-            <span className="px-2 text-center text-xs font-semibold">{resultPlaceholderTitle(job.status)}</span>
-          </span>
-        )}
-      </button>
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-line p-2">
-        <StatusBadge status={job.status} />
-        <span className="truncate text-xs font-bold">{job.modelType}</span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
-          <Hash className="h-2.5 w-2.5" />
-          {saveNumber}
-        </span>
-      </div>
-    </article>
-  );
-}
-
 function NoMatchesState({ total, onClear }: { total: number; onClear: () => void }) {
   return (
     <div className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed border-line bg-white px-6 text-center shadow-card">
@@ -416,7 +316,10 @@ function NoMatchesState({ total, onClear }: { total: number; onClear: () => void
   );
 }
 
-type StillImageActions = Omit<StillImagesWorkspaceProps, "category" | "state" | "selectedProject" | "targetFolderId" | "saveNumber" | "userName" | "jobs" | "users">;
+type StillImageActions = Omit<
+  StillImagesWorkspaceProps,
+  "category" | "state" | "selectedProject" | "targetFolderId" | "saveNumber" | "userName" | "jobs" | "users"
+>;
 
 function StillImageJobCard({
   job,
@@ -446,14 +349,14 @@ function StillImageJobCard({
   const resultBytes = formatResultBytes(job.outputBytes);
 
   return (
-    <article id={stillJobCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
+    <article id={resultCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
       {/* Always a row, so the actions stay in the top-right corner. This used to
           become one only at xl, which put the toolbar underneath the title on
           any window narrower than 1280px -- which is most of them. */}
       <div className="flex flex-row items-start justify-between gap-3 border-b border-line pb-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={job.status} />
+            <JobStatusBadge status={job.status} />
             <h2 className="text-sm font-bold">{job.modelType}</h2>
             {qwenMode ? (
               <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">
@@ -492,20 +395,20 @@ function StillImageJobCard({
           // shrink-0 so the toolbar keeps its size and the badges wrap instead.
           <div className="shrink-0">
             <JobActions
-            job={job}
-            project={project}
-            isFavorite={actions.favoriteJobIds?.has(job.id) ?? false}
-            canReuseSettings={actions.canReuseSettings?.(job) ?? false}
-            archiveView={actions.archiveView ?? false}
-            onDownload={actions.onDownload}
-            onCopyImage={actions.onCopyImage ?? noop}
-            onReuseSettings={actions.onReuseSettings ?? noop}
-            onRetry={actions.onRetry ?? noop}
-            onCancel={actions.onCancel ?? noop}
-            onToggleFavorite={actions.onToggleFavorite ?? noop}
-            onMove={actions.onMove ?? (async () => false)}
-            onArchive={actions.onArchive ?? noop}
-            onRestore={actions.onRestore ?? noop}
+              job={job}
+              project={project}
+              isFavorite={actions.favoriteJobIds?.has(job.id) ?? false}
+              canReuseSettings={actions.canReuseSettings?.(job) ?? false}
+              archiveView={actions.archiveView ?? false}
+              onDownload={actions.onDownload}
+              onCopyImage={actions.onCopyImage ?? noop}
+              onReuseSettings={actions.onReuseSettings ?? noop}
+              onRetry={actions.onRetry ?? noop}
+              onCancel={actions.onCancel ?? noop}
+              onToggleFavorite={actions.onToggleFavorite ?? noop}
+              onMove={actions.onMove ?? (async () => false)}
+              onArchive={actions.onArchive ?? noop}
+              onRestore={actions.onRestore ?? noop}
               onDeletePermanently={actions.onDeletePermanently ?? noop}
             />
           </div>
@@ -712,9 +615,7 @@ function StillImageResult({
         // Only a placeholder height: the real one is unknown until the image
         // loads, and guessing would make the page jump twice instead of once.
         <div className="flex min-h-[20rem] w-full items-center justify-center overflow-hidden rounded-lg border border-line bg-stone-100">
-          <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">
-            Result preview
-          </span>
+          <span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-stone-500 shadow-card">Result preview</span>
         </div>
       )}
 
@@ -723,10 +624,7 @@ function StillImageResult({
             the next job is submitted against the same path on disk rather than a
             re-upload of a file that never left the server. */}
         {onUseAsInput ? (
-          <UseAsInputMenu
-            onSelect={(categoryId) => onUseAsInput(job, categoryId)}
-            disabledReason={chainDisabledReason}
-          />
+          <UseAsInputMenu onSelect={(categoryId) => onUseAsInput(job, categoryId)} disabledReason={chainDisabledReason} />
         ) : null}
         <ResultOverlayButton
           icon={<Maximize2 className="h-4 w-4" />}
@@ -754,35 +652,8 @@ function StillImageResult({
         />
       </ResultOverlayActions>
 
-      {fullscreenImage ? (
-        <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} />
-      ) : null}
+      {fullscreenImage ? <FullscreenImagePreview image={fullscreenImage} onClose={() => setFullscreenImage(null)} /> : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: Job["status"] }) {
-  const running = status === "queued" || status === "sending" || status === "running";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold capitalize",
-        status === "completed"
-          ? "bg-teal-50 text-teal-700"
-          : status === "failed" || status === "canceled"
-            ? "bg-rose-50 text-rose-700"
-            : "bg-amber-50 text-amber-800",
-      )}
-    >
-      {status === "completed" ? (
-        <CheckCircle2 className="h-3 w-3" />
-      ) : running ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : (
-        <AlertTriangle className="h-3 w-3" />
-      )}
-      {status}
-    </span>
   );
 }
 

@@ -1,8 +1,11 @@
-import { Archive, CheckCircle2, ChevronDown, Hash, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Hash, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Job, JobStatus, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { JobCard } from "./JobCard";
+import { ResultTile } from "./ResultTile";
+import { resultCardElementId } from "../utils/resultCard";
+import { ArchiveViewToggle, ResultLayoutToggle, type ResultLayout } from "./ResultViewControls";
 
 type JobFeedProps = {
   jobs: Job[];
@@ -112,11 +115,22 @@ export function JobFeed({
   const [saveNumberFilter, setSaveNumberFilter] = useState("");
   const [outputFilter, setOutputFilter] = useState<OutputFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [layout, setLayout] = useState<ResultLayout>("list");
+  const [focusJobId, setFocusJobId] = useState<string | null>(null);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [hasScrolled, setHasScrolled] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (layout !== "list" || !focusJobId) return;
+    // Picking a tile out of fifty and being dropped at the top of the list would
+    // mean scrolling to find it again, which is what the grid was there to avoid.
+    // The id is left set rather than cleared: this only re-runs when the layout or
+    // the chosen card changes, and clearing would be a state write from an effect.
+    document.getElementById(resultCardElementId(focusJobId))?.scrollIntoView?.({ block: "start" });
+  }, [layout, focusJobId]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const selectedFolder = selectedProject?.folders?.find((folder) => folder.folderId === selectedFolderId);
@@ -350,32 +364,12 @@ export function JobFeed({
             </div>
 
             <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <div className="grid h-10 grid-cols-2 rounded-md border border-line bg-mist/70 p-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (archiveView) onToggleArchiveView();
-                  }}
-                  className={`rounded px-3 text-sm font-semibold transition ${
-                    archiveView ? "text-stone-600 hover:bg-white hover:text-ink" : "bg-white text-ink shadow-sm"
-                  }`}
-                  aria-pressed={!archiveView}
-                >
-                  Active
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!archiveView) onToggleArchiveView();
-                  }}
-                  className={`flex items-center justify-center gap-1.5 rounded px-3 text-sm font-semibold transition ${
-                    archiveView ? "bg-white text-ink shadow-sm" : "text-stone-600 hover:bg-white hover:text-ink"
-                  }`}
-                  aria-pressed={archiveView}
-                >
-                  <Archive className="h-3.5 w-3.5" />
-                  Archived
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <ArchiveViewToggle archiveView={archiveView} onToggle={onToggleArchiveView} />
+                {/* The switch Still Images has had: full cards to judge one result,
+                    a contact sheet to find one among many. Same component, so the
+                    two sections cannot drift apart. */}
+                <ResultLayoutToggle layout={layout} onChange={setLayout} />
               </div>
               <label className="relative min-w-[11rem]">
                 <span className="sr-only">Sort jobs</span>
@@ -610,29 +604,47 @@ export function JobFeed({
 
       {visibleJobs.length ? (
         <div className="space-y-3">
-          {visibleJobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              project={projects.find((project) => project.id === job.projectId)}
-              user={users.find((user) => user.id === job.userId)}
-              isFavorite={favoriteJobIds.has(job.id)}
-              canReuseSettings={canReuseSettings(job)}
-              onDownload={onDownload}
-              onCopyImage={onCopyImage}
-              onReuseSettings={onReuseSettings}
-              onRetry={onRetry}
-              onCancel={onCancel}
-              onToggleFavorite={onToggleFavorite}
-              onMove={onMove}
-              archiveView={archiveView}
-              onArchive={onArchive}
-              onRestore={onRestore}
-              onDeletePermanently={onDeletePermanently}
-              canEditSaveNumber={currentUserRole === "admin"}
-              onUpdateSaveNumber={onUpdateJobSaveNumber}
-            />
-          ))}
+          {layout === "grid" ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {visibleJobs.map((job) => (
+                <ResultTile
+                  key={job.id}
+                  job={job}
+                  label={job.modelType}
+                  chip={hasJobSaveNumber(job) ? getJobSaveNumber(job) : undefined}
+                  onOpen={() => {
+                    setFocusJobId(job.id);
+                    setLayout("list");
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
+          {layout === "list"
+            ? visibleJobs.map((job) => (
+                <JobCard
+                  key={job.id}
+                  job={job}
+                  project={projects.find((project) => project.id === job.projectId)}
+                  user={users.find((user) => user.id === job.userId)}
+                  isFavorite={favoriteJobIds.has(job.id)}
+                  canReuseSettings={canReuseSettings(job)}
+                  onDownload={onDownload}
+                  onCopyImage={onCopyImage}
+                  onReuseSettings={onReuseSettings}
+                  onRetry={onRetry}
+                  onCancel={onCancel}
+                  onToggleFavorite={onToggleFavorite}
+                  onMove={onMove}
+                  archiveView={archiveView}
+                  onArchive={onArchive}
+                  onRestore={onRestore}
+                  onDeletePermanently={onDeletePermanently}
+                  canEditSaveNumber={currentUserRole === "admin"}
+                  onUpdateSaveNumber={onUpdateJobSaveNumber}
+                />
+              ))
+            : null}
           {hasMoreJobs && onLoadMoreJobs ? (
             <div className="flex justify-center py-2">
               <button

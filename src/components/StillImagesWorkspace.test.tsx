@@ -70,6 +70,41 @@ function renderPanel(jobs: Job[]) {
   );
 }
 
+// The switch the Animation feed already had. Shared component, so the two sections
+// cannot end up disagreeing about what "Archived" looks like or does.
+describe("the archive switch", () => {
+  it("asks the host to switch between active results and the archive", async () => {
+    const user = userEvent.setup();
+    const onToggleArchiveView = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob()]}
+        archiveView={false}
+        onToggleArchiveView={onToggleArchiveView}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(onToggleArchiveView).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Archived" }));
+    expect(onToggleArchiveView).toHaveBeenCalledOnce();
+  });
+
+  it("shows no switch when the host does not wire one", () => {
+    // Previews and tests render this panel without the workspace around it, and a
+    // control that cannot do anything is worse than no control.
+    renderPanel([stillJob()]);
+    expect(screen.queryByRole("button", { name: "Archived" })).toBeNull();
+  });
+});
+
 // Thirty results is thirty full-width cards, each with a compare slider up to 85vh
 // tall, so the filter bar is the only way the panel stays usable at real volume.
 // What is asserted here is the wiring and the two empty states, which are easy to
@@ -95,8 +130,14 @@ describe("filtering the results list", () => {
   it("finds a render by its camera number", async () => {
     const user = userEvent.setup();
     renderPanel([
-      stillJob({ id: "job_12", workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0012" } } }),
-      stillJob({ id: "job_99", workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0099" } } }),
+      stillJob({
+        id: "job_12",
+        workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0012" } },
+      }),
+      stillJob({
+        id: "job_99",
+        workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0099" } },
+      }),
     ]);
 
     await user.type(screen.getByLabelText("Search results"), "0012");
@@ -144,7 +185,8 @@ describe("the grid layout", () => {
     expect(screen.getByText("Input preview")).toBeInTheDocument();
     // And the card it opened is addressable, which is what the panel scrolls to --
     // being dropped at the top of fifty results is what the grid was avoiding.
-    expect(document.getElementById("still-job-job_still_1")).toBeInTheDocument();
+    // The same id scheme the Animation cards use, since both sections share the tile.
+    expect(document.getElementById("result-card-job_still_1")).toBeInTheDocument();
   });
 });
 
@@ -245,7 +287,11 @@ describe("measured pod cost", () => {
 
   it("ignores a creditsActual that did not come from measured pod time", () => {
     renderPanel([
-      stillJob({ creditsActual: 99, creditsActualSource: "local_estimate", runpodTiming: { executionMs: 98_000, usdPerSecond: 0.0004174 } }),
+      stillJob({
+        creditsActual: 99,
+        creditsActualSource: "local_estimate",
+        runpodTiming: { executionMs: 98_000, usdPerSecond: 0.0004174 },
+      }),
     ]);
 
     expect(screen.getByText("Cost").closest("div")).toHaveTextContent("--");

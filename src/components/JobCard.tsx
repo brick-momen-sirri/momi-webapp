@@ -5,6 +5,7 @@ import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { JobActions } from "./JobActions";
+import { resultCardElementId } from "../utils/resultCard";
 import { JobMetadata } from "./JobMetadata";
 import { JobPreview } from "./JobPreview";
 
@@ -68,6 +69,8 @@ export function JobCard({
 
   return (
     <article
+      // Addressable so a grid tile can scroll to the card it opened.
+      id={resultCardElementId(job.id)}
       className={cn(
         "job-card-cv rounded-lg border bg-white p-4 shadow-card",
         job.status === "completed" ? "border-teal-200" : "border-line",
