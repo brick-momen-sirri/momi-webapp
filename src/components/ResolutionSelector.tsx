@@ -9,6 +9,8 @@ type ResolutionSelectorProps = {
   allowSeedance4K?: boolean;
   aspectRatio?: string;
   onAspectRatioChange?: (value: string) => void;
+  seedanceRatio?: string;
+  onSeedanceRatioChange?: (value: string) => void;
   imageOutputCount?: 1 | 2;
   onImageOutputCountChange?: (value: 1 | 2) => void;
 };
@@ -32,6 +34,8 @@ const resolutionOptions = [
 
 const defaultVideoResolutionOptions = ["720p", "1080p", "4K"];
 const nanoBananaAspectRatioOptions = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+// The ratio combo the ByteDance Seedance 2.0 Reference and First-Last-Frame nodes offer.
+const seedanceRatioOptions = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"];
 
 function parseResolution(value: string) {
   const option = resolutionOptions.find((item) => item.value.toLowerCase() === value.toLowerCase());
@@ -78,6 +82,8 @@ export function ResolutionSelector({
   allowSeedance4K = false,
   aspectRatio = "auto",
   onAspectRatioChange,
+  seedanceRatio = "16:9",
+  onSeedanceRatioChange,
   imageOutputCount,
   onImageOutputCountChange,
 }: ResolutionSelectorProps) {
@@ -94,8 +100,13 @@ export function ResolutionSelector({
     .map((resolution) => resolutionOptions.find((option) => option.value.toLowerCase() === resolution.toLowerCase()))
     .filter((option): option is (typeof resolutionOptions)[number] => Boolean(option));
   const showOutputCount = supportsImageOutputCount(selectedModel) && imageOutputCount && onImageOutputCountChange;
-  const showAspectRatio = supportsNanoBananaAspectRatio(selectedModel) && onAspectRatioChange;
-  const selectedAspectRatio = nanoBananaAspectRatioOptions.includes(aspectRatio) ? aspectRatio : "auto";
+  // Only one of the two ever applies: Nano Banana is an image model, Seedance a video one.
+  const ratioControl = ratioControlForModel(selectedModel, {
+    aspectRatio,
+    onAspectRatioChange,
+    seedanceRatio,
+    onSeedanceRatioChange,
+  });
   const disableSeedance4K = isSeedanceWorkflowModel(selectedModel) && !allowSeedance4K;
 
   const warnings = (() => {
@@ -120,7 +131,7 @@ export function ResolutionSelector({
         <h2 className="text-sm font-semibold">Resolution</h2>
       </div>
 
-      <div className={showAspectRatio ? "grid grid-cols-2 gap-2" : ""}>
+      <div className={ratioControl ? "grid grid-cols-2 gap-2" : ""}>
         <div className="relative min-w-0">
           <select
             className="h-10 w-full appearance-none rounded-md border border-line bg-stone-50 px-3 pr-9 text-sm font-semibold text-ink outline-none transition hover:border-stone-400 focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20"
@@ -141,19 +152,19 @@ export function ResolutionSelector({
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
         </div>
 
-        {showAspectRatio ? (
+        {ratioControl ? (
           <div className="relative min-w-0">
             <select
-              id="nano-banana-aspect-ratio"
+              id={ratioControl.id}
               className="h-10 w-full appearance-none rounded-md border border-line bg-stone-50 px-3 pr-9 text-sm font-semibold text-ink outline-none transition hover:border-stone-400 focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20"
               aria-label="Aspect ratio"
-              name="aspect_ratio"
-              value={selectedAspectRatio}
-              onChange={(event) => onAspectRatioChange(event.target.value)}
+              name={ratioControl.name}
+              value={ratioControl.value}
+              onChange={(event) => ratioControl.onChange(event.target.value)}
             >
-              {nanoBananaAspectRatioOptions.map((option) => (
+              {ratioControl.options.map((option) => (
                 <option key={option} value={option}>
-                  {option}
+                  {option === "adaptive" ? "adaptive (match input)" : option}
                 </option>
               ))}
             </select>
@@ -226,8 +237,29 @@ function supportsImageOutputCount(model: ModelType) {
   return isNanoBananaModel(model) || isGptImageModel(model);
 }
 
-function supportsNanoBananaAspectRatio(model: ModelType) {
-  return isNanoBananaModel(model);
+function ratioControlForModel(
+  model: ModelType,
+  props: Pick<ResolutionSelectorProps, "aspectRatio" | "onAspectRatioChange" | "seedanceRatio" | "onSeedanceRatioChange">,
+) {
+  if (isNanoBananaModel(model) && props.onAspectRatioChange) {
+    return {
+      id: "nano-banana-aspect-ratio",
+      name: "aspect_ratio",
+      options: nanoBananaAspectRatioOptions,
+      value: nanoBananaAspectRatioOptions.includes(props.aspectRatio ?? "") ? (props.aspectRatio as string) : "auto",
+      onChange: props.onAspectRatioChange,
+    };
+  }
+  if (isSeedanceWorkflowModel(model) && props.onSeedanceRatioChange) {
+    return {
+      id: "seedance-ratio",
+      name: "seedance_ratio",
+      options: seedanceRatioOptions,
+      value: seedanceRatioOptions.includes(props.seedanceRatio ?? "") ? (props.seedanceRatio as string) : "16:9",
+      onChange: props.onSeedanceRatioChange,
+    };
+  }
+  return undefined;
 }
 
 function is4KResolution(value: string) {

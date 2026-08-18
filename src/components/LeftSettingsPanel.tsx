@@ -20,6 +20,7 @@ type LeftSettingsPanelProps = {
   selectedResolution: string;
   allowSeedance4K: boolean;
   selectedNanoBananaAspectRatio: string;
+  selectedSeedanceRatio: string;
   selectedDurationSeconds: number;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
@@ -38,6 +39,7 @@ type LeftSettingsPanelProps = {
   onModelChange: (modelId: string) => void;
   onResolutionChange: (resolution: string) => void;
   onNanoBananaAspectRatioChange: (aspectRatio: string) => void;
+  onSeedanceRatioChange: (ratio: string) => void;
   onDurationChange: (seconds: number) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
@@ -59,6 +61,7 @@ export function LeftSettingsPanel({
   selectedResolution,
   allowSeedance4K,
   selectedNanoBananaAspectRatio,
+  selectedSeedanceRatio,
   selectedDurationSeconds,
   prompt,
   archVizGridOptions,
@@ -77,6 +80,7 @@ export function LeftSettingsPanel({
   onModelChange,
   onResolutionChange,
   onNanoBananaAspectRatioChange,
+  onSeedanceRatioChange,
   onDurationChange,
   onPromptChange,
   onArchVizGridOptionsChange,
@@ -105,6 +109,8 @@ export function LeftSettingsPanel({
           allowSeedance4K={allowSeedance4K}
           aspectRatio={selectedNanoBananaAspectRatio}
           onAspectRatioChange={onNanoBananaAspectRatioChange}
+          seedanceRatio={selectedSeedanceRatio}
+          onSeedanceRatioChange={onSeedanceRatioChange}
           imageOutputCount={imageOutputCount}
           onImageOutputCountChange={onImageOutputCountChange}
         />

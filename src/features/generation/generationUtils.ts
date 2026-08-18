@@ -108,6 +108,16 @@ export function normalizeNanoBananaAspectRatio(value: unknown) {
   return typeof value === "string" && nanoBananaAspectRatioValues.includes(value) ? value : "auto";
 }
 
+// The ratio options the ByteDance Seedance 2.0 Reference and First-Last-Frame nodes
+// offer. The default stays 16:9 because that is what the shipped Seedance workflows
+// already send; "adaptive" is the opt-in that keeps the source frame's own aspect.
+export const SEEDANCE_RATIO_VALUES = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"];
+export const DEFAULT_SEEDANCE_RATIO = "16:9";
+
+export function normalizeSeedanceRatio(value: unknown) {
+  return typeof value === "string" && SEEDANCE_RATIO_VALUES.includes(value) ? value : DEFAULT_SEEDANCE_RATIO;
+}
+
 function normalizeExactResolutionValue(value: string) {
   const lower = value.toLowerCase().replace(/\s+/g, "");
   return gptImageResolutionValues.find((resolution) => resolution.toLowerCase() === lower);
@@ -208,13 +218,21 @@ export function supports16By9CropToggle(
   return isImageToVideoModel(model) || isFirstLastFrameToVideoModel(model);
 }
 
-export function workflowOptionsForJob(
-  model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">,
-  archVizGrid: ArchVizGridOptions,
-  saveNumber: string,
-  imageOutputCount: 1 | 2,
-  nanoBananaAspectRatio: string,
-): WorkflowOptions {
+export function workflowOptionsForJob({
+  model,
+  archVizGrid,
+  saveNumber,
+  imageOutputCount,
+  nanoBananaAspectRatio,
+  seedanceRatio,
+}: {
+  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">;
+  archVizGrid: ArchVizGridOptions;
+  saveNumber: string;
+  imageOutputCount: 1 | 2;
+  nanoBananaAspectRatio: string;
+  seedanceRatio: string;
+}): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
     ...(isArchVizGridModel(model) ? { archVizGrid } : {}),
@@ -222,11 +240,16 @@ export function workflowOptionsForJob(
       ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } }
       : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
+    ...(supportsSeedanceRatio(model) ? { seedance: { ratio: normalizeSeedanceRatio(seedanceRatio) } } : {}),
     save: {
       cameraNumber: normalizedSaveNumber,
       shotNumber: normalizedSaveNumber,
     },
   };
+}
+
+export function supportsSeedanceRatio(model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">) {
+  return isSeedanceWorkflowModel(model);
 }
 
 export function isNanoBananaModel(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">) {
@@ -264,6 +287,7 @@ export function createLocalJob({
   saveNumber,
   imageOutputCount,
   selectedNanoBananaAspectRatio,
+  selectedSeedanceRatio,
   use16By9Cropping,
   requiredImages,
 }: {
@@ -279,6 +303,7 @@ export function createLocalJob({
   saveNumber: string;
   imageOutputCount: 1 | 2;
   selectedNanoBananaAspectRatio: string;
+  selectedSeedanceRatio: string;
   use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
@@ -308,13 +333,14 @@ export function createLocalJob({
     prompt: prompt.trim(),
     resolution: selectedResolution,
     durationSeconds: selectedModel.category === "video" ? selectedDurationSeconds : undefined,
-    workflowOptions: workflowOptionsForJob(
-      selectedModel,
-      archVizGridOptions,
+    workflowOptions: workflowOptionsForJob({
+      model: selectedModel,
+      archVizGrid: archVizGridOptions,
       saveNumber,
       imageOutputCount,
-      selectedNanoBananaAspectRatio,
-    ),
+      nanoBananaAspectRatio: selectedNanoBananaAspectRatio,
+      seedanceRatio: selectedSeedanceRatio,
+    }),
     status: "queued",
     inputImages,
     inputVideo: video?.url,

@@ -460,6 +460,58 @@ test("video edit workflows inject RunPod video filenames and multi-reference ima
   assert.equal("model.reference_images.image_2" in partialSeedanceWorkflow["359"].inputs, false);
 });
 
+test("Seedance workflows apply the selected output ratio to both node types", async () => {
+  const reference = requiredModel("brick_api_seedance2_0_r2v");
+  const referenceWorkflow = (await loadWorkflowForRunpod(
+    reference,
+    {
+      ...request(reference, ["main.png"], "seedance.mp4"),
+      workflowOptions: { seedance: { ratio: "9:16" } },
+    },
+    "0000_ply_graound",
+    ["main.png"],
+  )) as Record<string, any>;
+
+  assert.equal(referenceWorkflow["359"].inputs["model.ratio"], "9:16");
+
+  const firstLast = requiredModel("brick_api_seedance_2_0flf2v");
+  const firstLastWorkflow = (await loadWorkflowForRunpod(
+    firstLast,
+    {
+      ...request(firstLast, ["start.png", "end.png"]),
+      workflowOptions: { seedance: { ratio: "adaptive" } },
+    },
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+
+  assert.equal(firstLastWorkflow["1"].inputs["model.ratio"], "adaptive");
+});
+
+test("Seedance workflows keep their saved ratio when none is selected or the value is unknown", async () => {
+  const firstLast = requiredModel("brick_api_seedance_2_0flf2v");
+  const untouched = (await loadWorkflowForRunpod(
+    firstLast,
+    request(firstLast, ["start.png", "end.png"]),
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+
+  assert.equal(untouched["1"].inputs["model.ratio"], "16:9");
+
+  const rejected = (await loadWorkflowForRunpod(
+    firstLast,
+    {
+      ...request(firstLast, ["start.png", "end.png"]),
+      workflowOptions: { seedance: { ratio: "banana:9" } },
+    },
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+
+  assert.equal(rejected["1"].inputs["model.ratio"], "16:9");
+});
+
 test("Kling video workflows randomize fixed seeds and preserve long prompts for RunPod submission", async () => {
   const originalRandom = Math.random;
   Math.random = () => 0.123456;

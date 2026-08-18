@@ -3,7 +3,7 @@ import { getStoredAuthToken } from "../../services/backendApi";
 import type { ArchVizGridOptions, Job, ModelType, UploadedImage, UploadedVideo, WorkflowOptions } from "../../types";
 import { getImageSize } from "../../utils/imageCrop";
 import { createClientId } from "../../utils/id";
-import { normalizeNanoBananaAspectRatio } from "../generation/generationUtils";
+import { normalizeNanoBananaAspectRatio, normalizeSeedanceRatio } from "../generation/generationUtils";
 
 export function canReuseJobSettings(job: Job, models: ModelType[]) {
   return Boolean(
@@ -161,6 +161,10 @@ export function reusableNanoBananaAspectRatio(options: WorkflowOptions | undefin
   return typeof options?.nanoBanana?.aspectRatio === "string"
     ? normalizeNanoBananaAspectRatio(options.nanoBanana.aspectRatio)
     : undefined;
+}
+
+export function reusableSeedanceRatio(options: WorkflowOptions | undefined) {
+  return typeof options?.seedance?.ratio === "string" ? normalizeSeedanceRatio(options.seedance.ratio) : undefined;
 }
 
 export async function rehydrateJobInputImages(job: Job, slotCount: number) {

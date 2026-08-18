@@ -277,7 +277,19 @@ test("rejects malformed field types and provider-specific options", async () => 
   });
   assert.equal(providerOptions.status, 400);
   assert.match(String(providerOptions.body.error), /nano banana/i);
+
+  const seedanceRatio = await call({ ...validBody(), workflowOptions: { seedance: { ratio: "17:9" } } });
+  assert.equal(seedanceRatio.status, 400);
+  assert.match(String(seedanceRatio.body.error), /seedance ratio/i);
   assert.equal(createRequests.length, 0);
+});
+
+test("accepts every ratio the Seedance nodes offer", async () => {
+  for (const ratio of ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]) {
+    const response = await call({ ...validBody(), workflowOptions: { seedance: { ratio } } });
+    assert.equal(response.status, 201, `ratio ${ratio} was rejected: ${JSON.stringify(response.body)}`);
+    assert.equal(createRequests.at(-1)?.workflowOptions?.seedance?.ratio, ratio);
+  }
 });
 
 test("propagates media ownership failures without creating observable state", async () => {

@@ -23,7 +23,9 @@ import {
   normalizeNanoBananaAspectRatio,
   normalizeResolutionForModel,
   normalizeSaveNumber,
+  normalizeSeedanceRatio,
   supportsImageOutputCount,
+  supportsSeedanceRatio,
 } from "./features/generation/generationUtils";
 import { useGenerationForm } from "./features/generation/useGenerationForm";
 import { useAuthentication } from "./features/auth/useAuthentication";
@@ -40,6 +42,7 @@ import {
   reusableImageOutputCount,
   reusableNanoBananaAspectRatio,
   reusableSaveNumber,
+  reusableSeedanceRatio,
 } from "./features/jobs/jobReuse";
 import { useJobActions } from "./features/jobs/useJobActions";
 import { useJobSubmission } from "./features/jobs/useJobSubmission";
@@ -124,6 +127,8 @@ function App() {
     setSelectedResolution,
     selectedNanoBananaAspectRatio,
     setSelectedNanoBananaAspectRatio,
+    selectedSeedanceRatio,
+    setSelectedSeedanceRatio,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -231,6 +236,7 @@ function App() {
     saveNumber,
     imageOutputCount,
     selectedNanoBananaAspectRatio,
+    selectedSeedanceRatio,
     setJobs,
     setProjects,
     setBackendJobsTotal,
@@ -423,6 +429,12 @@ function App() {
       restored.add("aspect ratio");
     }
 
+    const seedanceRatio = reusableSeedanceRatio(job.workflowOptions);
+    if (seedanceRatio && supportsSeedanceRatio(targetModel)) {
+      setSelectedSeedanceRatio(seedanceRatio);
+      restored.add("aspect ratio");
+    }
+
     if (hasInputImageMetadata(job)) {
       const slotCount = reusableModel ? imageSlotCountForModel(reusableModel) : job.inputImages.length;
       const nextImages = await rehydrateJobInputImages(job, slotCount);
@@ -482,6 +494,7 @@ function App() {
                 selectedResolution={selectedResolution}
                 allowSeedance4K={allowSeedance4K}
                 selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
+                selectedSeedanceRatio={selectedSeedanceRatio}
                 selectedDurationSeconds={selectedDurationSeconds}
                 prompt={prompt}
                 archVizGridOptions={archVizGridOptions}
@@ -500,6 +513,7 @@ function App() {
                 onModelChange={handleModelChange}
                 onResolutionChange={handleResolutionChange}
                 onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
+                onSeedanceRatioChange={(value) => setSelectedSeedanceRatio(normalizeSeedanceRatio(value))}
                 onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
                 onPromptChange={setPrompt}
                 onArchVizGridOptionsChange={setArchVizGridOptions}

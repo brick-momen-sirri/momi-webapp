@@ -1,5 +1,5 @@
 import type { ThemeMode } from "../../components/ThemeToggle";
-import { normalizeNanoBananaAspectRatio, normalizeSaveNumber } from "../generation/generationUtils";
+import { normalizeNanoBananaAspectRatio, normalizeSaveNumber, normalizeSeedanceRatio } from "../generation/generationUtils";
 
 const GENERATION_SETTINGS_STORAGE_KEY = "momi_generation_settings_v1";
 const FAVORITE_JOB_IDS_STORAGE_KEY = "momi_favorite_job_ids_v1";
@@ -16,6 +16,7 @@ export type PersistedGenerationSettings = {
   imageOutputCount?: 1 | 2;
   nanoBananaOutputCount?: 1 | 2;
   selectedNanoBananaAspectRatio?: string;
+  selectedSeedanceRatio?: string;
   imageToVideo16By9Cropping?: boolean;
 };
 
@@ -39,6 +40,7 @@ export function readPersistedGenerationSettings(): PersistedGenerationSettings {
       imageOutputCount: parsed.imageOutputCount === 2 || parsed.nanoBananaOutputCount === 2 ? 2 : 1,
       nanoBananaOutputCount: parsed.nanoBananaOutputCount === 2 ? 2 : undefined,
       selectedNanoBananaAspectRatio: normalizeNanoBananaAspectRatio(parsed.selectedNanoBananaAspectRatio),
+      selectedSeedanceRatio: normalizeSeedanceRatio(parsed.selectedSeedanceRatio),
       imageToVideo16By9Cropping:
         typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };

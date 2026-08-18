@@ -20,6 +20,7 @@ import {
   normalizeNanoBananaAspectRatio,
   normalizeResolutionForModel,
   normalizeSaveNumber,
+  normalizeSeedanceRatio,
   supports16By9CropToggle,
   supportsImageOutputCount,
 } from "./generationUtils";
@@ -41,6 +42,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(
     normalizeNanoBananaAspectRatio(initialSettings.selectedNanoBananaAspectRatio),
   );
+  const [selectedSeedanceRatio, setSelectedSeedanceRatio] = useState(normalizeSeedanceRatio(initialSettings.selectedSeedanceRatio));
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
@@ -103,6 +105,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
       selectedModelId,
       selectedResolution,
       selectedNanoBananaAspectRatio,
+      selectedSeedanceRatio,
       selectedDurationSeconds,
       selectedProjectId,
       targetFolderId,
@@ -121,6 +124,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     selectedNanoBananaAspectRatio,
     selectedProjectId,
     selectedResolution,
+    selectedSeedanceRatio,
     targetFolderId,
   ]);
 
@@ -148,6 +152,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setSelectedResolution,
     selectedNanoBananaAspectRatio,
     setSelectedNanoBananaAspectRatio,
+    selectedSeedanceRatio,
+    setSelectedSeedanceRatio,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,

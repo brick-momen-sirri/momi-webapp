@@ -202,6 +202,11 @@ export type WorkflowOptions = {
   gptImage?: {
     outputCount?: 1 | 2;
   };
+  // The output aspect ratio the Seedance 2.x nodes take on their `ratio` widget.
+  // "adaptive" lets the model keep the reference frame's own aspect instead.
+  seedance?: {
+    ratio?: string;
+  };
   save?: {
     cameraNumber?: string;
     shotNumber?: string;

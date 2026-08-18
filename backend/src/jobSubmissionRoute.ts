@@ -19,6 +19,9 @@ export type JobSubmissionDependencies = {
 
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
 const NANO_BANANA_ASPECT_RATIOS = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
+// The ratio combo the ByteDance2 Seedance nodes offer; "adaptive" derives the
+// output aspect from the reference frame instead of forcing one of the grid ratios.
+const SEEDANCE_RATIOS = new Set(["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
 
 export function createJobSubmissionHandler(deps: JobSubmissionDependencies): RequestHandler {
   return async (req, res) => {
@@ -294,7 +297,7 @@ function normalizeResolution(value: string) {
 function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   if (value == null) return undefined;
   const options = plainRecord(value, "workflowOptions");
-  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "save", "stillImage"]);
+  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "seedance", "save", "stillImage"]);
   const unknown = Object.keys(options).find((key) => !allowedKeys.has(key));
   if (unknown) throw new JobSubmissionError(`Unsupported provider-specific workflow option: ${unknown}.`);
 
@@ -305,6 +308,12 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
     }
     if (nano.aspectRatio != null && (typeof nano.aspectRatio !== "string" || !NANO_BANANA_ASPECT_RATIOS.has(nano.aspectRatio))) {
       throw new JobSubmissionError("Nano Banana aspectRatio is not supported.");
+    }
+  }
+  if (options.seedance != null) {
+    const seedance = plainRecord(options.seedance, "Seedance options");
+    if (seedance.ratio != null && (typeof seedance.ratio !== "string" || !SEEDANCE_RATIOS.has(seedance.ratio))) {
+      throw new JobSubmissionError("Seedance ratio is not supported.");
     }
   }
   if (options.gptImage != null) {

@@ -37,6 +37,7 @@ type JobSubmissionOptions = {
   saveNumber: string;
   imageOutputCount: 1 | 2;
   selectedNanoBananaAspectRatio: string;
+  selectedSeedanceRatio: string;
   setJobs: Dispatch<SetStateAction<Job[]>>;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setBackendJobsTotal: Dispatch<SetStateAction<number>>;
@@ -77,6 +78,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
       saveNumber,
       imageOutputCount,
       selectedNanoBananaAspectRatio,
+      selectedSeedanceRatio,
       setJobs,
       setProjects,
       setBackendJobsTotal,
@@ -102,13 +104,14 @@ export function useJobSubmission(options: JobSubmissionOptions) {
     setSubmissionPhase("preparing");
     try {
       if (backendAvailable || selectedModel.backendCategory || selectedModel.workflowPath) {
-        const workflowOptions = workflowOptionsForJob(
-          selectedModel,
-          archVizGridOptions,
+        const workflowOptions = workflowOptionsForJob({
+          model: selectedModel,
+          archVizGrid: archVizGridOptions,
           saveNumber,
           imageOutputCount,
-          selectedNanoBananaAspectRatio,
-        );
+          nanoBananaAspectRatio: selectedNanoBananaAspectRatio,
+          seedanceRatio: selectedSeedanceRatio,
+        });
         const fingerprint = submissionFingerprint({
           accountId: account.id,
           selectedProjectId,
@@ -217,6 +220,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
         saveNumber,
         imageOutputCount,
         selectedNanoBananaAspectRatio,
+        selectedSeedanceRatio,
         use16By9Cropping,
         requiredImages,
       });
@@ -302,13 +306,14 @@ function fingerprintForCurrentOptions(options: JobSubmissionOptions) {
     video: options.video,
     requiredImages: options.requiredImages,
     use16By9Cropping: options.use16By9Cropping,
-    workflowOptions: workflowOptionsForJob(
-      options.selectedModel,
-      options.archVizGridOptions,
-      options.saveNumber,
-      options.imageOutputCount,
-      options.selectedNanoBananaAspectRatio,
-    ),
+    workflowOptions: workflowOptionsForJob({
+      model: options.selectedModel,
+      archVizGrid: options.archVizGridOptions,
+      saveNumber: options.saveNumber,
+      imageOutputCount: options.imageOutputCount,
+      nanoBananaAspectRatio: options.selectedNanoBananaAspectRatio,
+      seedanceRatio: options.selectedSeedanceRatio,
+    }),
   });
 }
 

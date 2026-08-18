@@ -33,6 +33,7 @@ const gptImageSizeOptions = [
 ];
 
 const nanoBananaAspectRatioOptions = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
+const seedanceRatioOptions = new Set(["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
 export async function loadWorkflowModels() {
   const files = (await Promise.all(workflowRoots.map((root) => listJsonFiles(root)))).flat();
   modelsCache = await Promise.all(files.map(inferWorkflowModel));
@@ -1104,6 +1105,9 @@ function injectInputs(
     if (isNanoBananaClassType(classType)) {
       applyNanoBananaAspectRatioInput(inputs, request.workflowOptions);
     }
+    if (isSeedance2ClassType(classType)) {
+      applySeedanceRatioInput(inputs, request.workflowOptions);
+    }
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {
       const key = Object.keys(inputs).find(
@@ -1210,6 +1214,28 @@ function applyNanoBananaAspectRatioInput(inputs: ComfyNode, workflowOptions: Cre
       return lower === "aspect_ratio" || lower === "aspect.ratio" || lower === "aspect ratio";
     }) ?? "aspect_ratio";
   inputs[key] = aspectRatio;
+}
+
+function isSeedance2ClassType(classType: string) {
+  return classType.includes("bytedance2");
+}
+
+function normalizeSeedanceRatio(value: unknown) {
+  return typeof value === "string" && seedanceRatioOptions.has(value) ? value : undefined;
+}
+
+// The Seedance nodes expose the ratio as a nested dynamic-combo input, so the
+// executable key is "model.ratio". Older graphs that spell it "ratio" are honored
+// as-is rather than gaining a second, ignored key.
+function applySeedanceRatioInput(inputs: ComfyNode, workflowOptions: CreateJobRequest["workflowOptions"]) {
+  const ratio = normalizeSeedanceRatio(workflowOptions?.seedance?.ratio);
+  if (!ratio) return;
+  const key =
+    Object.keys(inputs).find((item) => {
+      const lower = item.toLowerCase();
+      return lower === "model.ratio" || lower === "ratio";
+    }) ?? "model.ratio";
+  inputs[key] = ratio;
 }
 
 function isGptImageNode(node: ComfyNode) {

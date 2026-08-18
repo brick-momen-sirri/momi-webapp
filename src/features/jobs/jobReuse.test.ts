@@ -20,6 +20,7 @@ import {
   normalizeReusableArchVizGridOptions,
   reusableImageOutputCount,
   reusableNanoBananaAspectRatio,
+  reusableSeedanceRatio,
   reusableSaveNumber,
 } from "./jobReuse";
 
@@ -335,6 +336,22 @@ describe("reusableImageOutputCount", () => {
   it("prefers the GPT image count when both are present", () => {
     const options = { gptImage: { outputCount: 1 }, nanoBanana: { outputCount: 2 } } as WorkflowOptions;
     expect(reusableImageOutputCount(options)).toBe(1);
+  });
+});
+
+describe("reusableSeedanceRatio", () => {
+  it("restores a ratio the Seedance nodes offer", () => {
+    expect(reusableSeedanceRatio({ seedance: { ratio: "21:9" } } as WorkflowOptions)).toBe("21:9");
+    expect(reusableSeedanceRatio({ seedance: { ratio: "adaptive" } } as WorkflowOptions)).toBe("adaptive");
+  });
+
+  it("restores nothing when the job carried no ratio", () => {
+    expect(reusableSeedanceRatio(undefined)).toBeUndefined();
+    expect(reusableSeedanceRatio({ seedance: {} } as WorkflowOptions)).toBeUndefined();
+  });
+
+  it("falls back for a ratio the nodes do not offer", () => {
+    expect(reusableSeedanceRatio({ seedance: { ratio: "17:9" } } as WorkflowOptions)).toBe("16:9");
   });
 });
 
