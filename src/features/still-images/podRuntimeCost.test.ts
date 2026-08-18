@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatPodRuntime,
+  formatResultBytes,
+  formatUsd,
   gpuDisplayName,
   measuredPodCredits,
+  measuredPodUsd,
   POD_RUNTIME_SOURCE,
   podCostExplanation,
 } from "./podRuntimeCost";
@@ -75,6 +78,8 @@ describe("podCostExplanation", () => {
     expect(explanation).toContain("1m 40s of worker time");
     expect(explanation).toContain("on RTX PRO 6000 Blackwell Server Edition");
     expect(explanation).toContain("$0.0009215/s");
+    // The accounting unit stays discoverable even though the cell shows dollars.
+    expect(explanation).toContain("Charged as 19 credits.");
   });
 
   it("says why an uncosted run is uncosted", () => {
@@ -82,5 +87,59 @@ describe("podCostExplanation", () => {
     // rate for it. All of them mean "nobody measured this", not "it was free".
     const explanation = podCostExplanation({ runpodTiming: { executionMs: 100_000 } });
     expect(explanation).toContain("Not measured");
+  });
+});
+
+// The card shows dollars, because that is what the pods are rented in and what an
+// artist weighs a re-render against. Credits stay the accounting unit.
+describe("measuredPodUsd", () => {
+  const priced = {
+    creditsActual: 6,
+    creditsActualSource: POD_RUNTIME_SOURCE,
+    runpodTiming: { executionMs: 32_695, usdPerSecond: 0.0009215 },
+  };
+
+  it("recomputes from the seconds and the rate, not from the rounded credits", () => {
+    // The real run: 32.695s at $0.0009215/s = $0.030128. Reading it back from 6
+    // credits would give $0.0284 -- the same answer for anything 5.5 to 6.5.
+    expect(measuredPodUsd(priced)).toBeCloseTo(0.030128, 6);
+  });
+
+  it("falls back to the credits when the rate was not recorded", () => {
+    const older = { ...priced, runpodTiming: { executionMs: 32_695 } };
+    expect(measuredPodUsd(older)).toBeCloseTo(6 / 211, 6);
+  });
+
+  it("stays undefined for an unmeasured run", () => {
+    expect(measuredPodUsd({ runpodTiming: { executionMs: 32_695 } })).toBeUndefined();
+  });
+});
+
+describe("formatUsd", () => {
+  it("keeps enough digits that a real run is not rounded to nothing", () => {
+    // Cents are the normal case here, so two decimals would flatten every run to
+    // $0.03 and a fast edit to $0.00.
+    expect(formatUsd(0.030128)).toBe("$0.030");
+    expect(formatUsd(0.0031)).toBe("$0.0031");
+    expect(formatUsd(0.12)).toBe("$0.120");
+    // Dollars and up read as money.
+    expect(formatUsd(1.5)).toBe("$1.50");
+    expect(formatUsd(12.345)).toBe("$12.35");
+  });
+});
+
+describe("formatResultBytes", () => {
+  it("scales the unit to the size", () => {
+    expect(formatResultBytes(24.8 * 1024 * 1024)).toBe("24.8 MB");
+    expect(formatResultBytes(140 * 1024 * 1024)).toBe("140 MB");
+    expect(formatResultBytes(600 * 1024)).toBe("600 KB");
+    expect(formatResultBytes(2.5 * 1024 * 1024 * 1024)).toBe("2.50 GB");
+  });
+
+  it("reports nothing rather than zero when the size is unknown", () => {
+    // Every result that finished before the size was recorded, which is all of them
+    // so far -- and "0 MB" would be a claim about a file that certainly has bytes.
+    expect(formatResultBytes(undefined)).toBeUndefined();
+    expect(formatResultBytes(0)).toBeUndefined();
   });
 });

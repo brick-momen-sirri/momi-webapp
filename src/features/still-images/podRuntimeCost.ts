@@ -25,6 +25,62 @@ export function measuredPodCredits(job: Pick<Job, "creditsActual" | "creditsActu
   return typeof credits === "number" && Number.isFinite(credits) && credits > 0 ? credits : undefined;
 }
 
+/** Credits per USD, as the backend prices them. Kept in step with creditEstimator. */
+const CREDITS_PER_USD = 211;
+
+/**
+ * What the run cost, in dollars.
+ *
+ * Recomputed from the two terms the job records -- worker seconds and the rate they
+ * were priced at -- rather than converted back from the credits, which are rounded
+ * to whole numbers and would read as $0.03 for anything between 5 and 6 credits.
+ *
+ * Falls back to the credits for a job priced before the rate was recorded, since a
+ * dollar figure that is 0.5% out beats showing nothing.
+ */
+export function measuredPodUsd(job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming">) {
+  const credits = measuredPodCredits(job);
+  if (credits === undefined) return undefined;
+
+  const executionMs = job.runpodTiming?.executionMs;
+  const usdPerSecond = job.runpodTiming?.usdPerSecond;
+  if (executionMs && usdPerSecond) return (executionMs / 1000) * usdPerSecond;
+  return credits / CREDITS_PER_USD;
+}
+
+/**
+ * A cost in dollars, at a precision that does not round a real run to nothing.
+ *
+ * These runs are cents: a 33s Pro Upscaler on a PRO 6000 is $0.030. Two decimals
+ * would show $0.03 for everything from $0.025 to $0.034 and $0.00 for a fast edit,
+ * so small amounts keep more digits. Dollars and up get the usual two.
+ */
+export function formatUsd(usd: number) {
+  if (!Number.isFinite(usd) || usd < 0) return undefined;
+  if (usd >= 1) return `$${usd.toFixed(2)}`;
+  if (usd >= 0.01) return `$${usd.toFixed(3)}`;
+  // Below a cent, three decimals is just $0.00x -- say four so the number survives.
+  return `$${usd.toFixed(4)}`;
+}
+
+/**
+ * The result's size on disk, as "24.8 MB".
+ *
+ * Worth showing next to the dimensions: a 10K PNG past 100 MB is the reason this
+ * panel never loads an original, and output on the render host grows by tens of
+ * gigabytes a month.
+ */
+export function formatResultBytes(bytes: number | undefined) {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return undefined;
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  // A decimal up to 100 MB, where most of these results land and where the
+  // difference between 24 and 25 MB is still worth reading.
+  if (mb < 100) return `${mb.toFixed(1)} MB`;
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
 /**
  * Why a run cost what it did: the seconds, the GPU, and the rate.
  *
@@ -43,7 +99,10 @@ export function podCostExplanation(job: Pick<Job, "creditsActual" | "creditsActu
   const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
   const rate = job.runpodTiming?.usdPerSecond;
   const parts = [runtime && `${runtime} of worker time`, gpu && `on ${gpu}`, rate && `at $${rate}/s`].filter(Boolean);
-  return parts.length ? `Priced from ${parts.join(" ")}.` : "Priced from the worker time RunPod reported for this run.";
+  // Credits stay in the tooltip: the dashboards and the balance are denominated in
+  // them, so the figure has to remain findable even though the card shows dollars.
+  const priced = parts.length ? `Priced from ${parts.join(" ")}.` : "Priced from the worker time RunPod reported for this run.";
+  return `${priced} Charged as ${credits} credit${credits === 1 ? "" : "s"}.`;
 }
 
 /** RunPod's gpuTypeId without the vendor prefix, which is the same on all of them. */

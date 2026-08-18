@@ -47,6 +47,7 @@ export type BackendJob = {
   prompt?: string;
   resolution?: MediaResolution;
   outputResolution?: MediaResolution;
+  outputBytes?: number;
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
   status: Job["status"];

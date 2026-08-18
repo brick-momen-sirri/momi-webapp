@@ -358,6 +358,13 @@ export type Job = {
   prompt?: string;
   resolution?: Resolution;
   outputResolution?: Resolution;
+  /**
+   * Size of the result on disk, in bytes.
+   *
+   * Read once, when the file is written. Absent on every job that finished before
+   * this was recorded, and on results that never reached disk.
+   */
+  outputBytes?: number;
   durationSeconds?: number;
   workflowOptions?: WorkflowOptions;
   generatedPrompt?: string;

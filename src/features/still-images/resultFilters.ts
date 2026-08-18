@@ -10,7 +10,7 @@
 // the counts the header reports come from the same function that builds the list.
 
 import type { Job } from "../../types";
-import { measuredPodCredits } from "./podRuntimeCost";
+import { measuredPodUsd } from "./podRuntimeCost";
 import { STILL_IMAGE_CATEGORIES, type StillImageCategoryId } from "./stillImageCategories";
 
 export type StillImageResultStatus = "all" | "completed" | "working" | "failed";
@@ -105,7 +105,9 @@ function sortStillImageJobs(jobs: Job[], sort: StillImageResultSort) {
     // Uncosted runs sink rather than being dropped or read as free: most runs are
     // uncosted until a pod has a per-second price configured, and the point of this
     // ordering is to surface the expensive ones.
-    sorted.sort((a, b) => (measuredPodCredits(b) ?? -1) - (measuredPodCredits(a) ?? -1) || newestFirst(a, b));
+    // Dollars rather than credits: credits are rounded to whole numbers, so a third
+    // of these runs tie at 6 and the order among them would be arbitrary.
+    sorted.sort((a, b) => (measuredPodUsd(b) ?? -1) - (measuredPodUsd(a) ?? -1) || newestFirst(a, b));
     return sorted;
   }
   sorted.sort((a, b) => (sort === "oldest" ? -newestFirst(a, b) : newestFirst(a, b)));

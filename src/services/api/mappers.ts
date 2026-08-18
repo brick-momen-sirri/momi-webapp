@@ -104,6 +104,7 @@ export function mapJob(job: BackendJob): Job {
     prompt: job.prompt ?? "",
     resolution,
     outputResolution,
+    outputBytes: job.outputBytes,
     durationSeconds: job.durationSeconds,
     workflowOptions: job.workflowOptions,
     status: job.status,

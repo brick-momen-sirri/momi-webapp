@@ -253,6 +253,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     job.thumbnailUrls = artifacts.thumbnailUrls;
     job.fileName = artifacts.selectedArtifacts[0]?.fileName ?? selectedMedia[0]?.filename;
     job.outputResolution = artifacts.outputResolution;
+    job.outputBytes = artifacts.outputBytes;
 
     // Credit-exempt presets are not pushed to the Credit Tracker either. That
     // sync is what actually books the spend outside this app, so counting them

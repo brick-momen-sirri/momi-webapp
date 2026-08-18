@@ -23,6 +23,8 @@ export type PersistedServerlessArtifact = {
   filePath?: string;
   fileName?: string;
   resolution?: Resolution;
+  /** Size on disk of the written file, for the result's own record. */
+  byteLength?: number;
   manifestRecord?: Record<string, unknown>;
   error?: string;
 };
@@ -38,6 +40,8 @@ export type PersistServerlessArtifactsResult = {
   resultRemoteRefs: string[];
   thumbnailUrls: string[];
   outputResolution?: Resolution;
+  /** Size of the selected result on disk, aligned with outputResolution. */
+  outputBytes?: number;
   manifestRecords: Array<Record<string, unknown>>;
 };
 
@@ -109,6 +113,7 @@ export async function persistServerlessArtifacts({
     resultRemoteRefs: selectedArtifacts.map((artifact) => remoteObjectRef(artifact.remoteUrl)),
     thumbnailUrls,
     outputResolution: selectedArtifacts.find((artifact) => artifact.resolution)?.resolution,
+    outputBytes: selectedArtifacts.find((artifact) => artifact.byteLength !== undefined)?.byteLength,
     manifestRecords: artifacts
       .map((artifact) => artifact.manifestRecord)
       .filter((item): item is Record<string, unknown> => Boolean(item)),
@@ -143,6 +148,15 @@ async function persistOneArtifact(
     reservationPath = target.reservationPath;
     await mediaSource.writeTo(target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
+    // Same reason the resolution is read here: the file has just been written, so
+    // this is the one moment its size is free. Still image results are the largest
+    // media this app produces -- 4K to 10K PNGs past 100 MB -- and nothing recorded
+    // how much of the disk a render consumed, on a host where output grows by tens
+    // of gigabytes a month. Failure to stat is not worth failing a finished render.
+    const byteLength = await fs
+      .stat(target.filePath)
+      .then((stats) => stats.size)
+      .catch(() => undefined);
 
     // Build the preview renditions now, so browsing the project never decodes the
     // original. warmThumbnails does not throw and logs its own failures: the
@@ -189,6 +203,7 @@ async function persistOneArtifact(
       filePath: target.filePath,
       fileName: path.basename(target.filePath),
       resolution,
+      byteLength,
       manifestRecord,
     };
   } catch (error) {

@@ -23,8 +23,10 @@ import type {
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
 import {
   formatPodRuntime,
+  formatResultBytes,
+  formatUsd,
   gpuDisplayName,
-  measuredPodCredits,
+  measuredPodUsd,
   podCostExplanation,
 } from "../features/still-images/podRuntimeCost";
 import {
@@ -437,9 +439,11 @@ function StillImageJobCard({
   const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
   const qwenMode = job.workflowOptions?.stillImage?.settings?.mode;
   const seed = job.workflowOptions?.stillImage?.seed;
-  const podCredits = measuredPodCredits(job);
+  const podUsd = measuredPodUsd(job);
+  const podCost = podUsd === undefined ? undefined : formatUsd(podUsd);
   const podRuntime = formatPodRuntime(job);
   const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
+  const resultBytes = formatResultBytes(job.outputBytes);
 
   return (
     <article id={stillJobCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
@@ -597,12 +601,12 @@ function StillImageJobCard({
         {/* Measured, or nothing. These pods return no usage figures, so a cost
             exists only where RunPod reported worker time and the GPU behind the
             worker is one we have a rate for; anything else would be the old flat
-            estimate wearing a cost label. */}
-        <MetadataItem
-          label="Cost"
-          value={podCredits === undefined ? "--" : `${podCredits} cr`}
-          hint={podCostExplanation(job)}
-        />
+            estimate wearing a cost label.
+
+            Shown in dollars because that is what the pods are rented in and what an
+            artist can weigh a re-render against. The credit figure the balance and
+            the dashboards use is in the tooltip. */}
+        <MetadataItem label="Cost" value={podCost ?? "--"} hint={podCostExplanation(job)} />
         {/* Worker time, not the wall clock on the card: a job also waits in RunPod's
             queue, and that wait is not billed. */}
         <MetadataItem label="Pod time" value={podRuntime ?? "--"} hint="Time a worker spent on this job." />
@@ -613,6 +617,15 @@ function StillImageJobCard({
           label="GPU"
           value={gpu ?? "--"}
           hint={gpu ? job.runpodTiming?.gpuTypeId : "The worker's GPU was not identified for this run."}
+        />
+        {/* What came out, which for an upscaler is the whole point of the run. The
+            pixels are known for every result; the megabytes only for those rendered
+            since the size started being recorded, so they ride in the tooltip
+            rather than leaving a second cell empty on older cards. */}
+        <MetadataItem
+          label="Result size"
+          value={job.outputResolution?.label ?? formatResolution(job.outputResolution) ?? "--"}
+          hint={resultBytes ? `${resultBytes} on disk.` : "Size on disk was not recorded for this result."}
         />
       </div>
     </article>
@@ -830,6 +843,12 @@ function EmptyState({
       </article>
     </div>
   );
+}
+
+/** For a resolution stored before the label was, or one that lost it in transit. */
+function formatResolution(resolution: Job["outputResolution"]) {
+  if (!resolution?.width || !resolution?.height) return undefined;
+  return `${Math.round(resolution.width)} \u00d7 ${Math.round(resolution.height)}`;
 }
 
 function MetadataItem({ label, value, hint }: { label: string; value: string; hint?: string }) {

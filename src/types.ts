@@ -152,6 +152,8 @@ export type Job = {
   prompt: string;
   resolution: string;
   outputResolution?: MediaResolution;
+  /** Size of the result on disk, in bytes. Absent on jobs that predate recording it. */
+  outputBytes?: number;
   status: JobStatus;
   /**
    * A cancellation has been asked for but the dispatcher has not settled it yet.

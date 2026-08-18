@@ -177,7 +177,7 @@ describe("the destination chip", () => {
 // case is the one worth protecting: it is the difference between "this run was free"
 // and "nobody measured this run".
 describe("measured pod cost", () => {
-  it("shows the cost, the worker time and the GPU that set the rate", () => {
+  it("shows the cost in dollars, the worker time and the GPU that set the rate", () => {
     renderPanel([
       stillJob({
         creditsActual: 42,
@@ -191,12 +191,37 @@ describe("measured pod cost", () => {
       }),
     ]);
 
-    expect(screen.getByText("42 cr")).toBeInTheDocument();
+    // 98s at $0.0004174/s. Dollars, because that is what the pod is rented in.
+    expect(screen.getByText("$0.041")).toBeInTheDocument();
     // Worker time only. The 4s it spent queued is not billed and is not added in.
     expect(screen.getByText("1m 38s")).toBeInTheDocument();
     // The endpoint accepts several GPU classes at different rates, so which one ran
     // it is the explanation for the number beside it.
     expect(screen.getByText("GeForce RTX 5090")).toBeInTheDocument();
+    // The credit figure the balance and the dashboards use stays reachable.
+    expect(screen.getByText("Cost").closest("div")).toHaveAttribute("title", expect.stringContaining("42 credits"));
+  });
+
+  it("shows what came out, with the size on disk when it was recorded", () => {
+    renderPanel([
+      stillJob({
+        outputResolution: { width: 4095, height: 5610, label: "4095 × 5610" },
+        outputBytes: 26_004_684,
+      }),
+    ]);
+
+    const size = screen.getByText("Result size").closest("div");
+    expect(size).toHaveTextContent("4095 × 5610");
+    expect(size).toHaveAttribute("title", "24.8 MB on disk.");
+  });
+
+  it("still reports the dimensions when no size was recorded", () => {
+    // Every result rendered before the byte size started being captured.
+    renderPanel([stillJob({ outputResolution: { width: 2526, height: 2880, label: "2526 × 2880" } })]);
+
+    const size = screen.getByText("Result size").closest("div");
+    expect(size).toHaveTextContent("2526 × 2880");
+    expect(size).toHaveAttribute("title", "Size on disk was not recorded for this result.");
   });
 
   it("reports an unidentified GPU without pretending the run was free", () => {
@@ -219,9 +244,12 @@ describe("measured pod cost", () => {
   });
 
   it("ignores a creditsActual that did not come from measured pod time", () => {
-    renderPanel([stillJob({ creditsActual: 99, creditsActualSource: "local_estimate" })]);
+    renderPanel([
+      stillJob({ creditsActual: 99, creditsActualSource: "local_estimate", runpodTiming: { executionMs: 98_000, usdPerSecond: 0.0004174 } }),
+    ]);
 
-    expect(screen.queryByText("99 cr")).toBeNull();
+    expect(screen.getByText("Cost").closest("div")).toHaveTextContent("--");
+    expect(screen.queryByText("$0.041")).toBeNull();
   });
 });
 
