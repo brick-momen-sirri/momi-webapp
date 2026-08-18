@@ -1,4 +1,4 @@
-import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Star, Trash2 } from "lucide-react";
+import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Star, Trash2, XCircle } from "lucide-react";
 import type { Job, Project } from "../types";
 import { MoveResultMenu } from "./MoveResultMenu";
 
@@ -12,6 +12,7 @@ type JobActionsProps = {
   onCopyImage: (job: Job) => void;
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
+  onCancel: (job: Job) => void;
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
@@ -29,6 +30,7 @@ export function JobActions({
   onCopyImage,
   onReuseSettings,
   onRetry,
+  onCancel,
   onToggleFavorite,
   onMove,
   onArchive,
@@ -37,9 +39,32 @@ export function JobActions({
 }: JobActionsProps) {
   const result = job.resultUrl ?? job.thumbnailUrl;
   const canRetry = !archiveView && (job.status === "failed" || job.status === "canceled");
+  // Still working, so there is still GPU time left to save by stopping it.
+  const canCancel = !archiveView && (job.status === "queued" || job.status === "sending" || job.status === "running");
+  const canceling = canCancel && job.cancelRequested === true;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
+      {/* Sits with Retry at the front of the toolbar: both are about the run
+          rather than the result, and only one of them is ever available. The
+          dispatcher settles the request on its next poll, so the button stays
+          visible as a disabled "Canceling" instead of vanishing on click. */}
+      {canCancel ? (
+        <button
+          type="button"
+          onClick={() => onCancel(job)}
+          disabled={canceling}
+          className={`flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition ${
+            canceling
+              ? "cursor-not-allowed border-line bg-stone-50 text-stone-400"
+              : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+          }`}
+          title={canceling ? "Cancel requested; stopping on the pod" : "Stop this job and its remote render"}
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          {canceling ? "Canceling" : "Cancel"}
+        </button>
+      ) : null}
       {canRetry ? (
         <button
           type="button"

@@ -19,6 +19,7 @@ type JobCardProps = {
   onCopyImage: (job: Job) => void;
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
+  onCancel: (job: Job) => void;
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
@@ -39,6 +40,7 @@ export function JobCard({
   onCopyImage,
   onReuseSettings,
   onRetry,
+  onCancel,
   onToggleFavorite,
   onMove,
   onArchive,
@@ -203,6 +205,7 @@ export function JobCard({
           onCopyImage={onCopyImage}
           onReuseSettings={onReuseSettings}
           onRetry={onRetry}
+          onCancel={onCancel}
           onToggleFavorite={onToggleFavorite}
           onMove={onMove}
           onArchive={onArchive}

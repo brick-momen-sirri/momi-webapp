@@ -4,6 +4,7 @@ import type { ImageDownloadFormat } from "../../components/DownloadImageChoiceMo
 import {
   archiveBackendJob,
   backendResultFileUrl,
+  cancelBackendJob,
   moveBackendJobResult,
   permanentlyDeleteBackendJob,
   restoreBackendJob,
@@ -148,6 +149,40 @@ export function useJobActions(options: JobActionsOptions) {
     }
   }
 
+  /**
+   * Ask the dispatcher to stop a job that is still working.
+   *
+   * Worth having on both surfaces, but it is Still Images that needs it most: a
+   * preset runs one to eight minutes on a pod the studio pays for by the second,
+   * so a wrong slot or a typo in the prompt was previously paid for in full.
+   *
+   * The flag is what the UI shows, not the status. Cancellation is a request the
+   * dispatcher settles on its next poll -- which is also where the remote RunPod
+   * job is stopped -- so the job comes back still `running` and only reaches
+   * `canceled` once that has actually happened.
+   */
+  async function handleCancelJob(job: Job) {
+    if (!backendAvailable) {
+      showToast("Cancel is only available while the backend is connected.", "error");
+      return;
+    }
+    setJobs((current) => current.map((item) => (item.id === job.id ? { ...item, cancelRequested: true } : item)));
+    try {
+      const updated = await cancelBackendJob(job.id);
+      setJobs((current) => current.map((item) => (item.id === job.id ? updated : item)));
+      showToast(
+        updated.status === "canceled" ? "Job canceled." : "Cancel requested. Stopping the job on its pod.",
+      );
+    } catch (error) {
+      // Put the flag back: leaving it set would show "Canceling" forever on a job
+      // that is still running and still billing.
+      setJobs((current) =>
+        current.map((item) => (item.id === job.id ? { ...item, cancelRequested: job.cancelRequested } : item)),
+      );
+      showToast(error instanceof Error ? error.message : "Could not cancel job.", "error");
+    }
+  }
+
   async function setArchivedState(job: Job, restore: boolean) {
     const previousJobs = jobs;
     setJobs((current) => current.filter((item) => item.id !== job.id));
@@ -229,6 +264,7 @@ export function useJobActions(options: JobActionsOptions) {
     handleToggleFavorite,
     handleMoveJobResult,
     handleRetryJob,
+    handleCancelJob,
     handleArchiveJob: (job: Job) => setArchivedState(job, false),
     handleRestoreArchivedJob: (job: Job) => setArchivedState(job, true),
     handlePermanentlyDeleteJob,

@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, Project } from "../../types";
 import {
   archiveBackendJob,
+  cancelBackendJob,
   moveBackendJobResult,
   permanentlyDeleteBackendJob,
   restoreBackendJob,
@@ -20,6 +21,7 @@ import { useJobActions } from "./useJobActions";
 
 vi.mock("../../services/backendApi", () => ({
   archiveBackendJob: vi.fn(),
+  cancelBackendJob: vi.fn(),
   moveBackendJobResult: vi.fn(),
   permanentlyDeleteBackendJob: vi.fn(),
   restoreBackendJob: vi.fn(),
@@ -141,6 +143,43 @@ describe("retry", () => {
 
     expect(toasts.at(-1)).toMatchObject({ message: "Queue is paused.", type: "error" });
     expect(state.total).toBe(10);
+  });
+});
+
+// Cancelling is a request, not a state change: the dispatcher settles it on its
+// next poll, and that is also where the remote RunPod job -- the thing actually
+// costing money -- is stopped. So the flag has to survive a still-running
+// response, and must not survive a failed request.
+describe("cancel", () => {
+  it("refuses to cancel while the backend is disconnected", async () => {
+    const { result, toasts } = setup({ backendAvailable: false });
+
+    await act(async () => void (await result.current.handleCancelJob(job({ status: "running" }))));
+
+    expect(cancelBackendJob).not.toHaveBeenCalled();
+    expect(toasts[0]).toMatchObject({ type: "error" });
+  });
+
+  it("keeps the request flag on a job the dispatcher has not stopped yet", async () => {
+    vi.mocked(cancelBackendJob).mockResolvedValue(job({ status: "running", cancelRequested: true }));
+    const { result, state, toasts } = setup({ jobs: [job({ status: "running" })] });
+
+    await act(async () => void (await result.current.handleCancelJob(job({ status: "running" }))));
+
+    expect(state.jobs[0]).toMatchObject({ status: "running", cancelRequested: true });
+    expect(toasts.at(-1)?.type).not.toBe("error");
+  });
+
+  it("clears the request flag when the cancel is refused", async () => {
+    vi.mocked(cancelBackendJob).mockRejectedValue(new Error("Job already finished."));
+    const { result, state, toasts } = setup({ jobs: [job({ status: "running" })] });
+
+    await act(async () => void (await result.current.handleCancelJob(job({ status: "running" }))));
+
+    // Otherwise the card reads "Canceling" forever on a job that is still
+    // running, and still billing.
+    expect(state.jobs[0].cancelRequested).toBeUndefined();
+    expect(toasts.at(-1)).toMatchObject({ message: "Job already finished.", type: "error" });
   });
 });
 

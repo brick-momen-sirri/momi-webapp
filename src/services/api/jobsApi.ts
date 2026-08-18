@@ -81,6 +81,18 @@ export async function retryBackendJob(jobId: string) {
   return mutateJob(jobId, "retry", "POST");
 }
 
+/**
+ * Ask the dispatcher to stop a job that has not finished yet.
+ *
+ * The returned job is normally still `running` with `cancelRequested` set: the
+ * request is a flag the dispatcher observes on its next poll, which is also where
+ * the remote RunPod job is cancelled. Callers should show "Canceling" from the
+ * flag rather than treat the response as a finished cancellation.
+ */
+export async function cancelBackendJob(jobId: string) {
+  return mutateJob(jobId, "cancel", "POST");
+}
+
 export async function archiveBackendJob(jobId: string) {
   return mutateJob(jobId, "archive", "POST");
 }

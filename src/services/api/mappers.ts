@@ -106,6 +106,7 @@ export function mapJob(job: BackendJob): Job {
     durationSeconds: job.durationSeconds,
     workflowOptions: job.workflowOptions,
     status: job.status,
+    cancelRequested: job.cancelRequested,
     runpodProgress: job.runpodProgress,
     inputImages,
     inputVideo,

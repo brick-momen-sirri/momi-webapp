@@ -53,6 +53,8 @@ type StillImagesWorkspaceProps = {
   onCopyImage?: (job: Job) => void;
   onReuseSettings?: (job: Job) => void;
   onRetry?: (job: Job) => void;
+  /** Stop a queued or running job before it finishes paying for its pod time. */
+  onCancel?: (job: Job) => void;
   onToggleFavorite?: (job: Job) => void;
   onMove?: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive?: (job: Job) => void;
@@ -200,6 +202,7 @@ function StillImageJobCard({
             onCopyImage={actions.onCopyImage ?? noop}
             onReuseSettings={actions.onReuseSettings ?? noop}
             onRetry={actions.onRetry ?? noop}
+            onCancel={actions.onCancel ?? noop}
             onToggleFavorite={actions.onToggleFavorite ?? noop}
             onMove={actions.onMove ?? (async () => false)}
             onArchive={actions.onArchive ?? noop}

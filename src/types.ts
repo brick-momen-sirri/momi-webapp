@@ -153,6 +153,15 @@ export type Job = {
   resolution: string;
   outputResolution?: MediaResolution;
   status: JobStatus;
+  /**
+   * A cancellation has been asked for but the dispatcher has not settled it yet.
+   *
+   * Set the moment the API accepts the request, while the job is usually still
+   * `running`: the dispatcher observes the flag on its next poll, which is where
+   * the remote RunPod job is actually stopped. So "Canceling" comes from this and
+   * "Canceled" from the status.
+   */
+  cancelRequested?: boolean;
   inputImages: string[];
   inputVideo?: string;
   resultUrl?: string;

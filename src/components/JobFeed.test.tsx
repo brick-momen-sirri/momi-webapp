@@ -44,6 +44,7 @@ function renderFeed(jobs: Job[], overrides: Record<string, unknown> = {}) {
     onCopyImage: vi.fn(),
     onReuseSettings: vi.fn(),
     onRetry: vi.fn(),
+    onCancel: vi.fn(),
     canReuseSettings: () => true,
     onToggleFavorite: vi.fn(),
     onMove: vi.fn().mockResolvedValue(true),
@@ -331,6 +332,30 @@ describe("archive view", () => {
 });
 
 describe("job actions", () => {
+  it("offers cancel on a running job and passes it to the handler", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    renderFeed([job({ id: "a", status: "running" })], { onCancel });
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+  });
+
+  it("shows a disabled Canceling once the request is in flight", () => {
+    renderFeed([job({ id: "a", status: "running", cancelRequested: true })]);
+
+    // The dispatcher settles the request on its next poll, so the control stays
+    // put rather than disappearing and leaving no sign anything happened.
+    expect(screen.getByRole("button", { name: "Canceling" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it("offers no cancel once a job has finished", () => {
+    renderFeed([job({ id: "a", status: "completed" })]);
+
+    expect(screen.queryByRole("button", { name: /Cancel/ })).toBeNull();
+  });
+
   it("passes the job through to the retry handler", async () => {
     const user = userEvent.setup();
     const onRetry = vi.fn();
