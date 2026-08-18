@@ -38,8 +38,13 @@ function stillJob(overrides: Partial<Job> = {}): Job {
     prompt: "",
     status: "completed",
     inputImages: ["/api/media?path=in.png"],
-    resultUrls: ["/api/media?path=out.png"],
-    resultUrl: "/api/media?path=out.png",
+    // Both forms mapJob produces, because they are not interchangeable: results are
+    // proxied through /api/jobs/:id/result-media for display, while a chained input
+    // has to be submitted against the saved media path. A fixture that showed only
+    // one of them is how "Use as input" shipped broken.
+    resultUrls: ["/api/jobs/job_still_1/result-media?index=0"],
+    resultUrl: "/api/jobs/job_still_1/result-media?index=0",
+    resultSourceUrls: ["/api/media?path=out.png"],
     thumbnailUrls: [],
     outputType: "image",
     createdAt: "2026-08-12T10:00:00.000Z",
@@ -242,7 +247,7 @@ describe("StillImagesWorkspace", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Pro Upscaler" })).toBeInTheDocument();
     expect(screen.getByText("Camera 0012")).toBeInTheDocument();
     const result = screen.getByAltText("Result") as HTMLImageElement;
-    expect(result.src).toContain("out.png");
+    expect(result.src).toContain("result-media");
     expect(screen.getByAltText("Still image input 1")).toBeInTheDocument();
   });
 
@@ -257,11 +262,11 @@ describe("StillImagesWorkspace", () => {
     // 1440, the largest rendition: the card spans the panel and these renders
     // are being judged on quality, so a smaller one upscaled reads as a fault in
     // the render rather than in the preview.
-    expect(result.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=1440");
+    expect(result.getAttribute("src")).toBe("/api/jobs/job_still_1/result-media?index=0&w=1440");
     // Still a rendition, never the un-resized media route.
-    expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
+    expect(result.getAttribute("src")).not.toBe("/api/jobs/job_still_1/result-media?index=0");
     // Nothing on the card may point at the un-resized media route.
-    expect(result.getAttribute("src")).not.toBe("/api/media?path=out.png");
+    expect(result.getAttribute("src")).not.toBe("/api/jobs/job_still_1/result-media?index=0");
     // jsdom does not reflect these as IDL properties, so read the attributes.
     expect(result.getAttribute("loading")).toBe("lazy");
     expect(result.getAttribute("decoding")).toBe("async");
@@ -322,9 +327,9 @@ describe("StillImagesWorkspace", () => {
       .getAllByRole("img")
       .map((node) => node.getAttribute("src"));
     expect(sources).toContain("/api/media/thumbnail?path=in.png&w=1440");
-    expect(sources).toContain("/api/media/thumbnail?path=out.png&w=1440");
+    expect(sources).toContain("/api/jobs/job_still_1/result-media?index=0&w=1440");
     // Renditions on both sides; the original is still only ever an explicit ask.
-    expect(sources).not.toContain("/api/media?path=out.png");
+    expect(sources).not.toContain("/api/jobs/job_still_1/result-media?index=0");
   });
 
   // The archviz chain is enhance-then-upscale, and walking it used to mean
@@ -490,7 +495,7 @@ describe("StillImagesWorkspace", () => {
     const fullscreen = screen.getByRole("dialog", { name: /fullscreen image preview/i });
     const preview = within(fullscreen).getByRole("img") as HTMLImageElement;
     // Fullscreen is a bigger rendition, still not the original.
-    expect(preview.getAttribute("src")).toBe("/api/media/thumbnail?path=out.png&w=1440");
+    expect(preview.getAttribute("src")).toBe("/api/jobs/job_still_1/result-media?index=0&w=1440");
   });
 
   it("pluralizes the count", () => {

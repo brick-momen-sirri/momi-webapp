@@ -166,6 +166,16 @@ export type Job = {
   inputVideo?: string;
   resultUrl?: string;
   resultUrls?: string[];
+  /**
+   * The same results as saved project media, for submitting as an input.
+   *
+   * resultUrls above are rewritten to /api/jobs/:id/result-media so the browser
+   * fetches them through the backend with a media token. That form is for display
+   * only -- the job pipeline cannot resolve it to a file, so submitting one is
+   * rejected as a remote URL. These are the durable /api/media?path= values the
+   * backend stored, which is what a chained input has to carry.
+   */
+  resultSourceUrls?: string[];
   thumbnailUrl?: string;
   thumbnailUrls?: string[];
   outputType?: "image" | "video" | "sequence";

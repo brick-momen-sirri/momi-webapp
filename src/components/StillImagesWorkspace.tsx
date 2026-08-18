@@ -36,6 +36,7 @@ import {
   type StillImageResultFilters,
 } from "../features/still-images/resultFilters";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
+import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
@@ -647,6 +648,11 @@ function chainBlockedReason(job: Job, selectedProject?: Project) {
   if (!selectedProject) return "Select a project before sending a result to a preset.";
   if (job.projectId !== selectedProject.id) {
     return "This result belongs to another project. Open that project to use it as an input.";
+  }
+  // A result still sitting on the provider's storage has no path on disk to submit,
+  // and the presets cannot take a link. Said here rather than discovered at Generate.
+  if (!chainableResultUrl(job)) {
+    return "This result has not been saved into the project yet, so it cannot be used as an input.";
   }
   return undefined;
 }

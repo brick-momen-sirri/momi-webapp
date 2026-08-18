@@ -114,6 +114,9 @@ export function mapJob(job: BackendJob): Job {
     inputVideo,
     resultUrls,
     resultUrl,
+    // Deliberately unproxied and untokenised: this is the value the backend stored,
+    // and the only form a job can be submitted against.
+    resultSourceUrls: job.resultUrls,
     thumbnailUrls,
     thumbnailUrl: thumbnailUrls[0] ?? resultUrl,
     outputType: job.outputType,

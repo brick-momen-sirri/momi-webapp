@@ -23,10 +23,16 @@ vi.mock("../generation/generationUtils", () => ({
   uploadJobMediaUrl: (...args: unknown[]) => uploadJobMediaUrl(...args),
 }));
 
+// The shapes mapJob actually produces. This fixture used to set resultUrl to an
+// /api/media URL, which no backend job ever carries -- results are proxied through
+// /api/jobs/:id/result-media for display -- so the test asserted the right thing
+// about a job that could not exist, and the real chain submitted the proxied URL
+// and was refused by the materializer every time.
 const completedJob = {
   id: "job_1",
   status: "completed",
-  resultUrl: "/api/media?path=enhanced.png",
+  resultUrl: "/api/jobs/job_1/result-media?index=0&access_token=tok",
+  resultSourceUrls: ["/api/media?path=enhanced.png"],
   fileName: "RAW_0012_GeneralEnhancement_v001.png",
   modelType: "General Enhancement",
 } as Job;
@@ -89,9 +95,12 @@ describe("chaining a result into the next preset", () => {
       });
     });
 
-    // The URL the previous job wrote, forwarded untouched.
+    // The saved media path the previous job wrote, forwarded untouched.
     expect(createBackendJob.mock.calls[0][0].inputImages).toEqual(["/api/media?path=enhanced.png"]);
     // Never the rendition the slot was showing.
     expect(createBackendJob.mock.calls[0][0].inputImages[0]).not.toContain("thumbnail");
+    // And never the proxied display URL, which is what the dispatcher rejects as a
+    // remote link -- the failure this whole path had in production.
+    expect(createBackendJob.mock.calls[0][0].inputImages[0]).not.toContain("result-media");
   });
 });
