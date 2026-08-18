@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
 import { createInitialStillImagesState, getStillImageCategory } from "../features/still-images/stillImageCategories";
@@ -64,6 +65,108 @@ function renderPanel(jobs: Job[]) {
   );
 }
 
+// Thirty results is thirty full-width cards, each with a compare slider up to 85vh
+// tall, so the filter bar is the only way the panel stays usable at real volume.
+// What is asserted here is the wiring and the two empty states, which are easy to
+// confuse: "nothing ran" and "your filters hid everything" tell an artist opposite
+// things about whether to press Generate.
+describe("filtering the results list", () => {
+  it("narrows the list and says what it is showing", async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      stillJob({ id: "job_done" }),
+      stillJob({ id: "job_failed", status: "failed", errorMessage: "Worker ran out of memory." }),
+    ]);
+    expect(screen.getByText("2 results")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Filter by status"), "failed");
+
+    // The count has to say it is a subset, or a filtered list reads as the whole
+    // project and someone concludes their other renders were lost.
+    expect(screen.getByText("1 of 2 results")).toBeInTheDocument();
+    expect(screen.getByText("Worker ran out of memory.")).toBeInTheDocument();
+  });
+
+  it("finds a render by its camera number", async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      stillJob({ id: "job_12", workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0012" } } }),
+      stillJob({ id: "job_99", workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0099" } } }),
+    ]);
+
+    await user.type(screen.getByLabelText("Search results"), "0012");
+
+    expect(screen.getByText("1 of 2 results")).toBeInTheDocument();
+    expect(screen.getByText("Camera 0012")).toBeInTheDocument();
+    expect(screen.queryByText("Camera 0099")).toBeNull();
+  });
+
+  it("says the filters are hiding results rather than claiming nothing ran", async () => {
+    const user = userEvent.setup();
+    renderPanel([stillJob()]);
+
+    await user.selectOptions(screen.getByLabelText("Filter by preset"), "qwen-edit");
+
+    expect(screen.getByText("No result matches these filters")).toBeInTheDocument();
+    // The other empty state, which invites the artist to press Generate.
+    expect(screen.queryByText("No still image results for this project yet")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("1 result")).toBeInTheDocument();
+  });
+
+  it("offers no filter bar when the project has no results at all", () => {
+    renderPanel([]);
+    expect(screen.queryByLabelText("Search results")).toBeNull();
+  });
+});
+
+describe("the grid layout", () => {
+  it("switches to tiles and back to the full card", async () => {
+    const user = userEvent.setup();
+    renderPanel([stillJob({ fileName: "20260814_pro-upscaler_1234_cam-12_v001.png" })]);
+    // The list card carries the inputs and the whole metadata grid; that is what
+    // the grid trades away for a scannable sheet.
+    expect(screen.getByText("Input preview")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Grid" }));
+
+    const tile = screen.getByRole("button", { name: "Show this result in the full card" });
+    expect(tile).toBeInTheDocument();
+    expect(screen.queryByText("Input preview")).toBeNull();
+
+    await user.click(tile);
+    expect(screen.getByText("Input preview")).toBeInTheDocument();
+    // And the card it opened is addressable, which is what the panel scrolls to --
+    // being dropped at the top of fifty results is what the grid was avoiding.
+    expect(document.getElementById("still-job-job_still_1")).toBeInTheDocument();
+  });
+});
+
+// The chip beside the project name is the destination for the next Generate, not a
+// filter on this list -- unlabelled, it read as one while the list showed results
+// from every folder in the project.
+describe("the destination chip", () => {
+  it("says the folder is where new results will be saved", () => {
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={{ ...project, folders: [{ folderId: "fld_1", name: "Interiors", archived: false }] } as Project}
+        targetFolderId="fld_1"
+        saveNumber="0012"
+        userName="Momen"
+        jobs={[stillJob({ folderId: null, folderName: "Root" })]}
+      />,
+    );
+
+    expect(screen.getByText("Saving to Interiors")).toBeInTheDocument();
+    // And the result in another folder is still listed, which is what the label now
+    // admits to.
+    expect(screen.getByText("1 result")).toBeInTheDocument();
+  });
+});
+
 // These pods return no usage figures, so a cost on one of these cards is only ever
 // there because RunPod reported worker time and the endpoint had a price. The "--"
 // case is the one worth protecting: it is the difference between "this run was free"
@@ -102,7 +205,7 @@ describe("measured pod cost", () => {
 describe("StillImagesWorkspace", () => {
   it("shows an empty state and a zero count when nothing has been generated", () => {
     renderPanel([]);
-    expect(screen.getByText("0 generated results")).toBeInTheDocument();
+    expect(screen.getByText("0 results")).toBeInTheDocument();
     expect(screen.getByText("No still image results for this project yet")).toBeInTheDocument();
   });
 
@@ -117,7 +220,7 @@ describe("StillImagesWorkspace", () => {
   it("renders a completed job with its result image and metadata", () => {
     renderPanel([stillJob()]);
 
-    expect(screen.getByText("1 generated result")).toBeInTheDocument();
+    expect(screen.getByText("1 result")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Pro Upscaler" })).toBeInTheDocument();
     expect(screen.getByText("Camera 0012")).toBeInTheDocument();
     const result = screen.getByAltText("Result") as HTMLImageElement;
@@ -374,7 +477,7 @@ describe("StillImagesWorkspace", () => {
 
   it("pluralizes the count", () => {
     renderPanel([stillJob(), stillJob({ id: "job_still_2" })]);
-    expect(screen.getByText("2 generated results")).toBeInTheDocument();
+    expect(screen.getByText("2 results")).toBeInTheDocument();
   });
 
   it("shows the error message for a failed job instead of a pending placeholder", () => {

@@ -8,10 +8,13 @@ import {
   ImageIcon,
   Images,
   Loader2,
+  LayoutGrid,
   Maximize2,
+  Rows3,
+  Search,
   UserRound,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   StillImageCategoryDefinition,
   StillImageCategoryId,
@@ -19,6 +22,14 @@ import type {
 } from "../features/still-images/stillImageCategories";
 import { STILL_IMAGE_CATEGORIES } from "../features/still-images/stillImageCategories";
 import { formatPodRuntime, measuredPodCredits } from "../features/still-images/podRuntimeCost";
+import {
+  DEFAULT_STILL_IMAGE_RESULT_FILTERS,
+  filterStillImageJobs,
+  hasActiveStillImageFilters,
+  ROOT_FOLDER_FILTER,
+  STILL_IMAGE_PRESET_FILTER_OPTIONS,
+  type StillImageResultFilters,
+} from "../features/still-images/resultFilters";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
@@ -76,6 +87,24 @@ export function StillImagesWorkspace({
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
   const targetFolder = selectedProject?.folders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
+  const [filters, setFilters] = useState(DEFAULT_STILL_IMAGE_RESULT_FILTERS);
+  const [layout, setLayout] = useState<StillImageResultLayout>("list");
+  // Which card to land on after leaving the grid.
+  const [focusJobId, setFocusJobId] = useState<string | null>(null);
+  const visibleJobs = useMemo(() => filterStillImageJobs(jobs, filters), [jobs, filters]);
+  const filtering = hasActiveStillImageFilters(filters);
+
+  useEffect(() => {
+    if (layout !== "list" || !focusJobId) return;
+    // Picking a tile out of fifty and being dropped at the top of the list would
+    // mean scrolling to find it again, which is what the grid was there to avoid.
+    //
+    // Left set rather than cleared here: a stale id costs nothing, because this only
+    // re-runs when the layout or the chosen card changes, and clearing it would be a
+    // state write from inside an effect for no gain.
+    const card = document.getElementById(stillJobCardElementId(focusJobId));
+    card?.scrollIntoView?.({ block: "start" });
+  }, [layout, focusJobId]);
 
   return (
     <div className="middle-panel pb-3">
@@ -86,29 +115,63 @@ export function StillImagesWorkspace({
             <span className="rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">
               {selectedProject?.name ?? "Select project"}
             </span>
+            {/* Where the next Generate will save, which is not a filter on this
+                list. Unlabelled next to the project chip it read as one, while the
+                list went on showing results from every folder in the project. */}
             {targetFolder ? (
-              <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">{targetFolder.name}</span>
+              <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+                Saving to {targetFolder.name}
+              </span>
             ) : null}
-            <span className="text-sm font-semibold text-stone-500">
-              {jobs.length} generated result{jobs.length === 1 ? "" : "s"}
-            </span>
+            <span className="text-sm font-semibold text-stone-500">{resultCountLabel(visibleJobs.length, jobs.length, filtering)}</span>
           </div>
+          <StillImageResultLayoutToggle layout={layout} onChange={setLayout} />
         </div>
+        {jobs.length ? (
+          <StillImageResultFilterBar
+            filters={filters}
+            onChange={setFilters}
+            folders={selectedProject?.folders?.filter((folder) => !folder.archived) ?? []}
+          />
+        ) : null}
       </section>
 
-      {jobs.length ? (
-        <div className="space-y-3">
-          {jobs.map((job) => (
-            <StillImageJobCard
-              key={job.id}
-              job={job}
-              project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
-              selectedProject={selectedProject}
-              userName={users.find((user) => user.id === job.userId)?.name ?? userName}
-              actions={actions}
-            />
-          ))}
-        </div>
+      {visibleJobs.length ? (
+        layout === "grid" ? (
+          // Every list card carries a compare slider up to 85vh tall, which is what
+          // makes one result judgeable and thirty unfindable. The grid trades that
+          // for a scannable contact sheet, and a tile switches back to the cards.
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {visibleJobs.map((job) => (
+              <StillImageResultTile
+                key={job.id}
+                job={job}
+                onOpen={() => {
+                  setFocusJobId(job.id);
+                  setLayout("list");
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {visibleJobs.map((job) => (
+              <StillImageJobCard
+                key={job.id}
+                job={job}
+                project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
+                selectedProject={selectedProject}
+                userName={users.find((user) => user.id === job.userId)?.name ?? userName}
+                actions={actions}
+              />
+            ))}
+          </div>
+        )
+      ) : filtering ? (
+        // Not the same thing as an empty project, and must not be told as one: the
+        // preset instructions and the filename preview would suggest nothing had
+        // ever run here when the filters are simply hiding it.
+        <NoMatchesState total={jobs.length} onClear={() => setFilters(DEFAULT_STILL_IMAGE_RESULT_FILTERS)} />
       ) : (
         <EmptyState
           category={category}
@@ -119,6 +182,228 @@ export function StillImagesWorkspace({
           icon={<CategoryIcon className="h-5 w-5" />}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * How many results the list is showing.
+ *
+ * A filtered list has to say it is a subset -- "1 of 12" -- or it reads as the whole
+ * project and someone concludes the rest of their renders are gone. One string
+ * rather than interpolated fragments so it stays one text node, which is also how
+ * anything reading the header sees it.
+ */
+function resultCountLabel(shown: number, total: number, filtering: boolean) {
+  if (filtering) return `${shown} of ${total} result${total === 1 ? "" : "s"}`;
+  return `${total} result${total === 1 ? "" : "s"}`;
+}
+
+type StillImageResultLayout = "list" | "grid";
+
+/** Ties a grid tile to the card it opens. */
+function stillJobCardElementId(jobId: string) {
+  return `still-job-${jobId}`;
+}
+
+function StillImageResultLayoutToggle({
+  layout,
+  onChange,
+}: {
+  layout: StillImageResultLayout;
+  onChange: (layout: StillImageResultLayout) => void;
+}) {
+  const options = [
+    { value: "list", label: "List", icon: Rows3 },
+    { value: "grid", label: "Grid", icon: LayoutGrid },
+  ] as const;
+
+  return (
+    <div className="flex shrink-0 items-center gap-1 rounded-md border border-line bg-mist/60 p-1">
+      {options.map((option) => {
+        const Icon = option.icon;
+        const selected = option.value === layout;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={selected}
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition",
+              selected ? "bg-white text-ink shadow-card" : "text-stone-500 hover:text-ink",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const FILTER_SELECT_CLASS =
+  "h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20";
+
+function StillImageResultFilterBar({
+  filters,
+  onChange,
+  folders,
+}: {
+  filters: StillImageResultFilters;
+  onChange: (filters: StillImageResultFilters) => void;
+  folders: Array<{ folderId: string; name: string }>;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+      <label className="relative min-w-[200px] flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+        <input
+          type="search"
+          aria-label="Search results"
+          value={filters.query}
+          onChange={(event) => onChange({ ...filters, query: event.target.value })}
+          placeholder="Search prompt, file, camera, seed"
+          className="h-9 w-full rounded-md border border-line bg-white pl-8 pr-2 text-xs outline-none transition placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+        />
+      </label>
+      <select
+        aria-label="Filter by preset"
+        value={filters.presetId}
+        onChange={(event) => onChange({ ...filters, presetId: event.target.value as StillImageResultFilters["presetId"] })}
+        className={FILTER_SELECT_CLASS}
+      >
+        <option value="all">All presets</option>
+        {STILL_IMAGE_PRESET_FILTER_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Filter by status"
+        value={filters.status}
+        onChange={(event) => onChange({ ...filters, status: event.target.value as StillImageResultFilters["status"] })}
+        className={FILTER_SELECT_CLASS}
+      >
+        <option value="all">Any status</option>
+        <option value="completed">Completed</option>
+        <option value="working">Working</option>
+        <option value="failed">Failed or canceled</option>
+      </select>
+      <select
+        aria-label="Filter by folder"
+        value={filters.folderId}
+        onChange={(event) => onChange({ ...filters, folderId: event.target.value })}
+        className={FILTER_SELECT_CLASS}
+      >
+        <option value="all">All folders</option>
+        <option value={ROOT_FOLDER_FILTER}>Project root</option>
+        {folders.map((folder) => (
+          <option key={folder.folderId} value={folder.folderId}>
+            {folder.name}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Sort results"
+        value={filters.sort}
+        onChange={(event) => onChange({ ...filters, sort: event.target.value as StillImageResultFilters["sort"] })}
+        className={FILTER_SELECT_CLASS}
+      >
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="cost">Most expensive first</option>
+      </select>
+      {hasActiveStillImageFilters(filters) ? (
+        <button
+          type="button"
+          onClick={() => onChange({ ...DEFAULT_STILL_IMAGE_RESULT_FILTERS, sort: filters.sort })}
+          className="h-9 rounded-md border border-line bg-white px-2.5 text-xs font-semibold text-stone-600 transition hover:border-accent hover:text-accent"
+        >
+          Clear
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One result as a contact-sheet tile.
+ *
+ * The card rendition, not the original: scrolling a grid of fifty must cost fifty
+ * small requests, because these files routinely pass 100 MB and nothing in this
+ * panel may ever load one.
+ */
+function StillImageResultTile({ job, onOpen }: { job: Job; onOpen: () => void }) {
+  const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === job.workflowOptions?.stillImage?.categoryId);
+  const PresetIcon = preset?.icon ?? ImageIcon;
+  const resultUrl = job.resultUrl ?? job.thumbnailUrl;
+  const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
+
+  return (
+    <article className="overflow-hidden rounded-lg border border-line bg-white shadow-card">
+      <button
+        type="button"
+        onClick={onOpen}
+        // Labelled explicitly: the tile's only content is the result image, whose
+        // alt text is a filename, so without this the control announces itself as
+        // "20260814_pro-upscaler_1234_cam-12_v001.png".
+        aria-label="Show this result in the full card"
+        title="Show this result in the full card"
+        className="block aspect-[4/3] w-full overflow-hidden bg-stone-100"
+      >
+        {resultUrl && job.status === "completed" ? (
+          <img
+            src={thumbnailMediaUrl(resultUrl, THUMBNAIL_WIDTH.grid)}
+            alt={job.fileName ?? `${job.modelType} result`}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-stone-400">
+            {isJobWorking(job.status) ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : job.status === "failed" || job.status === "canceled" ? (
+              <AlertTriangle className="h-5 w-5" />
+            ) : (
+              <PresetIcon className="h-5 w-5" />
+            )}
+            <span className="px-2 text-center text-xs font-semibold">{resultPlaceholderTitle(job.status)}</span>
+          </span>
+        )}
+      </button>
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-line p-2">
+        <StatusBadge status={job.status} />
+        <span className="truncate text-xs font-bold">{job.modelType}</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
+          <Hash className="h-2.5 w-2.5" />
+          {saveNumber}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function NoMatchesState({ total, onClear }: { total: number; onClear: () => void }) {
+  return (
+    <div className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed border-line bg-white px-6 text-center shadow-card">
+      <span className="flex h-12 w-12 items-center justify-center rounded-full border border-line bg-white text-stone-400 shadow-sm">
+        <Search className="h-5 w-5" />
+      </span>
+      <p className="mt-3 text-sm font-semibold">No result matches these filters</p>
+      <p className="mt-1 max-w-md text-xs leading-5 text-stone-500">
+        This project has {total} still image result{total === 1 ? "" : "s"}, and none of them match what is selected above.
+      </p>
+      <button
+        type="button"
+        onClick={onClear}
+        className="mt-3 h-9 rounded-md border border-line bg-white px-3 text-xs font-semibold text-stone-700 transition hover:border-accent hover:text-accent"
+      >
+        Clear filters
+      </button>
     </div>
   );
 }
@@ -150,7 +435,7 @@ function StillImageJobCard({
   const podRuntime = formatPodRuntime(job);
 
   return (
-    <article className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
+    <article id={stillJobCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
       {/* Always a row, so the actions stay in the top-right corner. This used to
           become one only at xl, which put the toolbar underneath the title on
           any window narrower than 1280px -- which is most of them. */}
