@@ -504,6 +504,61 @@ test("Veo3 image-to-video workflow applies selected duration over scalar default
   assert.equal(veoWorkflow["1"].inputs.duration_seconds, 6);
 });
 
+// Two node families share the `resolution` input and disagree about one option:
+// GeminiNanoBanana2 offers 1K/2K/4K, the Veo3 nodes offer 720p/1080p/4k. Sending
+// "4K" to a Veo3 node is refused by the worker before it renders anything, which is
+// what every 4K Veo3 submission did:
+//
+//   resolution: '4K' not in ['720p', '1080p', '4k']
+test("Veo3 takes 4K in the lower case its node actually offers", async () => {
+  const veo = requiredModel("brick_api_veo3_i2v");
+  const veoWorkflow = (await loadWorkflowForRunpod(
+    veo,
+    {
+      ...request(veo, ["start.png"]),
+      resolution: { width: 3840, height: 2160, label: "4K" },
+    },
+    "0000_ply_graound",
+    ["start.png"],
+  )) as Record<string, any>;
+
+  assert.equal(veoWorkflow["1"].inputs.resolution, "4k");
+});
+
+test("Veo3 still takes the resolutions that were never in dispute", async () => {
+  const veo = requiredModel("brick_api_veo3_i2v");
+  for (const label of ["720p", "1080p"]) {
+    const veoWorkflow = (await loadWorkflowForRunpod(
+      veo,
+      {
+        ...request(veo, ["start.png"]),
+        resolution: { width: 1920, height: 1080, label },
+      },
+      "0000_ply_graound",
+      ["start.png"],
+    )) as Record<string, any>;
+
+    assert.equal(veoWorkflow["1"].inputs.resolution, label);
+  }
+});
+
+test("Nano Banana keeps the upper case its own node offers", async () => {
+  // The other vocabulary, and the reason this cannot simply be lower-cased: the
+  // node ships holding "1K", which is how the graph declares which scale it speaks.
+  const nano = requiredModel("brick_nano_banana_2");
+  const nanoWorkflow = (await loadWorkflowForRunpod(
+    nano,
+    {
+      ...request(nano, ["nano_1.png"]),
+      resolution: { width: 4096, height: 4096, label: "4K" },
+    },
+    "0000_ply_graound",
+    ["nano_1.png"],
+  )) as Record<string, any>;
+
+  assert.equal(nanoWorkflow["1"].inputs.resolution, "4K");
+});
+
 test("RunPod loading rejects UI workflows containing widget-bearing node types without an input mapping", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "momi-workflow-test-"));
   const workflowPath = path.join(tempDir, "unsupported_ui_workflow.json");

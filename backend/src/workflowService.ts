@@ -1058,7 +1058,8 @@ function injectInputs(
       }
       if (resolution && lowerKey === "width") inputs[key] = resolution.width;
       if (resolution && lowerKey === "height") inputs[key] = resolution.height;
-      if (resolution && lowerKey === "resolution") inputs[key] = directResolutionLabel(resolution.label ?? "1080p");
+      if (resolution && lowerKey === "resolution")
+        inputs[key] = directResolutionLabel(resolution.label ?? "1080p", inputs[key]);
       if (resolution && lowerKey === "model.resolution") inputs[key] = resolutionWidgetLabel(resolution.label ?? "1080p");
       if (resolution && isGptImageNode(node) && lowerKey === "size") inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
       if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) {
@@ -1450,12 +1451,33 @@ function resolutionWidgetLabel(label: string) {
   return "1080p";
 }
 
-function directResolutionLabel(label: string) {
+/**
+ * The value to write into a node's `resolution` combo.
+ *
+ * Two vocabularies share this input name and they disagree about one option.
+ * GeminiNanoBanana2 offers 1K/2K/4K; the Veo3 nodes offer 720p/1080p/**4k**, lower
+ * case. This returned "4K" for both, so every 4K Veo3 submission was rejected by
+ * the worker before it rendered anything:
+ *
+ *   resolution: '4K' not in ['720p', '1080p', '4k']
+ *
+ * Rather than keep a list of class names in step by hand, the node says which
+ * vocabulary it speaks: the graph ships with the widget's current value, and a
+ * K-scale node holds "1K" where a p-scale node holds "1080p". A node that changes
+ * its options keeps working as long as its default moves with them.
+ *
+ * @param currentValue the value already in the graph, which is the evidence.
+ */
+function directResolutionLabel(label: string, currentValue: unknown) {
   const normalized = label.toLowerCase().replace(/\s+/g, "");
-  if (normalized === "1k") return "1K";
-  if (normalized === "2k") return "2K";
-  if (normalized === "4k") return "4K";
+  const usesKScale = typeof currentValue === "string" && /^\d+\s*k$/i.test(currentValue.trim());
+
+  if (normalized === "4k") return usesKScale ? "4K" : "4k";
   if (normalized === "720p") return "720p";
+  // 1K and 2K exist only in the K-scale vocabulary. Asking a p-scale node for one
+  // is a combination no picker offers, and 1080p is what its own default would be.
+  if (normalized === "1k") return usesKScale ? "1K" : "1080p";
+  if (normalized === "2k") return usesKScale ? "2K" : "1080p";
   return "1080p";
 }
 
