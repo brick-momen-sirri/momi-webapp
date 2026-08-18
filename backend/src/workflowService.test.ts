@@ -504,6 +504,74 @@ test("Veo3 image-to-video workflow applies selected duration over scalar default
   assert.equal(veoWorkflow["1"].inputs.duration_seconds, 6);
 });
 
+// Every shipped graph, checked for widget values whose type contradicts the input
+// they sit in.
+//
+// Brick_api_veo3_i2v.json carried "negative_prompt": 8 and "duration_seconds": true
+// from the initial import, so every Veo3 image-to-video render ever submitted sent
+// the provider a negative prompt of 8. Nothing caught it: the graph parses, the
+// worker accepted it, and duration_seconds is overwritten at submit so its type was
+// invisible. Only reading the JSON by hand found it.
+//
+// A duration may legitimately be a string on some API nodes -- Flux3 ships
+// "duration": "5" and injectInputs preserves whichever type it finds -- so the rule
+// is "not a boolean" rather than "a number".
+test("no shipped workflow holds a widget value of the wrong type", async () => {
+  const suspects: string[] = [];
+
+  for (const model of getWorkflowModels()) {
+    if (!model.workflowPath) continue;
+    let graph: Record<string, { class_type?: unknown; inputs?: Record<string, unknown> }>;
+    try {
+      graph = JSON.parse(await fs.readFile(model.workflowPath, "utf8"));
+    } catch {
+      continue;
+    }
+
+    for (const [nodeId, node] of Object.entries(graph)) {
+      for (const [name, value] of Object.entries(node?.inputs ?? {})) {
+        // An array is a link to another node's output, not a widget value.
+        if (Array.isArray(value)) continue;
+        const where = `${path.basename(model.workflowPath)} node ${nodeId} ${String(node?.class_type)} ${name}`;
+        const leaf = name.toLowerCase().split(".").at(-1) ?? "";
+
+        if (/negative/.test(name.toLowerCase()) && /prompt/.test(name.toLowerCase()) && typeof value !== "string") {
+          suspects.push(`${where} = ${JSON.stringify(value)} (want a string)`);
+        }
+        if (["prompt", "text", "positive_prompt"].includes(leaf) && typeof value !== "string") {
+          suspects.push(`${where} = ${JSON.stringify(value)} (want a string)`);
+        }
+        if (["duration", "duration_seconds", "video_duration", "length_seconds"].includes(leaf)) {
+          if (typeof value === "boolean" || (typeof value !== "number" && typeof value !== "string")) {
+            suspects.push(`${where} = ${JSON.stringify(value)} (want a number or a numeric string)`);
+          }
+        }
+        if (leaf === "seed" && typeof value !== "number") {
+          suspects.push(`${where} = ${JSON.stringify(value)} (want a number)`);
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(suspects, [], `Widget values contradict their inputs:\n  ${suspects.join("\n  ")}`);
+});
+
+test("Veo3 image-to-video sends no negative prompt unless one is asked for", async () => {
+  const veo = requiredModel("brick_api_veo3_i2v");
+  const veoWorkflow = (await loadWorkflowForRunpod(
+    veo,
+    request(veo, ["start.png"]),
+    "0000_ply_graound",
+    ["start.png"],
+  )) as Record<string, any>;
+
+  // Empty, and specifically not the request's own prompt: isEditablePromptInput
+  // excludes anything containing "negative", which is what makes an empty string
+  // safe to store here.
+  assert.equal(veoWorkflow["1"].inputs.negative_prompt, "");
+  assert.notEqual(veoWorkflow["1"].inputs.prompt, "");
+});
+
 // Two node families share the `resolution` input and disagree about one option:
 // GeminiNanoBanana2 offers 1K/2K/4K, the Veo3 nodes offer 720p/1080p/4k. Sending
 // "4K" to a Veo3 node is refused by the worker before it renders anything, which is
