@@ -181,7 +181,29 @@ function mappedCreditsUsed(job: BackendJob) {
 function isCountedCreditUsage(creditUsage?: Job["creditUsage"]) {
   const source = (creditUsage?.source ?? "").trim().toLowerCase();
   return Boolean(
-    creditUsage && source !== "local_kling_estimate" && !(source.startsWith("local_") && source.includes("estimate")),
+    creditUsage &&
+    source !== "local_kling_estimate" &&
+    !(source.startsWith("local_") && source.includes("estimate")) &&
+    !isUnpricedCreditUsage(creditUsage),
+  );
+}
+
+/**
+ * A usage block the tracker returned without pricing anything in it.
+ *
+ * The tracker prices a run per partner node, and a node it has no rule for still
+ * comes back with every figure at zero (pricing_mode "unknown"). Counting that as
+ * a measured zero put a confident "0 credits" on gpt-image jobs that had just spent
+ * roughly 55 credits an output -- so it is not counted, and the card falls back to
+ * the estimate. Mirrors
+ * isUnpricedCreditUsage in the backend's creditUsageAccounting; keep the two in
+ * step.
+ */
+function isUnpricedCreditUsage(creditUsage: NonNullable<Job["creditUsage"]>) {
+  if (positiveNumber(creditUsage.total_estimated_credits) != null) return false;
+  if (positiveNumber(creditUsage.total_estimated_usd) != null) return false;
+  return (creditUsage.rows ?? []).every(
+    (row) => positiveNumber(row.total_estimated_credits) == null && positiveNumber(row.total_estimated_usd) == null,
   );
 }
 

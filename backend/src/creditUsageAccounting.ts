@@ -78,7 +78,7 @@ export function creditAccountingSource(job: Pick<Job, "creditsActual" | "credits
   }
 
   if (job.creditUsage?.source) {
-    return `${job.creditUsage.source}:not_counted`;
+    return `${job.creditUsage.source}:${isUnpricedCreditUsage(job.creditUsage) ? "unpriced" : "not_counted"}`;
   }
 
   if (positiveNumber(job.creditsUsed) != null) {
@@ -89,7 +89,38 @@ export function creditAccountingSource(job: Pick<Job, "creditsActual" | "credits
 }
 
 export function isCountedCreditUsage(creditUsage?: CreditUsageSummary) {
-  return Boolean(creditUsage && !isLocalFallbackCreditUsage(creditUsage));
+  return Boolean(creditUsage && !isLocalFallbackCreditUsage(creditUsage) && !isUnpricedCreditUsage(creditUsage));
+}
+
+/**
+ * Whether the tracker returned a usage block that carries no price at all.
+ *
+ * The tracker prices a run by matching its nodes against a rule per partner node.
+ * A node it has no rule for still comes back -- it executed, it has a duration --
+ * but every figure on it is zero and its pricing_mode reads "unknown". Nothing
+ * distinguishes that block from a run that genuinely cost nothing, and the app
+ * used to take it at face value: gpt-image runs priced fine at runtime_price until
+ * 2026-08-06, then went to "unknown" and reported a flat "0 credits" while the
+ * company balance kept dropping, and every total they landed in quietly
+ * understated the month.
+ *
+ * A zero here means "not priced", not "free", so such a block is not counted --
+ * the job falls back to showing its estimate, the way an unmeasured run always has.
+ * The test is the figures rather than pricing_mode: a block with a real number
+ * anywhere in it has been priced by something, whatever it called the mode.
+ *
+ * The fix for the underlying gap is a pricing rule in the tracker for the node
+ * (OpenAIGPTImage1 and Flux3ImageToVideoNode, as of 2026-08-19; a prompt_scan_error
+ * block lands here too, and wants the error looked at rather than a rule). This
+ * only stops the gap from reading as a measurement.
+ */
+export function isUnpricedCreditUsage(creditUsage?: CreditUsageSummary) {
+  if (!creditUsage) return false;
+  if (positiveNumber(creditUsage.total_estimated_credits) != null) return false;
+  if (positiveNumber(creditUsage.total_estimated_usd) != null) return false;
+  return (creditUsage.rows ?? []).every(
+    (row) => positiveNumber(row.total_estimated_credits) == null && positiveNumber(row.total_estimated_usd) == null,
+  );
 }
 
 export function isLocalFallbackCreditUsage(creditUsage?: CreditUsageSummary) {

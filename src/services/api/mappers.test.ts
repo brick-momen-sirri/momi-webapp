@@ -95,3 +95,50 @@ describe("mapJob result URLs", () => {
     expect(job.resultSourceUrls).toEqual(["/api/media?path=C%3A%5Cout%5Cresult.png"]);
   });
 });
+
+describe("mapJob credits", () => {
+  function gptImageJob(overrides: Partial<BackendJob> = {}): BackendJob {
+    return {
+      id: "job_1",
+      projectId: "prj_1",
+      userId: "usr_1",
+      modelId: "brick_api_openai_gpt_image_2_i2i",
+      modelName: "Api Openai Gpt Image 2 I2i",
+      category: "image_editing",
+      inputType: "multi_image",
+      status: "completed",
+      inputImages: [],
+      resultUrls: [],
+      thumbnailUrls: [],
+      outputType: "image",
+      creditsEstimated: 282,
+      createdAt: "2026-08-19T09:08:17.063Z",
+      creditUsage: {
+        total_estimated_credits: 0,
+        total_estimated_usd: 0,
+        source: "credit_tracker:prompt_scan",
+        rows: [{ node_id: "268", class_type: "OpenAIGPTImage1", pricing_mode: "unknown", total_estimated_credits: 0 }],
+      },
+      ...overrides,
+    } as BackendJob;
+  }
+
+  it("reports no credits when the tracker priced nothing", () => {
+    // A zero from a node the tracker has no rule for means "not priced", not
+    // "free" -- the card shows the estimate instead of a confident 0.
+    expect(mapJob(gptImageJob()).creditsUsed).toBeUndefined();
+  });
+
+  it("still reports a tracker figure that was priced", () => {
+    const job = gptImageJob({
+      creditsUsed: 137,
+      creditUsage: {
+        total_estimated_credits: 137,
+        source: "credit_tracker:prompt_scan",
+        rows: [{ node_id: "268", class_type: "OpenAIGPTImage1", pricing_mode: "fixed_per_run", total_estimated_credits: 137 }],
+      },
+    });
+
+    expect(mapJob(job).creditsUsed).toBe(137);
+  });
+});

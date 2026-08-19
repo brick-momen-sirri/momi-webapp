@@ -6,7 +6,9 @@ import {
   creditAccountingSource,
   creditsSpentForAccounting,
   hasMeasuredSpend,
+  isCountedCreditUsage,
   isCreditExemptJob,
+  isUnpricedCreditUsage,
 } from "./creditUsageAccounting.js";
 import { POD_RUNTIME_SOURCE } from "./podRuntimeCost.js";
 
@@ -166,4 +168,70 @@ test("a measured cost lifts the still image exemption, so it stops being an unco
   // Zero is not a measurement: podRuntimeCredits never returns it, so a zero here
   // came from somewhere else and the job stays exempt.
   assert.equal(isCreditExemptJob({ ...measured, creditsActual: 0 }), true);
+});
+
+test("a tracker block that priced nothing is not counted as a measured zero", () => {
+  // What the tracker returns for a node it has no pricing rule for: the run is
+  // there, with its duration, and every figure on it is zero. Reported as spend it
+  // reads as "this was free", which is how 199 gpt-image jobs came to claim zero
+  // while the company balance fell ~142 credits a run.
+  const job = {
+    creditUsage: {
+      total_estimated_credits: 0,
+      total_estimated_usd: 0,
+      source: "credit_tracker:prompt_scan",
+      rows: [
+        {
+          node_id: "268",
+          class_type: "OpenAIGPTImage1",
+          pricing_mode: "unknown",
+          duration_seconds: 145.88,
+          total_estimated_credits: 0,
+          total_estimated_usd: 0,
+        },
+      ],
+    },
+  };
+
+  assert.equal(creditsSpentForAccounting(job), 0);
+  assert.equal(creditAccountingSource(job), "credit_tracker:prompt_scan:unpriced");
+  assert.equal(isUnpricedCreditUsage(job.creditUsage), true);
+  assert.equal(isCountedCreditUsage(job.creditUsage), false);
+});
+
+test("one priced row is enough to count the block, whatever the rest report", () => {
+  const creditUsage = {
+    total_estimated_credits: 0,
+    source: "credit_tracker:prompt_scan",
+    rows: [
+      { node_id: "1", pricing_mode: "unknown", total_estimated_credits: 0 },
+      { node_id: "2", pricing_mode: "fixed_per_run", total_estimated_credits: 12 },
+    ],
+  };
+
+  assert.equal(isUnpricedCreditUsage(creditUsage), false);
+  assert.equal(isCountedCreditUsage(creditUsage), true);
+  // The total is the tracker's own; a row that disagrees with it is not re-summed
+  // here, so the job still books what the tracker said it did.
+  assert.equal(creditsSpentForAccounting({ creditUsage }), 0);
+});
+
+test("a usd-only block is priced, even with zero credits", () => {
+  assert.equal(
+    isUnpricedCreditUsage({ total_estimated_credits: 0, total_estimated_usd: 0.42, source: "credit_tracker:runtime_price" }),
+    false,
+  );
+});
+
+test("a measured figure survives an unpriced tracker block", () => {
+  // Pod runtime priced the worker time; the tracker having no rule for the node
+  // does not undo that.
+  const job = {
+    creditsActual: 9.5,
+    creditsActualSource: POD_RUNTIME_SOURCE,
+    creditUsage: { total_estimated_credits: 0, source: "credit_tracker:prompt_scan" },
+  };
+
+  assert.equal(creditsSpentForAccounting(job), 9.5);
+  assert.equal(creditAccountingSource(job), POD_RUNTIME_SOURCE);
 });
