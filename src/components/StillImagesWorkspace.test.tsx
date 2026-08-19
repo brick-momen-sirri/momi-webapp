@@ -165,6 +165,55 @@ describe("filtering the results list", () => {
     renderPanel([]);
     expect(screen.queryByLabelText("Search results")).toBeNull();
   });
+
+  // Projects are studio-wide and favourites are per browser, so these two are the
+  // narrowings a job cannot answer on its own. Both are offered only where the host
+  // supplied what they compare against, which is the same rule the card actions use.
+  it("narrows to the results this account starred, and the ones it ran", async () => {
+    const user = userEvent.setup();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        currentUserId="usr_1"
+        favoriteJobIds={new Set(["job_starred"])}
+        jobs={[
+          stillJob({ id: "job_starred", userId: "usr_other" }),
+          stillJob({
+            id: "job_mine",
+            userId: "usr_1",
+            workflowOptions: { stillImage: { categoryId: "pro-upscaler", settings: {} }, save: { cameraNumber: "0099" } },
+          }),
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Favourites" }));
+    expect(screen.getByText("1 of 2 results")).toBeInTheDocument();
+    expect(screen.getByText("Camera 0012")).toBeInTheDocument();
+
+    // On together they intersect: the starred one is someone else's, so nothing is
+    // both. The header has to keep saying it is hiding results.
+    await user.click(screen.getByRole("button", { name: "Mine" }));
+    expect(screen.getByText("0 of 2 results")).toBeInTheDocument();
+    expect(screen.getByText("No result matches these filters")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Favourites" }));
+    expect(screen.getByText("1 of 2 results")).toBeInTheDocument();
+    expect(screen.getByText("Camera 0099")).toBeInTheDocument();
+  });
+
+  it("offers neither personal filter when the host supplies no account or favourites", () => {
+    // A "Mine" switch with no account behind it would hide every result and read as
+    // the panel being broken.
+    renderPanel([stillJob()]);
+    expect(screen.queryByRole("button", { name: "Favourites" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mine" })).toBeNull();
+  });
 });
 
 describe("the grid layout", () => {
@@ -312,6 +361,30 @@ describe("StillImagesWorkspace", () => {
     renderPanel([stillJob()]);
     expect(screen.getByText("User")).toBeInTheDocument();
     expect(screen.getAllByText("Momen").length).toBeGreaterThan(0);
+  });
+
+  it("hands over the seed rather than making it be read off the card", async () => {
+    // The cell is one truncated line, and the seed is how a take is reproduced or
+    // quoted to whoever asked for it. Retyping ten digits off a card is where this
+    // went wrong.
+    const user = userEvent.setup();
+    renderPanel([
+      stillJob({
+        workflowOptions: {
+          stillImage: { categoryId: "pro-upscaler", seed: 184992, settings: {} },
+          save: { cameraNumber: "0012" },
+        },
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Copy seed 184992" }));
+    expect(await navigator.clipboard.readText()).toBe("184992");
+    expect(screen.getByRole("button", { name: "Seed copied" })).toBeInTheDocument();
+  });
+
+  it("offers nothing to copy for a result made before seeds were recorded", () => {
+    renderPanel([stillJob()]);
+    expect(screen.queryByRole("button", { name: /Copy seed/ })).toBeNull();
   });
 
   it("renders a completed job with its result image and metadata", () => {

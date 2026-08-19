@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { UploadedImage } from "../../types";
 import { revokeImageObjectUrls } from "../../utils/uploadedImage";
 import { normalizeStillImageSeedInput } from "./seed";
+import { readPersistedStillImagesForm, writePersistedStillImagesForm } from "./stillImagePreferences";
 import {
   createInitialStillImagesState,
   getStillImageCategory,
@@ -11,12 +12,22 @@ import {
 } from "./stillImageCategories";
 
 export function useStillImagesForm() {
-  const [selectedCategoryId, setSelectedCategoryId] = useState<StillImageCategoryId>("general-enhancement");
-  const [stateByCategory, setStateByCategory] = useState(createInitialStillImagesState);
-  const [targetFolderId, setTargetFolderId] = useState("");
-  const [saveNumber, setSaveNumber] = useState("0000");
+  // Read once, lazily, the same way the Animation form takes its persisted settings.
+  // Everything but the images comes back; stillImagePreferences.ts explains why they
+  // do not.
+  const [restored] = useState(readPersistedStillImagesForm);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<StillImageCategoryId>(restored.selectedCategoryId);
+  const [stateByCategory, setStateByCategory] = useState(restored.stateByCategory);
+  const [targetFolderId, setTargetFolderId] = useState(restored.targetFolderId);
+  const [saveNumber, setSaveNumber] = useState(restored.saveNumber);
   const selectedCategory = getStillImageCategory(selectedCategoryId);
   const selectedState = stateByCategory[selectedCategoryId];
+
+  // Every preset's fields, not just the visible one's: switching category and back is
+  // one of the ways this state was being lost.
+  useEffect(() => {
+    writePersistedStillImagesForm({ selectedCategoryId, stateByCategory, targetFolderId, saveNumber });
+  }, [saveNumber, selectedCategoryId, stateByCategory, targetFolderId]);
 
   function updateSelectedState(update: Partial<(typeof stateByCategory)[StillImageCategoryId]>) {
     setStateByCategory((current) => ({

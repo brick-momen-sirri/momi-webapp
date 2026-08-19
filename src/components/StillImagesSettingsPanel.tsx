@@ -1,6 +1,7 @@
-import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Play, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal } from "lucide-react";
 import type { Project, UploadedImage } from "../types";
 import { cn } from "../utils/classNames";
+import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
   STILL_IMAGE_CATEGORIES,
   shouldShowStillImagePrompt,
@@ -191,33 +192,41 @@ export function StillImagesSettingsPanel({
           <Dices className="h-4 w-4 text-stone-500" />
           <h2 className="text-sm font-semibold">Seed</h2>
         </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label="Seed"
-            value={state.seed}
-            onChange={(event) => onSeedChange(event.target.value)}
-            placeholder="New seed each run"
-            className="h-10 min-w-0 flex-1 rounded-md border border-line bg-white px-3 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
-          />
-          <button
-            type="button"
-            onClick={() => onSeedChange("")}
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label="Seed"
+          value={state.seed}
+          onChange={(event) => onSeedChange(event.target.value)}
+          placeholder="New seed each run"
+          className="h-10 w-full min-w-0 rounded-md border border-line bg-white px-3 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+        />
+        {/* Pin, walk, release. Exploring a setting around one take used to mean
+            reading the seed off a finished card and retyping it here, because the only
+            control was Clear and the only other way to fill the field was Reuse
+            settings on a job that had already run. */}
+        <div className="mt-2 flex gap-2">
+          <SeedButton label="Random" onClick={() => onSeedChange(randomStillImageSeedValue())}>
+            <Dices className="h-3.5 w-3.5" />
+            Random
+          </SeedButton>
+          <SeedButton
+            label="Previous seed"
             disabled={!state.seed}
-            className={cn(
-              "h-10 shrink-0 rounded-md border px-3 text-xs font-semibold transition",
-              state.seed
-                ? "border-line bg-white text-stone-700 hover:border-accent hover:text-accent"
-                : "cursor-not-allowed border-line bg-stone-50 text-stone-300",
-            )}
+            onClick={() => onSeedChange(stepStillImageSeed(state.seed, -1))}
           >
+            <Minus className="h-3.5 w-3.5" />
+          </SeedButton>
+          <SeedButton label="Next seed" disabled={!state.seed} onClick={() => onSeedChange(stepStillImageSeed(state.seed, 1))}>
+            <Plus className="h-3.5 w-3.5" />
+          </SeedButton>
+          <SeedButton label="Clear seed" disabled={!state.seed} onClick={() => onSeedChange("")}>
             Clear
-          </button>
+          </SeedButton>
         </div>
         <p className="mt-2 text-xs leading-5 text-stone-500">
           {state.seed
-            ? "This exact seed will be used, so the same inputs and settings reproduce that render."
+            ? "This exact seed will be used, so the same inputs and settings reproduce that render. Stepping moves to a neighbouring take, which is a different render, not a nudged one."
             : "A new seed is drawn for each run and saved on the result, so any render can be reproduced later."}
         </p>
       </section>
@@ -274,6 +283,42 @@ export function StillImagesSettingsPanel({
         </p>
       </section>
     </div>
+  );
+}
+
+/**
+ * One of the seed field's actions.
+ *
+ * `label` is the accessible name, so the icon-only steppers announce themselves as
+ * something other than an unlabelled button.
+ */
+function SeedButton({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold transition",
+        disabled
+          ? "cursor-not-allowed border-line bg-stone-50 text-stone-300"
+          : "border-line bg-white text-stone-700 hover:border-accent hover:text-accent",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

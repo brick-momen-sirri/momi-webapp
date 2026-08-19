@@ -108,11 +108,21 @@ describe("StillImagesSettingsPanel", () => {
     const seed = () => screen.getByRole("textbox", { name: "Seed" });
     // Empty is the normal state: the server draws one and records it on the job.
     expect(seed()).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
+    // Nothing to clear, and nothing to step from. Stepping an empty field would pin
+    // a seed the artist never chose.
+    expect(screen.getByRole("button", { name: "Clear seed" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next seed" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Previous seed" })).toBeDisabled();
 
     // Seeds get pasted out of a card's metadata row, so the field takes what a
     // paste brings with it rather than rejecting the whole thing.
     await user.type(seed(), "seed 1-234");
+    expect(seed()).toHaveValue("1234");
+
+    // Walking to a neighbouring take, which is what stepping is for.
+    await user.click(screen.getByRole("button", { name: "Next seed" }));
+    expect(seed()).toHaveValue("1235");
+    await user.click(screen.getByRole("button", { name: "Previous seed" }));
     expect(seed()).toHaveValue("1234");
 
     // Clamped here rather than at submission, which is after the artist has set
@@ -120,8 +130,21 @@ describe("StillImagesSettingsPanel", () => {
     await user.clear(seed());
     await user.type(seed(), "99999999999");
     expect(seed()).toHaveValue("4294967295");
+    // Including the step: the server rejects anything past this, and the ceiling is
+    // a real seed rather than a value to refuse.
+    await user.click(screen.getByRole("button", { name: "Next seed" }));
+    expect(seed()).toHaveValue("4294967295");
 
-    await user.click(screen.getByRole("button", { name: "Clear" }));
+    // Pinned on demand, so exploring a setting around one take does not depend on
+    // having a finished card to read a seed off.
+    await user.click(screen.getByRole("button", { name: "Random" }));
+    // Whole digits in range, whatever was drawn -- anything else is a seed the server
+    // refuses, which would only surface after the inputs were set up.
+    const drawn = (seed() as HTMLInputElement).value;
+    expect(drawn).toMatch(/^\d+$/);
+    expect(Number(drawn)).toBeLessThanOrEqual(4294967295);
+
+    await user.click(screen.getByRole("button", { name: "Clear seed" }));
     expect(seed()).toHaveValue("");
 
     // Per preset, like the prompt and the sliders next to it.

@@ -1,4 +1,18 @@
-import { AlertTriangle, Calendar, Download, Folder, Hash, ImageIcon, Images, Maximize2, Search, UserRound } from "lucide-react";
+import {
+  AlertTriangle,
+  Calendar,
+  Check,
+  Copy,
+  Download,
+  Folder,
+  Hash,
+  ImageIcon,
+  Images,
+  Maximize2,
+  Search,
+  Star,
+  UserRound,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   StillImageCategoryDefinition,
@@ -23,6 +37,7 @@ import {
   type StillImageResultFilters,
 } from "../features/still-images/resultFilters";
 import { stillImageResultFileName } from "../features/still-images/resultFileName";
+import { useStillImageResultView } from "../features/still-images/useStillImageResultView";
 import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
@@ -33,8 +48,9 @@ import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
 import { ResultTile } from "./ResultTile";
+import { cn } from "../utils/classNames";
 import { resultCardElementId } from "../utils/resultCard";
-import { ArchiveViewToggle, JobStatusBadge, ResultLayoutToggle, type ResultLayout } from "./ResultViewControls";
+import { ArchiveViewToggle, JobStatusBadge, ResultLayoutToggle } from "./ResultViewControls";
 import { UseAsInputMenu } from "./UseAsInputMenu";
 
 type StillImagesWorkspaceProps = {
@@ -47,6 +63,8 @@ type StillImagesWorkspaceProps = {
   /** Still image jobs only -- App filters by section before passing them here. */
   jobs: Job[];
   users?: User[];
+  /** The signed-in account, for the "Mine" filter. Absent leaves that filter unoffered. */
+  currentUserId?: string;
   // The same actions an Animation card offers. Passed through rather than
   // reimplemented so the two surfaces cannot drift into different behaviour for
   // download, archive or move.
@@ -80,15 +98,21 @@ export function StillImagesWorkspace({
   userName,
   jobs,
   users = [],
+  currentUserId,
+  favoriteJobIds,
   ...actions
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
   const targetFolder = selectedProject?.folders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
-  const [filters, setFilters] = useState(DEFAULT_STILL_IMAGE_RESULT_FILTERS);
-  const [layout, setLayout] = useState<ResultLayout>("list");
+  // Both outlive this mount: the panel is thrown away every time the section is
+  // switched away from, and neither is a per-visit choice.
+  const { filters, setFilters, layout, setLayout } = useStillImageResultView();
   // Which card to land on after leaving the grid.
   const [focusJobId, setFocusJobId] = useState<string | null>(null);
-  const visibleJobs = useMemo(() => filterStillImageJobs(jobs, filters), [jobs, filters]);
+  const visibleJobs = useMemo(
+    () => filterStillImageJobs(jobs, filters, { favoriteJobIds, currentUserId }),
+    [jobs, filters, favoriteJobIds, currentUserId],
+  );
   const filtering = hasActiveStillImageFilters(filters);
 
   useEffect(() => {
@@ -140,6 +164,11 @@ export function StillImagesWorkspace({
             filters={filters}
             onChange={setFilters}
             folders={selectedProject?.folders?.filter((folder) => !folder.archived) ?? []}
+            // Each offered only where the panel was given what it needs to answer it,
+            // the same rule the card actions follow. A "Mine" switch with no account
+            // behind it would hide every result and look broken.
+            offerFavorites={Boolean(favoriteJobIds)}
+            offerMine={Boolean(currentUserId)}
           />
         ) : null}
       </section>
@@ -172,6 +201,7 @@ export function StillImagesWorkspace({
                 project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
                 selectedProject={selectedProject}
                 userName={users.find((user) => user.id === job.userId)?.name ?? userName}
+                isFavorite={favoriteJobIds?.has(job.id) ?? false}
                 actions={actions}
               />
             ))}
@@ -212,14 +242,48 @@ function resultCountLabel(shown: number, total: number, filtering: boolean) {
 const FILTER_SELECT_CLASS =
   "h-9 min-w-0 rounded-md border border-line bg-white px-2 text-xs font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20";
 
+/** An on/off narrowing, sized to sit in the same row as the selects. */
+function FilterToggle({
+  icon,
+  label,
+  pressed,
+  onToggle,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  pressed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={pressed}
+      className={cn(
+        "flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition",
+        pressed
+          ? "border-accent bg-accent text-white"
+          : "border-line bg-white text-stone-600 hover:border-accent hover:text-accent",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 function StillImageResultFilterBar({
   filters,
   onChange,
   folders,
+  offerFavorites,
+  offerMine,
 }: {
   filters: StillImageResultFilters;
   onChange: (filters: StillImageResultFilters) => void;
   folders: Array<{ folderId: string; name: string }>;
+  offerFavorites: boolean;
+  offerMine: boolean;
 }) {
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
@@ -282,6 +346,25 @@ function StillImageResultFilterBar({
         <option value="oldest">Oldest first</option>
         <option value="cost">Most expensive first</option>
       </select>
+      {/* The two personal narrowings, as switches rather than another select: they are
+          not alternatives to each other and both are commonly on at once -- "the ones
+          I starred" and "the ones I ran" are different questions. */}
+      {offerFavorites ? (
+        <FilterToggle
+          icon={<Star className={cn("h-3.5 w-3.5", filters.favoritesOnly && "fill-current")} />}
+          label="Favourites"
+          pressed={filters.favoritesOnly}
+          onToggle={() => onChange({ ...filters, favoritesOnly: !filters.favoritesOnly })}
+        />
+      ) : null}
+      {offerMine ? (
+        <FilterToggle
+          icon={<UserRound className="h-3.5 w-3.5" />}
+          label="Mine"
+          pressed={filters.mineOnly}
+          onToggle={() => onChange({ ...filters, mineOnly: !filters.mineOnly })}
+        />
+      ) : null}
       {hasActiveStillImageFilters(filters) ? (
         <button
           type="button"
@@ -318,7 +401,16 @@ function NoMatchesState({ total, onClear }: { total: number; onClear: () => void
 
 type StillImageActions = Omit<
   StillImagesWorkspaceProps,
-  "category" | "state" | "selectedProject" | "targetFolderId" | "saveNumber" | "userName" | "jobs" | "users"
+  | "category"
+  | "state"
+  | "selectedProject"
+  | "targetFolderId"
+  | "saveNumber"
+  | "userName"
+  | "jobs"
+  | "users"
+  | "currentUserId"
+  | "favoriteJobIds"
 >;
 
 function StillImageJobCard({
@@ -326,6 +418,7 @@ function StillImageJobCard({
   project,
   selectedProject,
   userName,
+  isFavorite,
   actions,
 }: {
   job: Job;
@@ -333,6 +426,7 @@ function StillImageJobCard({
   /** Where a new job would be submitted, which is not always this job's project. */
   selectedProject?: Project;
   userName: string;
+  isFavorite: boolean;
   actions: StillImageActions;
 }) {
   const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === job.workflowOptions?.stillImage?.categoryId);
@@ -397,7 +491,7 @@ function StillImageJobCard({
             <JobActions
               job={job}
               project={project}
-              isFavorite={actions.favoriteJobIds?.has(job.id) ?? false}
+              isFavorite={isFavorite}
               canReuseSettings={actions.canReuseSettings?.(job) ?? false}
               archiveView={actions.archiveView ?? false}
               onDownload={actions.onDownload}
@@ -497,8 +591,16 @@ function StillImageJobCard({
         <MetadataItem label="Input" value={`${inputImages.length} image${inputImages.length === 1 ? "" : "s"}`} />
         <MetadataItem label="Camera" value={saveNumber} />
         {/* What Reuse settings puts back in the form to render this take again.
-            Older results predate seeds being recorded and show a dash. */}
-        <MetadataItem label="Seed" value={seed === undefined ? "--" : String(seed)} />
+            Older results predate seeds being recorded and show a dash.
+
+            Copyable because the whole cell is one truncated line: reproducing a take
+            in a different project, or quoting it to whoever asked for it, meant
+            reading a ten-digit number off the card and retyping it. */}
+        <MetadataItem
+          label="Seed"
+          value={seed === undefined ? "--" : String(seed)}
+          copyValue={seed === undefined ? undefined : String(seed)}
+        />
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
         <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
         {/* Measured, or nothing. These pods return no usage figures, so a cost
@@ -722,15 +824,71 @@ function formatResolution(resolution: Job["outputResolution"]) {
   return `${Math.round(resolution.width)} \u00d7 ${Math.round(resolution.height)}`;
 }
 
-function MetadataItem({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MetadataItem({
+  label,
+  value,
+  hint,
+  copyValue,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** Makes the cell a copy button. Omit for a cell whose value is nobody's to reuse. */
+  copyValue?: string;
+}) {
   return (
     <div className="min-w-0 rounded-md bg-mist/70 px-2 py-1.5" title={hint}>
       <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
         {label === "Project" || label === "Folder" ? <Folder className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}
         {label}
       </span>
-      <p className="mt-1 truncate text-xs font-semibold capitalize text-ink">{value}</p>
+      {copyValue ? (
+        <CopyableValue label={label} value={value} copyValue={copyValue} />
+      ) : (
+        <p className="mt-1 truncate text-xs font-semibold capitalize text-ink">{value}</p>
+      )}
     </div>
+  );
+}
+
+/**
+ * A metadata value that can be taken away.
+ *
+ * Falls back to plain text where the clipboard is unavailable -- an insecure origin,
+ * or a browser withholding permission -- rather than offering a button that silently
+ * does nothing.
+ */
+function CopyableValue({ label, value, copyValue }: { label: string; value: string; copyValue: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    return <p className="mt-1 truncate text-xs font-semibold capitalize text-ink">{value}</p>;
+  }
+
+  return (
+    <button
+      type="button"
+      title={copied ? "Copied" : `Copy ${label.toLowerCase()}`}
+      aria-label={copied ? `${label} copied` : `Copy ${label.toLowerCase()} ${copyValue}`}
+      onClick={() => {
+        // Nothing to report on failure beyond not confirming: the value is on screen
+        // and selectable, so a rejected clipboard leaves the artist no worse off.
+        void navigator.clipboard.writeText(copyValue).then(
+          () => setCopied(true),
+          () => undefined,
+        );
+      }}
+      className="mt-1 flex w-full items-center gap-1 text-left text-xs font-semibold capitalize text-ink transition hover:text-accent"
+    >
+      <span className="truncate">{value}</span>
+      {copied ? <Check className="h-3 w-3 shrink-0 text-teal-600" /> : <Copy className="h-3 w-3 shrink-0 text-stone-400" />}
+    </button>
   );
 }
 

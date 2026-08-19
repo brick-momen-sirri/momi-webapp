@@ -19,7 +19,10 @@ vi.mock("../../services/backendApi", async (importOriginal) => ({
   createBackendJob: (...args: unknown[]) => createBackendJob(...args),
 }));
 
-vi.mock("../generation/generationUtils", () => ({
+// Partial: the form's persistence path reads normalizeSaveNumber out of this same
+// module, and replacing the whole thing left it undefined at first render.
+vi.mock("../generation/generationUtils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../generation/generationUtils")>()),
   uploadJobMediaUrl: (...args: unknown[]) => uploadJobMediaUrl(...args),
 }));
 
