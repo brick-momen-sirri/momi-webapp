@@ -24,7 +24,23 @@ export type StillImageResultFilters = {
   presetId: StillImageCategoryId | "all";
   status: StillImageResultStatus;
   folderId: string;
+  /** Only results starred in this browser. Favourites are local, not on the job. */
+  favoritesOnly: boolean;
+  /** Only results this account submitted. Projects are studio-wide, so most lists are mixed. */
+  mineOnly: boolean;
   sort: StillImageResultSort;
+};
+
+/**
+ * What the two personal filters need that a job does not carry.
+ *
+ * Favourites live in browser storage (features/preferences/appPreferences) and the
+ * signed-in account is App's, so neither can be read off the job the way a preset or
+ * a folder can. Passed in rather than imported so this stays pure and testable.
+ */
+export type StillImageResultViewer = {
+  favoriteJobIds?: ReadonlySet<string>;
+  currentUserId?: string;
 };
 
 export const DEFAULT_STILL_IMAGE_RESULT_FILTERS: StillImageResultFilters = {
@@ -32,12 +48,19 @@ export const DEFAULT_STILL_IMAGE_RESULT_FILTERS: StillImageResultFilters = {
   presetId: "all",
   status: "all",
   folderId: "all",
+  favoritesOnly: false,
+  mineOnly: false,
   sort: "newest",
 };
 
 export function hasActiveStillImageFilters(filters: StillImageResultFilters) {
   return (
-    filters.query.trim() !== "" || filters.presetId !== "all" || filters.status !== "all" || filters.folderId !== "all"
+    filters.query.trim() !== "" ||
+    filters.presetId !== "all" ||
+    filters.status !== "all" ||
+    filters.folderId !== "all" ||
+    filters.favoritesOnly ||
+    filters.mineOnly
   );
 }
 
@@ -47,12 +70,18 @@ export const STILL_IMAGE_PRESET_FILTER_OPTIONS = STILL_IMAGE_CATEGORIES.map((cat
   label: category.label,
 }));
 
-export function filterStillImageJobs(jobs: Job[], filters: StillImageResultFilters) {
+export function filterStillImageJobs(jobs: Job[], filters: StillImageResultFilters, viewer: StillImageResultViewer = {}) {
   const query = filters.query.trim().toLowerCase();
   const matched = jobs.filter((job) => {
     if (filters.presetId !== "all" && job.workflowOptions?.stillImage?.categoryId !== filters.presetId) return false;
     if (!matchesStatus(job, filters.status)) return false;
     if (!matchesFolder(job, filters.folderId)) return false;
+    // Both narrow to nothing when the panel was given no favourites and no account
+    // to compare against. Empty is the honest answer -- none of these results is
+    // known to be starred or known to be yours -- and the header says "0 of 12"
+    // rather than reading as an empty project.
+    if (filters.favoritesOnly && !viewer.favoriteJobIds?.has(job.id)) return false;
+    if (filters.mineOnly && (!viewer.currentUserId || job.userId !== viewer.currentUserId)) return false;
     return !query || searchableText(job).includes(query);
   });
 

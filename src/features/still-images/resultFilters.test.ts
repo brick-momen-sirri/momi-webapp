@@ -44,10 +44,7 @@ describe("filterStillImageJobs", () => {
     const newer = job({ id: "newer", createdAt: "2026-08-14T10:00:00.000Z" });
 
     expect(filterStillImageJobs([older, newer], filters()).map((item) => item.id)).toEqual(["newer", "older"]);
-    expect(filterStillImageJobs([older, newer], filters({ sort: "oldest" })).map((item) => item.id)).toEqual([
-      "older",
-      "newer",
-    ]);
+    expect(filterStillImageJobs([older, newer], filters({ sort: "oldest" })).map((item) => item.id)).toEqual(["older", "newer"]);
   });
 
   it("narrows to one preset", () => {
@@ -67,15 +64,9 @@ describe("filterStillImageJobs", () => {
     const queued = job({ id: "queued", status: "queued" });
     const all = [job({ id: "done" }), failed, canceled, running, queued];
 
-    expect(filterStillImageJobs(all, filters({ status: "failed" })).map((item) => item.id)).toEqual([
-      "failed",
-      "canceled",
-    ]);
+    expect(filterStillImageJobs(all, filters({ status: "failed" })).map((item) => item.id)).toEqual(["failed", "canceled"]);
     // "Working" is anything still in flight, whichever stage it is at.
-    expect(filterStillImageJobs(all, filters({ status: "working" })).map((item) => item.id)).toEqual([
-      "running",
-      "queued",
-    ]);
+    expect(filterStillImageJobs(all, filters({ status: "working" })).map((item) => item.id)).toEqual(["running", "queued"]);
     expect(filterStillImageJobs(all, filters({ status: "completed" })).map((item) => item.id)).toEqual(["done"]);
   });
 
@@ -86,9 +77,7 @@ describe("filterStillImageJobs", () => {
     expect(filterStillImageJobs([inFolder, atRoot], filters({ folderId: ROOT_FOLDER_FILTER })).map((i) => i.id)).toEqual([
       "at_root",
     ]);
-    expect(filterStillImageJobs([inFolder, atRoot], filters({ folderId: "fld_1" })).map((i) => i.id)).toEqual([
-      "in_folder",
-    ]);
+    expect(filterStillImageJobs([inFolder, atRoot], filters({ folderId: "fld_1" })).map((i) => i.id)).toEqual(["in_folder"]);
   });
 
   it("searches the things an artist refers to a render by", () => {
@@ -154,6 +143,43 @@ describe("filterStillImageJobs", () => {
   });
 });
 
+describe("the two personal filters", () => {
+  // Neither can be read off a job: favourites are stored per browser and the account
+  // is App's, so both come in as viewer context. The failure worth guarding is a
+  // filter that silently matches everything when that context is missing.
+  const mine = job({ id: "job_mine", userId: "usr_momen" });
+  const theirs = job({ id: "job_theirs", userId: "usr_other" });
+
+  it("keeps only starred results", () => {
+    const starred = filterStillImageJobs([mine, theirs], filters({ favoritesOnly: true }), {
+      favoriteJobIds: new Set(["job_theirs"]),
+    });
+    expect(starred.map((entry) => entry.id)).toEqual(["job_theirs"]);
+  });
+
+  it("keeps only this account's results", () => {
+    const own = filterStillImageJobs([mine, theirs], filters({ mineOnly: true }), { currentUserId: "usr_momen" });
+    expect(own.map((entry) => entry.id)).toEqual(["job_mine"]);
+  });
+
+  it("narrows to nothing rather than everything when the viewer is unknown", () => {
+    // The panel does not offer either switch without the context behind it, so this
+    // is the belt-and-braces case: on, with nothing to compare against, must not read
+    // as "no filter" and quietly show someone else's work as their own.
+    expect(filterStillImageJobs([mine, theirs], filters({ favoritesOnly: true }))).toEqual([]);
+    expect(filterStillImageJobs([mine, theirs], filters({ mineOnly: true }))).toEqual([]);
+  });
+
+  it("intersects with each other and with the rest", () => {
+    const both = filterStillImageJobs(
+      [mine, theirs, job({ id: "job_mine_unstarred", userId: "usr_momen" })],
+      filters({ favoritesOnly: true, mineOnly: true }),
+      { favoriteJobIds: new Set(["job_mine", "job_theirs"]), currentUserId: "usr_momen" },
+    );
+    expect(both.map((entry) => entry.id)).toEqual(["job_mine"]);
+  });
+});
+
 describe("hasActiveStillImageFilters", () => {
   it("ignores sort order, which hides nothing", () => {
     // Sort must not light up "Clear filters" or make the header claim a subset:
@@ -163,6 +189,14 @@ describe("hasActiveStillImageFilters", () => {
     expect(hasActiveStillImageFilters(filters({ query: "  " }))).toBe(false);
     expect(hasActiveStillImageFilters(filters({ query: "cam-12" }))).toBe(true);
     expect(hasActiveStillImageFilters(filters({ status: "failed" }))).toBe(true);
+  });
+
+  it("counts the personal filters, which hide plenty", () => {
+    // Both must light up Clear and make the header say "n of m": a panel showing four
+    // of forty results with no visible reason is how someone concludes the rest were
+    // deleted.
+    expect(hasActiveStillImageFilters(filters({ favoritesOnly: true }))).toBe(true);
+    expect(hasActiveStillImageFilters(filters({ mineOnly: true }))).toBe(true);
   });
 });
 
