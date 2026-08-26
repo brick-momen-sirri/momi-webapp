@@ -292,3 +292,70 @@ ownership marker establishes; population is only a smell test.
 
 - `node scripts/auditBackupSnapshots.mjs` from `backend/` for a population
   check across the whole retention window (read-only unless `--apply`).
+
+## 9. When the offsite leg is refused: reading a 403
+
+A dead offsite leg looks identical from the app whatever the cause — an hourly
+`backup_upload_failed`, `uploaded: false`, and local snapshots still `integrity:
+ok`. It stayed that way undiagnosed for six days in August 2026. Run:
+
+```
+node scripts/verifyOffsiteBackup.mjs
+```
+
+from `backend/`, in a shell where `BACKUP_AZURE_SAS_URL` is set. It probes the
+data plane and names the cause. Read-only by default; `--write` actually uploads
+a probe blob, and on a SAS without `d` that blob cannot be removed afterwards.
+
+**Why a bare "403" never narrowed anything.** Azure reports a permission the SAS
+never carried and a permission it claims but cannot exercise with the *same*
+code, `AuthorizationPermissionMismatch`. The script separates them by probing a
+permission the backup SAS has always carried (`r`) against one it does not
+(`l`), so the codes can be compared rather than guessed at.
+
+| Response to a plain read      | Cause                                                          |
+| ----------------------------- | -------------------------------------------------------------- |
+| `404 BlobNotFound`            | Auth is fine. The problem is write-specific — see below.       |
+| `AuthenticationFailed`        | The signing account key was rotated, or the SAS is malformed.  |
+| `KeyBasedAuthenticationNotPermitted` | `allowSharedKeyAccess` is off; no account-key SAS can work. |
+| `AuthorizationFailure`        | Refused before permissions — a storage firewall / network rule. |
+| `NETWORK`                     | Egress or DNS, not Azure.                                      |
+
+**Reads succeed and writes are refused** is the case seen on 2026-08-21. Worth
+knowing what it is *not*: not expiry (`se` was three months out), not the key
+(that fails the read too), not shared-key being disabled, not a network rule,
+and not immutability or a legal hold — a `HEAD` on a real blob carried no
+`x-ms-immutability-policy-*` or `x-ms-legal-hold` header and the lease was
+`available`/`unlocked`. Azure was simply evaluating the token as read-only. Mint
+a fresh container SAS and swap it in; if a brand-new SAS is refused the same
+way, the restriction is on the account or container rather than the token, and
+that needs the portal.
+
+Note §3 asks for **Write, Create, List**. The SAS live through the August outage
+was `sp=rcw` — carrying Read, which §3 says to withhold, and missing List, which
+the media leg's restore index wants. Bring a replacement back in line with §3.
+
+### Swapping the SAS without losing it on the next reboot
+
+Both layers are needed, and the middle step is the one that has bitten twice:
+
+1. Set it at **User scope**, so a fresh `pm2 start` inherits it:
+   `[Environment]::SetEnvironmentVariable("BACKUP_AZURE_SAS_URL", "<url>", "User")`
+2. Restart the dispatcher **with `--update-env`**, from a shell that can see
+   User scope:
+   `pm2 restart ecosystem.config.cjs --only momi-dispatcher --update-env`
+   A plain `pm2 restart momi-dispatcher` replays pm2's *stored* env and the new
+   value never reaches the process — that is exactly how the 2026-08-06 → 08-12
+   outage went unnoticed for six days. Before using `--update-env`, confirm no
+   key lives only in pm2's stored env (it rebuilds the env from the ecosystem
+   `env` block plus the launching shell, silently dropping anything else).
+3. `pm2 save`, so `pm2 resurrect` after a reboot replays the new value too.
+
+A cycle fires immediately on dispatcher boot, so the swap self-verifies within a
+minute or so — but confirm it directly rather than waiting for the alert to stop:
+
+```
+node scripts/verifyOffsiteBackup.mjs
+```
+
+Then check `data/backups/backup-status.json` shows `uploaded: true`.
