@@ -11,7 +11,7 @@ export type JobListingInput = {
 export function buildJobListing({ jobs, mediaJobs, archivedMediaJobs, archived, mediaFilePathFromUrl }: JobListingInput) {
   const backendResultPaths = new Set(
     jobs
-      .flatMap((job) => [...job.resultUrls, ...job.thumbnailUrls])
+      .flatMap(jobMediaUrls)
       .map(mediaFilePathFromUrl)
       .filter((item): item is string => Boolean(item)),
   );
@@ -20,7 +20,7 @@ export function buildJobListing({ jobs, mediaJobs, archivedMediaJobs, archived, 
 
   for (const job of mediaJobs) {
     if (archivedMediaIds.has(job.id)) continue;
-    const mediaPaths = [...job.resultUrls, ...job.thumbnailUrls]
+    const mediaPaths = jobMediaUrls(job)
       .map(mediaFilePathFromUrl)
       .filter((item): item is string => Boolean(item));
     if (mediaPaths.some((filePath) => backendResultPaths.has(filePath))) continue;
@@ -36,4 +36,9 @@ export function buildJobListing({ jobs, mediaJobs, archivedMediaJobs, archived, 
     }
   }
   return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function jobMediaUrls(job: Job) {
+  const generatedCropUrl = job.workflowOptions?.stillImage?.edit?.generatedCropUrl;
+  return [...job.resultUrls, ...job.thumbnailUrls, ...(generatedCropUrl ? [generatedCropUrl] : [])];
 }

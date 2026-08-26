@@ -95,6 +95,39 @@ test("validates video inputs independently from image inputs", async () => {
   await assert.rejects(() => validate([], "data:image/png;base64,AQID"), /expected video media/i);
 });
 
+test("validates crop-edit originals and prior layer media even though they are not RunPod inputs", async () => {
+  const request: CreateJobRequest = {
+    projectId: project.id,
+    modelId: "model",
+    userId: user.id,
+    inputImages: [mediaUrl(ownedProjectFile), mediaUrl(ownedProjectFile)],
+    workflowOptions: {
+      stillImage: {
+        categoryId: "image-editing",
+        settings: {},
+        edit: {
+          layerId: "edit_12345678",
+          operation: "create",
+          crop: { x: 0, y: 0, size: 10, sourceWidth: 20, sourceHeight: 20 },
+          mask: { width: 20, height: 20, softness: 0, strokes: [] },
+          originalSourceUrl: mediaUrl(ownedProjectFile),
+          maskSourceUrl: mediaUrl(ownedProjectFile),
+          baseLayerIds: ["edit_87654321"],
+          baseLayers: [
+            {
+              layerId: "edit_87654321",
+              crop: { x: 0, y: 0, size: 10, sourceWidth: 20, sourceHeight: 20 },
+              generatedCropUrl: mediaUrl(otherProjectFile),
+              maskSourceUrl: mediaUrl(ownedProjectFile),
+            },
+          ],
+        },
+      },
+    },
+  };
+  await assert.rejects(() => validateJobMediaReferences(request, project, user), /not owned by this user or project/i);
+});
+
 async function validate(inputImages: string[], inputVideo?: string) {
   const request: CreateJobRequest = {
     projectId: project.id,

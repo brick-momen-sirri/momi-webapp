@@ -5,12 +5,16 @@
 // GPT-Image), so one generic serverless ComfyUI worker served all of them and
 // there was nothing to choose between.
 //
-// Still image presets break that. They execute locally on the GPU -- Flux via
+// Still image presets break that. Most execute locally on the GPU -- Flux via
 // Nunchaku, KSampler, 4x-UltraSharp, GGUF VLMs -- so each runs on its own pod
 // carrying its own weights and custom nodes. The endpoint therefore becomes a
 // per-job property, and one that must be remembered: a job acknowledged by RunPod
 // is polled and cancelled against the endpoint it was submitted to, and a
 // dispatcher restart or failover must not guess.
+//
+// The exception is a preset whose graph is itself a provider call -- Image Editing
+// is one -- which needs no weights and so goes back to the generic worker unless
+// an override names a pod for it.
 
 import {
   runpodApiRoot,
@@ -23,6 +27,7 @@ import {
   runpodStillImageEndpointIds,
   runpodSubmissionMode,
 } from "./config.js";
+import { stillImageRunsOnSharedEndpoint } from "./stillImageWorkflow.js";
 import type { WorkflowOptions } from "./types.js";
 
 export type RunpodEndpoint = {
@@ -95,11 +100,15 @@ export function resolveRunpodEndpoint(job: { runpodEndpointId?: string; workflow
   if (!categoryId) return defaultRunpodEndpoint();
 
   const configured = stillImageEndpointId(categoryId);
-  if (!configured) {
-    throw new Error(
-      `No RunPod endpoint is configured for the ${categoryId} still image preset. ` +
-        `Set RUNPOD_ENDPOINT_ID_${categoryId.replaceAll("-", "_").toUpperCase()}.`,
-    );
-  }
-  return runpodEndpointForId(configured);
+  if (configured) return runpodEndpointForId(configured);
+
+  // A shared preset loads no models -- its graph is a remote API call -- so the
+  // Animation endpoint runs it as-is, and that is where comfy_org_api_key is
+  // already sent. An override still wins above, for pinning one to its own pod.
+  if (stillImageRunsOnSharedEndpoint(categoryId)) return defaultRunpodEndpoint();
+
+  throw new Error(
+    `No RunPod endpoint is configured for the ${categoryId} still image preset. ` +
+      `Set RUNPOD_ENDPOINT_ID_${categoryId.replaceAll("-", "_").toUpperCase()}.`,
+  );
 }

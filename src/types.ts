@@ -115,6 +115,58 @@ export type MediaResolution = {
   label?: string;
 };
 
+export type StillImageEditCrop = {
+  /** Original-image pixel coordinates. Never display/CSS coordinates. */
+  x: number;
+  y: number;
+  size: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+export type StillImageEditMask = {
+  width: number;
+  height: number;
+  softness: number;
+  strokes: Array<{
+    tool: "brush" | "eraser" | "lasso";
+    radius: number;
+    points: Array<{ x: number; y: number }>;
+  }>;
+};
+
+export type StillImageEditBaseLayer = {
+  layerId: string;
+  crop: StillImageEditCrop;
+  generatedCropUrl: string;
+  maskSourceUrl: string;
+};
+
+export type StillImageEditMode = "inpaint" | "enhance";
+
+export type StillImageEditReference = {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  previewUrl?: string;
+};
+
+export type StillImageEditWorkflow = {
+  layerId: string;
+  operation: "create" | "regenerate";
+  mode: StillImageEditMode;
+  documentId: string;
+  crop: StillImageEditCrop;
+  mask: StillImageEditMask;
+  originalSourceUrl: string;
+  maskSourceUrl: string;
+  baseLayerIds: string[];
+  baseLayers: StillImageEditBaseLayer[];
+  referenceSourceUrls: string[];
+  /** Written by the backend after it preserves the provider's crop result. */
+  generatedCropUrl?: string;
+};
+
 /**
  * What a running job is doing right now. Mirrors RunpodJobProgress on the
  * backend; every field is observed rather than estimated, and there is
@@ -261,6 +313,8 @@ export type WorkflowOptions = {
      */
     seed?: number;
     settings: Record<string, string | number | boolean>;
+    /** Present only for the crop/layer based Image Editing preset. */
+    edit?: StillImageEditWorkflow;
   };
 };
 

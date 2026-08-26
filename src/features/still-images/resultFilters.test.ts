@@ -9,6 +9,7 @@ import {
   ROOT_FOLDER_FILTER,
   STILL_IMAGE_PRESET_FILTER_OPTIONS,
 } from "./resultFilters";
+import { STILL_IMAGE_CATEGORIES } from "./stillImageCategories";
 
 // A project's results are a flat list of large cards, so finding one among thirty
 // is entirely down to these rules. The cases that matter are the ones an artist
@@ -202,11 +203,12 @@ describe("hasActiveStillImageFilters", () => {
 
 describe("STILL_IMAGE_PRESET_FILTER_OPTIONS", () => {
   it("offers every preset in the catalogue, so none can be unfilterable", () => {
-    expect(STILL_IMAGE_PRESET_FILTER_OPTIONS.map((option) => option.value)).toEqual([
-      "general-enhancement",
-      "pro-upscaler",
-      "reference-generator",
-      "qwen-edit",
-    ]);
+    // Held against the catalogue rather than a literal list: a preset added
+    // without a filter option would be one whose results cannot be found again,
+    // and a literal list here would only ever be updated alongside it.
+    expect(STILL_IMAGE_PRESET_FILTER_OPTIONS.map((option) => option.value)).toEqual(
+      STILL_IMAGE_CATEGORIES.map((category) => category.id),
+    );
+    expect(STILL_IMAGE_PRESET_FILTER_OPTIONS.length).toBeGreaterThan(4);
   });
 });

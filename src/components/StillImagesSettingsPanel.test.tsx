@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { appendMaskStroke, createMaskDrawing } from "../features/still-images/maskDrawing";
+import { createInitialStillImagesState, getStillImageCategory } from "../features/still-images/stillImageCategories";
 import { useStillImagesForm } from "../features/still-images/useStillImagesForm";
+import type { Project, UploadedImage } from "../types";
 import { StillImagesSettingsPanel } from "./StillImagesSettingsPanel";
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
 
@@ -20,6 +23,7 @@ function StillImagesHarness() {
         saveNumber={form.saveNumber}
         onCategoryChange={form.setSelectedCategoryId}
         onImagesChange={form.setImages}
+        onMaskChange={form.setMask}
         onPromptChange={form.setPrompt}
         onSeedChange={form.setSeed}
         onSettingChange={form.setSetting}
@@ -99,6 +103,64 @@ describe("StillImagesSettingsPanel", () => {
     await user.selectOptions(mode, "edit");
     await user.selectOptions(screen.getByLabelText("Image count"), "3");
     expect(screen.getByLabelText("Upload Image 3")).toBeInTheDocument();
+  });
+
+  it("offers one upload slot for Image Editing and paints the rest", async () => {
+    const user = userEvent.setup();
+    render(<StillImagesHarness />);
+
+    await user.click(screen.getByRole("button", { name: "Image Editing" }));
+
+    // Slots 2 and 3 are the mask and the marked guide, both drawn from the region
+    // the artist paints. Offering them as uploads would ask for files that do not
+    // exist and that nothing outside this panel knows how to make.
+    expect(screen.getByLabelText("Upload Source image")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload Edit mask")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload Marked guide")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current composite & mask" })).toBeInTheDocument();
+
+    // Mask settings and actions now live inside the full-screen studio rather
+    // than leaking implementation slots into the sidebar uploader.
+    expect(screen.queryByRole("checkbox", { name: /show the model where/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload Source image")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload Edit mask")).not.toBeInTheDocument();
+  });
+
+  it("keeps Image Editing generation inside the composite studio", () => {
+    const category = getStillImageCategory("image-editing");
+    const base = createInitialStillImagesState()["image-editing"];
+    const image: UploadedImage = { id: "img_1", name: "shot.png", url: "blob:shot" };
+    const props = {
+      selectedCategoryId: "image-editing" as const,
+      category,
+      selectedProject: { id: "proj_1", name: "Tower", folders: [] } as unknown as Project,
+      targetFolderId: "",
+      saveNumber: "0012",
+      onCategoryChange: () => undefined,
+      onImagesChange: () => undefined,
+      onMaskChange: () => undefined,
+      onPromptChange: () => undefined,
+      onSeedChange: () => undefined,
+      onSettingChange: () => undefined,
+      onTargetFolderChange: () => undefined,
+      onSaveNumberChange: () => undefined,
+      onGenerate: () => undefined,
+    };
+
+    // Nothing yet: the editor explains what to upload and does not expose the
+    // disconnected sidebar Generate action.
+    const empty = render(<StillImagesSettingsPanel {...props} state={base} />);
+    expect(screen.getByText(/upload a source image above/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
+    empty.unmount();
+
+    const painted = {
+      ...base,
+      images: [image],
+      mask: appendMaskStroke(createMaskDrawing(800, 600), { tool: "brush" as const, radius: 20, points: [{ x: 10, y: 10 }] }),
+    };
+    render(<StillImagesSettingsPanel {...props} state={painted} />);
+    expect(screen.queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
   });
 
   it("holds a seed per preset and refuses what the server would reject", async () => {

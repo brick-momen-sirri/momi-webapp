@@ -53,6 +53,9 @@ import { useProjectActions, type ConfirmDialogState } from "./features/projects/
 import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
 import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
 import { chainableResultImage } from "./features/still-images/chainResult";
+import { finalizeImageEdit } from "./features/still-images/finalizeImageEdit";
+import { layersWithJobs } from "./features/still-images/imageEditLayers";
+import type { MaskDrawing } from "./features/still-images/maskDrawing";
 import { isStillImageJob } from "./features/still-images/jobSection";
 import { reusableStillImageJob } from "./features/still-images/reuseStillImageJob";
 import { STILL_IMAGE_CATEGORIES, type StillImageCategoryId } from "./features/still-images/stillImageCategories";
@@ -243,6 +246,13 @@ function App() {
     setBackendJobsOffset,
     showToast,
   });
+  const selectedStillImageState = useMemo(
+    () =>
+      stillImagesForm.selectedCategoryId === "image-editing"
+        ? { ...stillImagesForm.selectedState, editLayers: layersWithJobs(stillImagesForm.selectedState, jobs) }
+        : stillImagesForm.selectedState,
+    [jobs, stillImagesForm.selectedCategoryId, stillImagesForm.selectedState],
+  );
   const stillImagesSubmission = useStillImagesSubmission({
     onJobCreated: (job) => {
       setJobs((current) => mergeJobs([job], current));
@@ -250,17 +260,56 @@ function App() {
       setBackendJobsOffset((current) => current + 1);
       showToast("Still image job queued.", "success");
     },
+    onJobUpdated: (job) => setJobs((current) => mergeJobs([job], current)),
+    onEditJobCompleted: (job) => {
+      // A generated edit becomes a document layer only after its crop has been
+      // saved and mapped back to the original coordinates. Until then the current
+      // mask/prompt/reference draft stays intact and retryable.
+      stillImagesForm.commitEditLayer(job);
+      showToast("Edit complete and added as a layer.", "success");
+    },
     onError: (message) => showToast(message, "error"),
   });
+  const [finishingStillImageEdit, setFinishingStillImageEdit] = useState(false);
   const handleStillImagesGenerate = () => {
     if (!selectedProjectId) return;
     void stillImagesSubmission.submit({
       projectId: selectedProjectId,
       categoryId: stillImagesForm.selectedCategoryId,
-      categoryState: stillImagesForm.selectedState,
+      categoryState: selectedStillImageState,
       targetFolderId: stillImagesForm.targetFolderId,
       saveNumber: stillImagesForm.saveNumber,
     });
+  };
+  const handleFinishStillImageEdit = async (drawing: MaskDrawing) => {
+    if (stillImagesSubmission.submitting) {
+      showToast("Wait for the edit request to finish sending before completing the composite.", "error");
+      return false;
+    }
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS_ID) {
+      showToast("Select a project before finishing the composite.", "error");
+      return false;
+    }
+    setFinishingStillImageEdit(true);
+    try {
+      const job = await finalizeImageEdit({
+        projectId: selectedProjectId,
+        targetFolderId: stillImagesForm.targetFolderId,
+        saveNumber: stillImagesForm.saveNumber,
+        state: selectedStillImageState,
+        currentDrawing: drawing,
+      });
+      setJobs((current) => mergeJobs([job], current));
+      setBackendJobsTotal((current) => current + 1);
+      setBackendJobsOffset((current) => current + 1);
+      showToast("Edited composite added to Results.", "success");
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not finish the edited composite.", "error");
+      return false;
+    } finally {
+      setFinishingStillImageEdit(false);
+    }
   };
   // The two workspaces list different jobs from the same loaded set. Without this
   // split, still image jobs would also appear in the Animation feed -- they share
@@ -271,6 +320,7 @@ function App() {
       jobs.filter(
         (job) =>
           isStillImageJob(job) &&
+          !job.workflowOptions?.stillImage?.edit &&
           (!selectedProjectId || selectedProjectId === ALL_PROJECTS_ID || job.projectId === selectedProjectId),
       ),
     [jobs, selectedProjectId],
@@ -530,18 +580,28 @@ function App() {
               <StillImagesSettingsPanel
                 selectedCategoryId={stillImagesForm.selectedCategoryId}
                 category={stillImagesForm.selectedCategory}
-                state={stillImagesForm.selectedState}
+                state={selectedStillImageState}
                 selectedProject={selectedProject}
                 targetFolderId={stillImagesForm.targetFolderId}
                 saveNumber={stillImagesForm.saveNumber}
                 onCategoryChange={stillImagesForm.setSelectedCategoryId}
                 onImagesChange={stillImagesForm.setImages}
+                onMaskChange={stillImagesForm.setMask}
                 onPromptChange={stillImagesForm.setPrompt}
                 onSeedChange={stillImagesForm.setSeed}
                 onSettingChange={stillImagesForm.setSetting}
                 onTargetFolderChange={stillImagesForm.setTargetFolderId}
                 onSaveNumberChange={stillImagesForm.setSaveNumber}
                 onGenerate={handleStillImagesGenerate}
+                onNewEditLayer={stillImagesForm.startNewEditLayer}
+                onSelectEditLayer={stillImagesForm.selectEditLayer}
+                onToggleEditLayer={stillImagesForm.toggleEditLayer}
+                onDeleteEditLayer={stillImagesForm.deleteEditLayer}
+                onMoveEditLayer={stillImagesForm.moveEditLayer}
+                onEditModeChange={stillImagesForm.setEditMode}
+                onEditReferencesChange={stillImagesForm.setEditReferences}
+                onFinishEditing={handleFinishStillImageEdit}
+                finishingEdit={finishingStillImageEdit}
                 submitting={stillImagesSubmission.submitting}
                 submitError={stillImagesSubmission.error}
               />
@@ -581,7 +641,7 @@ function App() {
           ) : (
             <StillImagesWorkspace
               category={stillImagesForm.selectedCategory}
-              state={stillImagesForm.selectedState}
+              state={selectedStillImageState}
               selectedProject={selectedProject}
               targetFolderId={stillImagesForm.targetFolderId}
               saveNumber={stillImagesForm.saveNumber}

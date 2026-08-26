@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
@@ -22,6 +23,7 @@ import { getProject } from "./projectService.js";
 import {
   appendAudit,
   appendManifestEvent,
+  folderDisplayName,
   loadProjectFolders,
   validateDisplayName,
   withProjectMutationLock,
@@ -30,10 +32,12 @@ import { cancelComfyWorkflowOnRunpod } from "./runpodComfyService.js";
 import { resolveRunpodEndpoint } from "./runpodEndpoints.js";
 import { isDispatcher } from "./processRole.js";
 import { IdempotencyConflictError, openSqliteJobStore, type SqliteJobStore } from "./sqliteJobStore.js";
-import { readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
+import { ensureJobFolders, readJsonFileWithBackup, saveJobMetadata, snapshotJsonStore, writeJsonFile } from "./storageService.js";
 import { invalidateMediaCache, scanExistingMediaJobs } from "./mediaService.js";
 import { logMemory } from "./memoryLogger.js";
 import { moveResultFiles } from "./resultMoveService.js";
+import { renderStillImageEditComposite } from "./stillImageEditComposite.js";
+import type { FinalizeStillImageEditRequest } from "./stillImageEditFinalization.js";
 import { getWorkflowModel } from "./workflowService.js";
 import type { CreateJobRequest, Job } from "./types.js";
 import {
@@ -428,6 +432,71 @@ export async function createJob(request: CreateJobRequest) {
       void dispatchQueue();
     },
   });
+  return job;
+}
+
+/** Persist the editor's visible stack as one ordinary, completed Still Images job. */
+export async function createCompletedStillImageEditJob(
+  request: FinalizeStillImageEditRequest & { userId: string },
+): Promise<Job> {
+  const project = getProject(request.projectId);
+  if (!project) throw new Error("Project not found.");
+  const projectFolders = await loadProjectFolders(project);
+  if (
+    request.targetFolderId &&
+    !projectFolders.some((folder) => folder.folderId === request.targetFolderId && !folder.archived)
+  ) {
+    throw new Error("Target folder not found.");
+  }
+
+  const jobId = `job_${crypto.randomUUID().replaceAll("-", "").slice(0, 24)}`;
+  const folders = await ensureJobFolders(project, jobId);
+  const fileName = `current-composite-${request.saveNumber}.png`;
+  const outputPath = path.join(folders.output, fileName);
+  const outputResolution = await renderStillImageEditComposite(request.originalSourceUrl, request.layers, outputPath);
+  const outputBytes = (await fs.stat(outputPath)).size;
+  const now = new Date().toISOString();
+  const job: Job = {
+    id: jobId,
+    projectId: project.id,
+    folderId: request.targetFolderId,
+    folderName: folderDisplayName(request.targetFolderId, projectFolders),
+    userId: request.userId,
+    modelId: "still_image-editing",
+    modelName: "Current Composite & Mask",
+    title: "Edited Composite",
+    category: "image_editing",
+    inputType: "single_image",
+    prompt: request.prompt,
+    outputResolution,
+    outputBytes,
+    workflowOptions: {
+      stillImage: {
+        categoryId: "image-editing",
+        settings: { finalizedComposite: true, documentId: request.documentId },
+      },
+      save: { cameraNumber: request.saveNumber },
+    },
+    status: "completed",
+    inputImages: [request.originalSourceUrl],
+    resultUrls: [`/api/media?path=${encodeURIComponent(outputPath)}`],
+    thumbnailUrls: [],
+    outputType: "image",
+    projectFolderPath: project.folderPath,
+    workflowPath: "local://current-composite",
+    creditsEstimated: 0,
+    creditsUsed: 0,
+    fileName,
+    source: "backend_job",
+    createdAt: now,
+    startedAt: now,
+    completedAt: now,
+  };
+
+  jobs = [job, ...jobs];
+  await persistUpsert(job);
+  await saveJobMetadata(job, project);
+  invalidateMediaCache();
   return job;
 }
 

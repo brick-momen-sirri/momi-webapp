@@ -25,9 +25,9 @@ import path from "node:path";
 
 import { stillImageWorkflowRoot } from "./config.js";
 import {
-  getStillImageCategory,
-  stillImageSlotCount,
+  stillImageRequestSlotCount,
   type StillImageCategoryId,
+  type StillImageEditOptions,
   type StillImageOptions,
   type StillImageSettingValue,
 } from "./stillImageCategories.js";
@@ -76,6 +76,18 @@ export type StillImagePreset = {
   categoryId: StillImageCategoryId;
   workflowFile: string;
   inputTransport: StillImageInputTransport;
+  /**
+   * Where this preset's graph has to run.
+   *
+   * "dedicated" presets are the local-GPU ones: each has its own RunPod endpoint
+   * holding the models the graph loads, named by RUNPOD_ENDPOINT_ID_<PRESET>, and
+   * dispatching one to the shared endpoint would fail on a missing checkpoint.
+   *
+   * "shared" presets call a remote provider through a ComfyUI API node and load
+   * nothing, so they belong on the same endpoint the Animation models already use
+   * -- the one that is handed comfy_org_api_key -- and want no pod of their own.
+   */
+  endpoint: "dedicated" | "shared";
   inputBindings: readonly StillImageInputBinding[];
   apply: (graph: StillImageGraph, input: ResolvedBuildInput) => void;
 };
@@ -101,6 +113,7 @@ type ResolvedBuildInput = {
   prompt: string;
   images: string[];
   imageCount: number;
+  edit?: StillImageEditOptions;
   nextSeed: () => number;
 };
 
@@ -116,6 +129,10 @@ export function stillImageWorkflowPath(categoryId: StillImageCategoryId) {
 
 export function stillImageInputTransport(categoryId: StillImageCategoryId) {
   return stillImagePreset(categoryId).inputTransport;
+}
+
+export function stillImageRunsOnSharedEndpoint(categoryId: StillImageCategoryId) {
+  return stillImagePreset(categoryId).endpoint === "shared";
 }
 
 /**
@@ -182,10 +199,9 @@ export function assertStillImageBindings(graph: StillImageGraph, categoryId: Sti
  */
 export async function buildStillImageWorkflow(input: StillImageBuildInput): Promise<StillImageGraph> {
   const preset = stillImagePreset(input.options.categoryId);
-  const category = getStillImageCategory(input.options.categoryId);
   const graph = JSON.parse(await fs.readFile(stillImageWorkflowPath(preset.categoryId), "utf8")) as StillImageGraph;
 
-  const imageCount = stillImageSlotCount(category, input.options.settings);
+  const imageCount = stillImageRequestSlotCount(input.options);
   if (input.images.length !== imageCount) {
     throw new Error(`${preset.categoryId} expects ${imageCount} input image(s); received ${input.images.length}.`);
   }
@@ -206,6 +222,7 @@ export async function buildStillImageWorkflow(input: StillImageBuildInput): Prom
     prompt: (input.prompt ?? "").trim(),
     images: input.images,
     imageCount,
+    edit: input.options.edit,
     // Derived from the job's own master seed, so resubmitting that seed with the
     // same settings and inputs reproduces this render. A job recorded before
     // seeds were persisted has none; those keep the old behaviour of a fresh
@@ -322,10 +339,9 @@ function applyGeneralEnhancement(graph: StillImageGraph, input: ResolvedBuildInp
 
   // The input image is written by the binding pass in buildStillImageWorkflow.
 
-  // No mask surface in this UI, so always the generated-mask route. Equivalent to
-  // forge's has_drawn_mask = false; the drawn-mask branch (nodes 86/88) is left
-  // unreferenced and never executes.
-  connect(graph, GENERAL.maskRouter, "mask", GENERAL.maskRouteGenerated);
+  // Ordinary enhancement uses the graph-generated mask. The integrated image
+  // editor supplies slot 2 to the graph's dormant drawn-mask branch instead.
+  connect(graph, GENERAL.maskRouter, "mask", input.edit?.mode === "enhance" ? "88" : GENERAL.maskRouteGenerated);
 
   set(graph, GENERAL.promptText, "text_a", prompt);
   set(graph, GENERAL.qwenPrompt, "custom_prompt", prompt);
@@ -680,6 +696,65 @@ const RAW_ENHANCEMENT_QWEN_PROMPT = [
   "   - premium archviz quality",
 ].join("\n");
 
+// -- image editing -----------------------------------------------------------
+
+const IMAGE_EDIT = {
+  gemini: "1",
+  source: "3",
+  mask: "20",
+  guide: "12",
+  batch: "11",
+  guideInput: "images.image1",
+  composite: "24",
+  save: "10",
+  references: ["30", "31", "32"],
+} as const;
+
+/**
+ * Prompt-guided editing confined to a painted region.
+ *
+ * Unlike the other four presets this graph does no sampling of its own: node 1 is
+ * a remote Nano Banana call, and everything around it exists to make that call
+ * behave like an inpaint. Two things do that work.
+ *
+ * The guide (slot 3) is the source with the painted region washed over in
+ * magenta, batched in behind the clean source. Nano Banana has no mask input, so
+ * a visible marker is the only way to say "here"; the system prompt in the export
+ * tells it the wash is a marker and must not survive into the result.
+ *
+ * The composite is what actually guarantees it. Whatever comes back is scaled to
+ * the source's exact size and pasted through the painted mask, so every pixel
+ * outside the region is bit-for-bit the source. Without it the model's usual
+ * whole-image drift would quietly re-render the parts nobody asked about.
+ */
+function applyImageEditing(graph: StillImageGraph, input: ResolvedBuildInput) {
+  set(graph, IMAGE_EDIT.gemini, "prompt", input.prompt);
+  set(graph, IMAGE_EDIT.gemini, "seed", input.nextSeed());
+  set(graph, IMAGE_EDIT.gemini, "resolution", choice(input.settings, "resolution", "1K"));
+  set(graph, IMAGE_EDIT.gemini, "thinking_level", choice(input.settings, "thinking", "MINIMAL"));
+
+  // The guide is the only optional slot, so imageCount is what says whether it
+  // was uploaded. Reading markRegion here instead would let a stale setting point
+  // the batch at a node holding a filename nothing was sent for.
+  if (input.imageCount >= 3) {
+    connect(graph, IMAGE_EDIT.batch, IMAGE_EDIT.guideInput, IMAGE_EDIT.guide);
+  } else {
+    delete nodeInputs(graph, IMAGE_EDIT.batch)[IMAGE_EDIT.guideInput];
+  }
+
+  const referenceCount = input.edit?.referenceSourceUrls.length ?? 0;
+  for (let index = 0; index < IMAGE_EDIT.references.length; index += 1) {
+    const inputName = `images.image${index + 2}`;
+    if (index < referenceCount) connect(graph, IMAGE_EDIT.batch, inputName, IMAGE_EDIT.references[index]);
+    else delete nodeInputs(graph, IMAGE_EDIT.batch)[inputName];
+  }
+
+  // Off, the raw crop leaves the worker. The result saver still applies the
+  // editable crop mask while rebuilding the full-resolution original, so this is
+  // only a pre-blend preference and never permission to change outside the mask.
+  connect(graph, IMAGE_EDIT.save, "images", flag(input.settings, "preserveUnmasked") ? IMAGE_EDIT.composite : IMAGE_EDIT.gemini);
+}
+
 /**
  * What each ComfyUI node means, for the waiting UI.
  *
@@ -759,6 +834,18 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
     "182": "Resizing the result",
     "137": "Saving final image",
   },
+  // Six of the ten nodes here are loaders and arithmetic, and the one that takes
+  // the time -- node 1 -- is a remote call the worker reports as a single step.
+  "image-editing": {
+    "3": "Loading the source image",
+    "20": "Loading the painted mask",
+    "12": "Loading the marked guide",
+    "11": "Collecting the inputs",
+    "1": "Editing with Nano Banana",
+    "22": "Matching the source size",
+    "24": "Pasting the edit back through the mask",
+    "10": "Saving final image",
+  },
   "reference-generator": {
     "42": "Loading main image",
     "43": "Loading reference image",
@@ -805,17 +892,22 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "general-enhancement": {
     categoryId: "general-enhancement",
     workflowFile: "general-enhancement.json",
+    endpoint: "dedicated",
     inputTransport: "inline_base64",
     // Node 63 only. Node 81 in this graph is also a LoadImage but sits in the
     // disconnected drawn-mask branch, and node 86 is the mask's own base64 loader;
     // neither is an input slot. This is the graph that makes class-name scanning
     // unusable.
-    inputBindings: [{ slot: 1, mode: "base64", nodeId: "63", inputName: "image" }],
+    inputBindings: [
+      { slot: 1, mode: "base64", nodeId: "63", inputName: "image" },
+      { slot: 2, mode: "base64", nodeId: "86", inputName: "image" },
+    ],
     apply: applyGeneralEnhancement,
   },
   "pro-upscaler": {
     categoryId: "pro-upscaler",
     workflowFile: "pro-upscaler.json",
+    endpoint: "dedicated",
     inputTransport: "load_image_name",
     inputBindings: [{ slot: 1, mode: "load-image", nodeId: "99", inputName: "image", filename: stillImageSlotFilename(1) }],
     apply: applyProUpscaler,
@@ -823,6 +915,7 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "reference-generator": {
     categoryId: "reference-generator",
     workflowFile: "reference-generator.json",
+    endpoint: "dedicated",
     inputTransport: "inline_base64",
     inputBindings: [
       { slot: 1, mode: "base64", nodeId: "42", inputName: "image" },
@@ -833,6 +926,7 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "qwen-edit": {
     categoryId: "qwen-edit",
     workflowFile: "qwen-edit.json",
+    endpoint: "dedicated",
     inputTransport: "load_image_name",
     // Nodes 121 and 165 were exported holding the same value, "0001 (1).png".
     // These deterministic per-slot names are what stop slots 2 and 3 overwriting
@@ -843,5 +937,27 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
       { slot: 3, mode: "load-image", nodeId: "165", inputName: "image", filename: stillImageSlotFilename(3) },
     ],
     apply: applyQwenEdit,
+  },
+  "image-editing": {
+    categoryId: "image-editing",
+    workflowFile: "image-editing.json",
+    endpoint: "shared",
+    // Nano Banana is a remote API node, so nothing here is size-critical enough
+    // to justify inlining: the bytes ride in the RunPod payload like every other
+    // load-image preset, and a large source stays eligible for a signed URL.
+    inputTransport: "load_image_name",
+    // Slot order is source, mask, guide rather than the order they appear in the
+    // graph. stillImageInputBindings keeps the slots at or below the resolved
+    // count, so putting the optional guide last is what lets markRegion drop it
+    // without disturbing the two that are always sent.
+    inputBindings: [
+      { slot: 1, mode: "load-image", nodeId: "3", inputName: "image", filename: stillImageSlotFilename(1) },
+      { slot: 2, mode: "load-image", nodeId: "20", inputName: "image", filename: stillImageSlotFilename(2) },
+      { slot: 3, mode: "load-image", nodeId: "12", inputName: "image", filename: stillImageSlotFilename(3) },
+      { slot: 4, mode: "load-image", nodeId: "30", inputName: "image", filename: stillImageSlotFilename(4) },
+      { slot: 5, mode: "load-image", nodeId: "31", inputName: "image", filename: stillImageSlotFilename(5) },
+      { slot: 6, mode: "load-image", nodeId: "32", inputName: "image", filename: stillImageSlotFilename(6) },
+    ],
+    apply: applyImageEditing,
   },
 };

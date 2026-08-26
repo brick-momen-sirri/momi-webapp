@@ -16,6 +16,19 @@ export async function validateJobMediaReferences(request: CreateJobRequest, proj
   for (const value of request.inputImages ?? []) {
     await validateReference(value, "image", project, user);
   }
+  // Crop editing keeps the full original and prior layer crops out of inputImages
+  // so they are not sent to RunPod. They are still media reads performed for this
+  // job and therefore require the exact same project/user ownership validation.
+  const edit = request.workflowOptions?.stillImage?.edit;
+  if (edit) {
+    const editReferences = [
+      edit.originalSourceUrl,
+      edit.maskSourceUrl,
+      ...(edit.referenceSourceUrls ?? []),
+      ...edit.baseLayers.flatMap((layer) => [layer.generatedCropUrl, layer.maskSourceUrl]),
+    ];
+    for (const value of new Set(editReferences)) await validateReference(value, "image", project, user);
+  }
   if (request.startFrame) await validateReference(request.startFrame, "image", project, user);
   if (request.endFrame) await validateReference(request.endFrame, "image", project, user);
   if (request.inputVideo) await validateReference(request.inputVideo, "video", project, user);

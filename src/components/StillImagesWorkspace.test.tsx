@@ -3,7 +3,11 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
-import { createInitialStillImagesState, getStillImageCategory } from "../features/still-images/stillImageCategories";
+import {
+  createInitialStillImagesState,
+  getStillImageCategory,
+  STILL_IMAGE_CATEGORIES,
+} from "../features/still-images/stillImageCategories";
 import type { Job, Project } from "../types";
 
 // The results panel is the only place a Still Images job becomes visible, so an
@@ -503,7 +507,7 @@ describe("StillImagesWorkspace", () => {
     // whichever one the left panel happens to show would be wrong as often as
     // it was right.
     const menu = screen.getByRole("menu", { name: /send this result to a preset/i });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(4);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(STILL_IMAGE_CATEGORIES.length);
 
     await userEvent.click(within(menu).getByRole("menuitem", { name: /qwen edit/i }));
 

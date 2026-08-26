@@ -1,0 +1,99 @@
+{
+  "1": {
+    "inputs": {
+      "prompt": "",
+      "model": "Nano Banana 2 (Gemini 3.1 Flash Image)",
+      "seed": 42,
+      "aspect_ratio": "auto",
+      "resolution": "1K",
+      "response_modalities": "IMAGE",
+      "thinking_level": "MINIMAL",
+      "system_prompt": "You are an expert image editor. The first image is the source. The second image is that same source overlaid with a translucent magenta wash marking the region the user wants changed: the wash is a region marker only. Never reproduce it, never let it tint the result, and never treat it as part of the scene. Any remaining images are visual references supplied by the user; use them for the requested identity, appearance, material, colour, or style without copying their framing. Apply the user's instruction inside the marked region and leave everything outside it identical to the source. Always return an image with the same framing and aspect ratio as the source. You must ALWAYS produce an image.",
+      "images": ["11", 0]
+    },
+    "class_type": "GeminiNanoBanana2",
+    "_meta": { "title": "Nano Banana 2" }
+  },
+  "3": {
+    "inputs": { "image": "momi_still_01.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Source image" }
+  },
+  "20": {
+    "inputs": { "image": "momi_still_02.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Edit mask" }
+  },
+  "12": {
+    "inputs": { "image": "momi_still_03.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Marked guide" }
+  },
+  "11": {
+    "inputs": {
+      "images.image0": ["3", 0],
+      "images.image1": ["12", 0]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": { "title": "Batch Images" }
+  },
+  "21": {
+    "inputs": { "image": ["3", 0] },
+    "class_type": "GetImageSize",
+    "_meta": { "title": "Source size" }
+  },
+  "22": {
+    "inputs": {
+      "image": ["1", 0],
+      "upscale_method": "lanczos",
+      "width": ["21", 0],
+      "height": ["21", 1],
+      "crop": "center"
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Back to source size" }
+  },
+  "23": {
+    "inputs": { "image": ["20", 0], "channel": "red" },
+    "class_type": "ImageToMask",
+    "_meta": { "title": "Mask from painted region" }
+  },
+  "24": {
+    "inputs": {
+      "destination": ["3", 0],
+      "source": ["22", 0],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": ["23", 0]
+    },
+    "class_type": "ImageCompositeMasked",
+    "_meta": { "title": "Paste the edit back through the mask" }
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": ["24", 0]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": { "title": "Save Image (Advanced)" }
+  },
+  "30": {
+    "inputs": { "image": "momi_still_04.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 1" }
+  },
+  "31": {
+    "inputs": { "image": "momi_still_05.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 2" }
+  },
+  "32": {
+    "inputs": { "image": "momi_still_06.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 3" }
+  }
+}

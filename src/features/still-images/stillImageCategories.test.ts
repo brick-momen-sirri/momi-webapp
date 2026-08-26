@@ -41,6 +41,11 @@ const slotCases: Array<[StillImageCategoryId, Settings, number]> = [
   ["qwen-edit", { mode: "edit", imageCount: "9" }, 3],
   ["qwen-edit", { mode: "edit", imageCount: "0" }, 1],
   ["qwen-edit", { mode: "edit", imageCount: "not-a-number" }, 1],
+  // Source, painted mask, and the marked guide unless the wash is off. Nothing
+  // varies with the source image, so the only case is the toggle.
+  ["image-editing", {}, 3],
+  ["image-editing", { markRegion: true }, 3],
+  ["image-editing", { markRegion: false }, 2],
 ];
 
 const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
@@ -52,6 +57,7 @@ const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
   ["qwen-edit", { mode: "consistency" }, true],
   ["qwen-edit", { mode: "raw-enhancement" }, true],
   ["qwen-edit", {}, true],
+  ["image-editing", {}, true],
 ];
 
 const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
@@ -101,6 +107,7 @@ const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
   ["reference-generator", { enhancement: false }, ["colorStrength", "creativity", "structureStrength", "enhancement"]],
   ["qwen-edit", { mode: "edit" }, ["mode", "imageCount"]],
   ["qwen-edit", { mode: "consistency" }, ["mode"]],
+  ["image-editing", {}, ["resolution", "thinking", "markRegion", "preserveUnmasked", "variations"]],
 ];
 
 describe("still image catalogue truth tables", () => {
@@ -130,7 +137,7 @@ describe("still image catalogue shape", () => {
   // These mirror the backend's assertions about its own copy. The server leans on
   // them when validating: a range without a maximum validates against Infinity,
   // and a select without options rejects every value including its own default.
-  const categoryIds: StillImageCategoryId[] = ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"];
+  const categoryIds: StillImageCategoryId[] = STILL_IMAGE_CATEGORIES.map((category) => category.id);
 
   it("every range setting has both bounds and a default inside them", () => {
     for (const categoryId of categoryIds) {

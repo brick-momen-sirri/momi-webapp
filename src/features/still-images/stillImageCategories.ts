@@ -14,12 +14,20 @@
 // the bottom are mirrored (and asserted against their counterparts in
 // backend/src/stillImageCategories.test.ts).
 
-import { ImageIcon, Images, ScanSearch, Sparkles } from "lucide-react";
+import { Brush, ImageIcon, Images, ScanSearch, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import presets from "../../../backend/src/data/stillImagePresets.json";
-import type { UploadedImage } from "../../types";
+import type {
+  JobStatus,
+  StillImageEditBaseLayer,
+  StillImageEditCrop,
+  StillImageEditMode,
+  StillImageEditReference,
+  UploadedImage,
+} from "../../types";
+import type { MaskDrawing } from "./maskDrawing";
 
-export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit";
+export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit" | "image-editing";
 
 export type StillImageSettingValue = string | number | boolean;
 
@@ -68,7 +76,72 @@ export type StillImageCategoryState = {
    * half-typed value does not have to round-trip through NaN.
    */
   seed: string;
+  /**
+   * The painted region, for the preset that has one.
+   *
+   * Held beside the images rather than inside them because it is not an upload:
+   * the mask and the marked guide are drawn from it at submit time and take slots
+   * 2 and 3, so what is stored here is the drawing, not its rendering. Undefined
+   * for every other preset, and never persisted -- the strokes are in the source
+   * image's pixels, and that image does not survive a reload either.
+   */
+  mask?: MaskDrawing;
+  /**
+   * Non-destructive Image Editing passes, ordered from bottom to top.
+   *
+   * A layer keeps geometry in original-image pixels. Provider/result URLs are
+   * refreshed from the matching job when the workspace renders, so a long job
+   * does not require copying the global job store into this form state.
+   */
+  editLayers?: StillImageEditLayer[];
+  /** Undefined means a new edit above every existing layer. */
+  activeEditLayerId?: string;
+  /** One continuous editor session for this uploaded original. */
+  editDocumentId?: string;
+  editMode?: StillImageEditMode;
+  editReferences?: UploadedImage[];
+  /** Durable URL captured by the first submitted layer and reused at finalization. */
+  editOriginalSourceUrl?: string;
   settings: Record<string, StillImageSettingValue>;
+};
+
+export type StillImageEditLayer = {
+  id: string;
+  name: string;
+  mask: MaskDrawing;
+  crop: StillImageEditCrop;
+  prompt: string;
+  mode: StillImageEditMode;
+  references: StillImageEditReference[];
+  documentId: string;
+  originalSourceUrl?: string;
+  jobId: string;
+  createdAt: string;
+  updatedAt: string;
+  visible: boolean;
+  order: number;
+  /** Changes when the mask or generated take changes, invalidating local composites. */
+  revision: number;
+  status: JobStatus;
+  errorMessage?: string;
+  resultUrl?: string;
+  /** Durable backend value, safe to persist in another job's metadata. */
+  generatedCropSourceUrl?: string;
+  /** Browser-readable version of generatedCropSourceUrl. */
+  generatedCropUrl?: string;
+  maskSourceUrl?: string;
+  /** Immutable crop/mask assets that formed this layer's generation input. */
+  baseLayers?: StillImageEditBaseLayer[];
+  /** Compact identity for the exact frozen base above. */
+  baseRevisionId?: string;
+  generation?: {
+    jobId: string;
+    workflow: "image-editing" | "general-enhancement";
+    workflowPath?: string;
+    modelId?: string;
+    seed?: number;
+    settings: Record<string, StillImageSettingValue>;
+  };
 };
 
 export type StillImagesState = Record<StillImageCategoryId, StillImageCategoryState>;
@@ -136,6 +209,34 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
       structureStrength: { label: "Structure strength" },
       enhancement: { label: "Enable enhancement" },
       colorMatch: { label: "Color match" },
+    },
+  },
+  "image-editing": {
+    label: "Image Editing",
+    shortDescription: "Paint over a region and describe what should be there.",
+    instructions: "Upload an image, paint the area to change, then describe the result you want in it.",
+    icon: Brush,
+    prompt: {
+      label: "Edit prompt",
+      placeholder: "Describe what should be in the painted area...",
+      hint: "Say what the region should become, not what to do to it. Everything outside it is kept from the original.",
+    },
+    settings: {
+      resolution: { label: "Output resolution", optionLabels: { "1K": "1K", "2K": "2K", "4K": "4K" } },
+      thinking: {
+        label: "Reasoning",
+        hint: "Thorough plans the edit before drawing it. Slower, and better on instructions with more than one part.",
+        optionLabels: { MINIMAL: "Fast", HIGH: "Thorough" },
+      },
+      markRegion: {
+        label: "Show the model where",
+        hint: "Sends a second copy of the image with the region washed over. Turn off if the wash is tinting results.",
+      },
+      preserveUnmasked: {
+        label: "Pre-blend returned crop",
+        hint: "Also blends the crop on the worker. The backend always applies the editable mask when rebuilding the full image, so pixels outside it remain protected.",
+      },
+      variations: { label: "Variations", hint: "How many to run. Each is its own job, with its own seed." },
     },
   },
   "qwen-edit": {
@@ -271,6 +372,7 @@ export function createInitialStillImagesState(): StillImagesState {
     "pro-upscaler": createInitialCategoryState(getStillImageCategory("pro-upscaler")),
     "reference-generator": createInitialCategoryState(getStillImageCategory("reference-generator")),
     "qwen-edit": createInitialCategoryState(getStillImageCategory("qwen-edit")),
+    "image-editing": createInitialCategoryState(getStillImageCategory("image-editing")),
   };
 }
 
@@ -279,11 +381,16 @@ function createInitialCategoryState(category: StillImageCategoryDefinition): Sti
     images: [],
     prompt: "",
     seed: "",
+    editLayers: [],
+    ...(category.id === "image-editing" ? { editMode: "inpaint" as const, editReferences: [] } : {}),
     settings: Object.fromEntries(category.settings.map((setting) => [setting.id, setting.defaultValue])),
   };
 }
 
 export function stillImageSlotCount(category: StillImageCategoryDefinition, state: StillImageCategoryState) {
+  // Source, painted mask, and -- unless the wash has been turned off -- the marked
+  // guide. Only the first is an upload; see maskRaster.ts for the other two.
+  if (category.id === "image-editing") return state.settings.markRegion === false ? 2 : 3;
   if (category.id === "qwen-edit") {
     const mode = String(state.settings.mode || "edit");
     if (mode === "reference-transfer") return 2;
@@ -294,6 +401,7 @@ export function stillImageSlotCount(category: StillImageCategoryDefinition, stat
 }
 
 export function stillImageSlotLabels(category: StillImageCategoryDefinition, state: StillImageCategoryState) {
+  if (category.id === "image-editing") return ["Source image", "Edit mask", "Marked guide"];
   if (category.id === "reference-generator") return ["Main image", "Reference image"];
   if (category.id !== "qwen-edit") return ["Input image"];
 

@@ -130,6 +130,18 @@
           "visibleWhen": { "settingId": "mode", "equals": "edit" }
         }
       ]
+    },
+    {
+      "id": "image-editing",
+      "imageSlots": 3,
+      "acceptsPrompt": true,
+      "settings": [
+        { "id": "resolution", "kind": "select", "defaultValue": "1K", "options": ["1K", "2K", "4K"] },
+        { "id": "thinking", "kind": "select", "defaultValue": "MINIMAL", "options": ["MINIMAL", "HIGH"] },
+        { "id": "markRegion", "kind": "checkbox", "defaultValue": true },
+        { "id": "preserveUnmasked", "kind": "checkbox", "defaultValue": true },
+        { "id": "variations", "kind": "range", "defaultValue": 1, "minimum": 1, "maximum": 4, "step": 1 }
+      ]
     }
   ]
 }

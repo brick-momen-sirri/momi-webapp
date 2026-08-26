@@ -10,6 +10,7 @@ import { invalidateMediaCache } from "./mediaService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMediaService.js";
 import { warmPlayableVideo } from "./playableVideoService.js";
 import { warmThumbnails } from "./thumbnailService.js";
+import { compositeStillImageEditResult } from "./stillImageEditComposite.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
 import type { Job, Project, Resolution, WorkflowModel } from "./types.js";
 
@@ -147,6 +148,10 @@ async function persistOneArtifact(
     );
     reservationPath = target.reservationPath;
     await mediaSource.writeTo(target.filePath);
+    // Image Editing providers receive only a square crop. Preserve that crop as
+    // the editable layer payload, then turn the user-facing result back into the
+    // full original-resolution composite before resolution/thumbnail inspection.
+    if (assetType === "image") await compositeStillImageEditResult(context.job, target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
     // Same reason the resolution is read here: the file has just been written, so
     // this is the one moment its size is free. Still image results are the largest

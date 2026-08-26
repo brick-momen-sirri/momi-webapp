@@ -62,7 +62,8 @@ export async function moveResultFiles({
 
   const sourceOutputRoot = outputRootFor(project, job.folderId, folders, "Source");
   const destinationOutputRoot = outputRootFor(project, destinationFolderId, folders, "Destination");
-  const referencedPaths = uniqueLocalMediaPaths([...job.resultUrls, ...job.thumbnailUrls]);
+  const editCropUrl = job.workflowOptions?.stillImage?.edit?.generatedCropUrl;
+  const referencedPaths = uniqueLocalMediaPaths([...job.resultUrls, ...job.thumbnailUrls, ...(editCropUrl ? [editCropUrl] : [])]);
   const operations = buildMoveOperations(referencedPaths, sourceOutputRoot, destinationOutputRoot, job.outputType);
 
   await validateReferencedFiles(referencedPaths);
@@ -94,6 +95,15 @@ export async function moveResultFiles({
     folderName: folderDisplayName(destinationFolderId, folders),
     resultUrls: job.resultUrls.map(relocateUrl),
     thumbnailUrls: job.thumbnailUrls.map(relocateUrl),
+    workflowOptions: editCropUrl
+      ? {
+          ...job.workflowOptions,
+          stillImage: {
+            ...job.workflowOptions!.stillImage!,
+            edit: { ...job.workflowOptions!.stillImage!.edit!, generatedCropUrl: relocateUrl(editCropUrl) },
+          },
+        }
+      : job.workflowOptions,
   };
 
   return {

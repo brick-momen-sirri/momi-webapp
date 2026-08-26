@@ -1,4 +1,4 @@
-import type { WorkflowOptions } from "../../types";
+import type { StillImageEditBaseLayer, WorkflowOptions } from "../../types";
 import { apiRequest } from "./client";
 import { mapJob } from "./mappers";
 import type { BackendJob, BackendJobsPage, FetchBackendJobsParams } from "./types";
@@ -28,6 +28,14 @@ export async function fetchBackendJobs(params: FetchBackendJobsParams = {}): Pro
   };
 }
 
+/** Fetch one complete job record for lifecycle-sensitive editor flows. */
+export async function fetchBackendJob(jobId: string, options: { signal?: AbortSignal } = {}) {
+  const data = await apiRequest<{ job: BackendJob }>(`/api/jobs/${encodeURIComponent(jobId)}`, {
+    signal: options.signal,
+  });
+  return mapJob(data.job);
+}
+
 export async function createBackendJob(
   payload: {
     clientRequestId?: string;
@@ -55,6 +63,23 @@ export async function createBackendJob(
     signal: options.signal,
   });
   return { job: mapJob(data.job), replayed: data.replayed === true };
+}
+
+export async function finalizeBackendStillImageEdit(payload: {
+  projectId: string;
+  targetFolderId?: string | null;
+  documentId: string;
+  originalSourceUrl: string;
+  prompt?: string;
+  saveNumber: string;
+  layers: StillImageEditBaseLayer[];
+}) {
+  const data = await apiRequest<{ job: BackendJob }>("/api/still-image-edits/finalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return mapJob(data.job);
 }
 
 export async function renameBackendJob(projectId: string, jobId: string, title: string) {

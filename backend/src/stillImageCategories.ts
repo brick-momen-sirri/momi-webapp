@@ -30,14 +30,15 @@
 // the save node, over an 8-case matrix. See GENERAL_ENHANCEMENT_WORKFLOW_README.md
 // in momi-forge.
 //
-// Deliberately not ported: the mask editor. forge exposes mask_b64 and
-// has_drawn_mask, which route 13.mask between nodes 85 and 88. This UI has no
-// mask surface, so the wiring must always take the generated-mask route
-// (13.mask <- 85), the same as forge's has_drawn_mask = false.
+// forge exposes mask_b64 and has_drawn_mask, which route 13.mask between nodes 85
+// and 88. Ordinary General Enhancement submissions keep the generated-mask route
+// (13.mask <- 85); Enhance actions from the integrated editor activate the drawn
+// route. Image Editing carries its mask as an ordinary image slot instead -- see
+// applyImageEditing.
 
 import presets from "./data/stillImagePresets.json" with { type: "json" };
 
-export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit";
+export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit" | "image-editing";
 
 export type StillImageSettingValue = string | number | boolean;
 
@@ -80,6 +81,50 @@ export type StillImageOptions = {
    */
   seed?: number;
   settings: Record<string, StillImageSettingValue>;
+  edit?: StillImageEditOptions;
+};
+
+export type StillImageEditCrop = {
+  x: number;
+  y: number;
+  size: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+export type StillImageEditMask = {
+  width: number;
+  height: number;
+  softness: number;
+  strokes: Array<{
+    tool: "brush" | "eraser" | "lasso";
+    radius: number;
+    points: Array<{ x: number; y: number }>;
+  }>;
+};
+
+export type StillImageEditBaseLayer = {
+  layerId: string;
+  crop: StillImageEditCrop;
+  generatedCropUrl: string;
+  maskSourceUrl: string;
+};
+
+export type StillImageEditMode = "inpaint" | "enhance";
+
+export type StillImageEditOptions = {
+  layerId: string;
+  operation: "create" | "regenerate";
+  mode: StillImageEditMode;
+  documentId: string;
+  crop: StillImageEditCrop;
+  mask: StillImageEditMask;
+  originalSourceUrl: string;
+  maskSourceUrl: string;
+  baseLayerIds: string[];
+  baseLayers: StillImageEditBaseLayer[];
+  referenceSourceUrls: string[];
+  generatedCropUrl?: string;
 };
 
 export const STILL_IMAGE_CATEGORY_IDS: readonly StillImageCategoryId[] = [
@@ -87,6 +132,7 @@ export const STILL_IMAGE_CATEGORY_IDS: readonly StillImageCategoryId[] = [
   "pro-upscaler",
   "reference-generator",
   "qwen-edit",
+  "image-editing",
 ];
 
 /**
@@ -149,6 +195,17 @@ function assertSettingShape(categoryId: string, setting: StillImageSettingDefini
   }
 }
 
+/**
+ * A checkbox as the slot and prompt rules see it.
+ *
+ * Defaults to true on an absent value because both callers read settings whose
+ * preset default is true; a bag that predates the setting must behave as the
+ * preset does, not as an unchecked box.
+ */
+function flagSetting(settings: Record<string, StillImageSettingValue>, id: string) {
+  return settings[id] !== false;
+}
+
 export function isStillImageCategoryId(value: unknown): value is StillImageCategoryId {
   return typeof value === "string" && STILL_IMAGE_CATEGORY_IDS.includes(value as StillImageCategoryId);
 }
@@ -169,12 +226,23 @@ export function getStillImageCategory(categoryId: StillImageCategoryId) {
  * for a two-input graph and silently ignored.
  */
 export function stillImageSlotCount(category: StillImageCategoryDefinition, settings: Record<string, StillImageSettingValue>) {
+  // Slot 1 is the source, slot 2 the painted mask, slot 3 the same source with the
+  // masked region washed over. The wash is what tells Nano Banana where to work;
+  // with markRegion off it is not uploaded at all, so the request carries two.
+  if (category.id === "image-editing") return flagSetting(settings, "markRegion") ? 3 : 2;
   if (category.id !== "qwen-edit") return category.imageSlots;
 
   const mode = String(settings.mode ?? "edit");
   if (mode === "reference-transfer") return 2;
   if (mode === "consistency" || mode === "raw-enhancement") return 1;
   return Math.max(1, Math.min(3, Number(settings.imageCount) || 1));
+}
+
+/** Variable editor inputs layered on top of the catalogue's ordinary slot rules. */
+export function stillImageRequestSlotCount(options: StillImageOptions) {
+  if (!options.edit) return stillImageSlotCount(getStillImageCategory(options.categoryId), options.settings);
+  const fixed = options.edit.mode === "enhance" ? 2 : 3;
+  return fixed + options.edit.referenceSourceUrls.length;
 }
 
 /**

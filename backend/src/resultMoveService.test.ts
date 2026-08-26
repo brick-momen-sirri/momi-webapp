@@ -106,6 +106,47 @@ test("moving a result with a missing local reference is rejected without changin
   assert.equal(job.resultUrls[0], mediaUrl(missing));
 });
 
+test("moving an edit result also moves and rewrites its editable crop sidecar", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "momi-result-move-layer-"));
+  const project = makeProject(path.join(root, "1234_Client_Project"));
+  const folders = makeFolders();
+  const sourceRoot = path.join(project.folderPath, "folders", folders[0].diskName, "images", "20260716");
+  const resultPath = path.join(sourceRoot, "result.png");
+  const layerPath = path.join(sourceRoot, "result.edit-layer.png");
+  await fs.mkdir(sourceRoot, { recursive: true });
+  await fs.writeFile(resultPath, "full", "utf8");
+  await fs.writeFile(layerPath, "crop", "utf8");
+  const job = makeJob(project, folders[0].folderId, mediaUrl(resultPath));
+  job.workflowOptions = {
+    stillImage: {
+      categoryId: "image-editing",
+      settings: {},
+      edit: {
+        layerId: "edit_12345678",
+        operation: "create",
+        crop: { x: 0, y: 0, size: 10, sourceWidth: 20, sourceHeight: 20 },
+        mask: { width: 20, height: 20, softness: 0, strokes: [] },
+        originalSourceUrl: mediaUrl(resultPath),
+        maskSourceUrl: mediaUrl(resultPath),
+        baseLayerIds: [],
+        baseLayers: [],
+        generatedCropUrl: mediaUrl(layerPath),
+      },
+    },
+  };
+
+  const moved = await moveResultFiles({
+    project,
+    job,
+    destinationFolderId: folders[1].folderId,
+    folders,
+  });
+  const movedLayerPath = mediaPath(moved.job.workflowOptions?.stillImage?.edit?.generatedCropUrl ?? "");
+  assert.ok(movedLayerPath);
+  assert.equal(await fs.readFile(movedLayerPath, "utf8"), "crop");
+  await assert.rejects(fs.stat(layerPath));
+});
+
 function makeProject(folderPath: string): Project {
   return {
     id: "project-1",

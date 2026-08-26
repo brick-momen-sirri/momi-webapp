@@ -42,6 +42,11 @@ const slotCases: Array<[StillImageCategoryId, Settings, number]> = [
   ["qwen-edit", { mode: "edit", imageCount: "9" }, 3],
   ["qwen-edit", { mode: "edit", imageCount: "0" }, 1],
   ["qwen-edit", { mode: "edit", imageCount: "not-a-number" }, 1],
+  // Source, painted mask, and the marked guide unless the wash is off. Nothing
+  // varies with the source image, so the only case is the toggle.
+  ["image-editing", {}, 3],
+  ["image-editing", { markRegion: true }, 3],
+  ["image-editing", { markRegion: false }, 2],
 ];
 
 const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
@@ -53,6 +58,7 @@ const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
   ["qwen-edit", { mode: "consistency" }, true],
   ["qwen-edit", { mode: "raw-enhancement" }, true],
   ["qwen-edit", {}, true],
+  ["image-editing", {}, true],
 ];
 
 const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
@@ -102,6 +108,7 @@ const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
   ["reference-generator", { enhancement: false }, ["colorStrength", "creativity", "structureStrength", "enhancement"]],
   ["qwen-edit", { mode: "edit" }, ["mode", "imageCount"]],
   ["qwen-edit", { mode: "consistency" }, ["mode"]],
+  ["image-editing", {}, ["resolution", "thinking", "markRegion", "preserveUnmasked", "variations"]],
 ];
 
 test("slot count truth table", () => {
@@ -125,10 +132,13 @@ test("setting visibility truth table", () => {
   }
 });
 
-test("isStillImageCategoryId accepts only the four presets", () => {
+test("isStillImageCategoryId accepts only the catalogued presets", () => {
   assert.equal(isStillImageCategoryId("qwen-edit"), true);
   assert.equal(isStillImageCategoryId("general-enhancement"), true);
   assert.equal(isStillImageCategoryId("Qwen-Edit"), false);
+  assert.equal(isStillImageCategoryId("image-editing"), true);
+  // Underscored, which is the ModelCategory spelling. The preset id is hyphenated,
+  // and the two live close enough together to be worth pinning apart.
   assert.equal(isStillImageCategoryId("image_editing"), false);
   assert.equal(isStillImageCategoryId(""), false);
   assert.equal(isStillImageCategoryId(undefined), false);

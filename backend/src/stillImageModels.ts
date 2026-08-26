@@ -6,7 +6,7 @@
 // model-less path through all of that, each preset is presented as a model.
 //
 // These are NOT in modelsCache and never come from loadWorkflowModels. That cache
-// backs GET /api/models, which is the Animation picker, and four local-GPU presets
+// backs GET /api/models, which is the Animation picker, and the local-GPU presets
 // have no business there -- they would be selectable against the shared endpoint.
 // getWorkflowModel falls back to this registry so a preset id resolves, while
 // getWorkflowModels stays Animation-only.
@@ -86,6 +86,16 @@ const MODEL_METADATA: Record<StillImageCategoryId, StillImageModelMetadata> = {
     category: "image_editing",
     estimatedCredits: 8,
     estimatedTime: "1-3 min",
+  },
+  "image-editing": {
+    name: "Image Editing",
+    category: "image_editing",
+    // The odd one out: not GPU-seconds on our own pod but a per-image Nano Banana
+    // charge, so this figure is a provider price rather than a placeholder. It is
+    // the 1K rate; 2K and 4K bill more, and the worker's credit_usage is what
+    // lands on the job either way.
+    estimatedCredits: 4,
+    estimatedTime: "20-60 sec",
   },
 };
 

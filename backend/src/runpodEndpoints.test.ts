@@ -65,6 +65,14 @@ test("a preset with no configured pod is refused, not sent to the shared worker"
   assert.throws(() => resolveRunpodEndpoint(stillImageJob("reference-generator")), /Set RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR/);
 });
 
+test("a shared preset with no configured pod goes to the animation worker", () => {
+  // Image Editing's graph is a Nano Banana API call. It loads no weights, so the
+  // shared worker runs it -- and that worker is the one handed comfy_org_api_key.
+  const endpoint = resolveRunpodEndpoint(stillImageJob("image-editing"));
+  assert.equal(endpoint.id, "shared-animation-endpoint");
+  assert.deepEqual(endpoint, defaultRunpodEndpoint());
+});
+
 test("a persisted endpoint id wins over the preset configuration", () => {
   // Once RunPod has acknowledged the job, that is where the work lives -- even if
   // the preset has since been pointed at a different pod.

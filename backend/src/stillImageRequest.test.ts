@@ -284,3 +284,109 @@ test("animation-only media is refused", () => {
   assert.throws(() => assertStillImageInputs(upscaler, { inputImages: ["a.png"], endFrame: "e.png" }), /start or end frames/);
   assert.throws(() => assertStillImageInputs(upscaler, { inputImages: ["a.png"], inputVideo: "v.mp4" }), /input video/);
 });
+
+test("image edit crop and editable mask metadata survive normalization", () => {
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    crop: { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+    mask: {
+      width: 1200,
+      height: 800,
+      softness: 20,
+      strokes: [{ tool: "brush", radius: 25, points: [{ x: 250, y: 200 }] }],
+    },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+    generatedCropUrl: "/api/media?path=caller-must-not-set.png",
+  };
+  const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
+  assert.deepEqual(options.edit?.crop, edit.crop);
+  assert.deepEqual(options.edit?.mask, edit.mask);
+  assert.equal(options.edit?.generatedCropUrl, undefined);
+  assert.doesNotThrow(() =>
+    assertStillImageInputs(options, {
+      inputImages: ["/api/media?path=crop.png", edit.maskSourceUrl, "/api/media?path=guide.png"],
+    }),
+  );
+});
+
+test("image edit metadata rejects mismatched coordinates and mask slots", () => {
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    crop: { x: 900, y: 0, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+    mask: { width: 1200, height: 800, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+  };
+  assert.throws(() => normalizeStillImageOptions({ categoryId: "image-editing", edit }), /crop\.x/);
+
+  const valid = normalizeStillImageOptions({
+    categoryId: "image-editing",
+    edit: { ...edit, crop: { ...edit.crop, x: 800 } },
+  });
+  assert.throws(
+    () => assertStillImageInputs(valid, { inputImages: ["crop", "another-mask", "guide"] }),
+    /mask metadata must reference input image slot 2/,
+  );
+});
+
+test("inpaint references extend the ordered image slots", () => {
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    mode: "inpaint",
+    documentId: "editdoc_12345678",
+    crop: { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+    mask: { width: 1200, height: 800, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+    referenceSourceUrls: ["/api/media?path=reference.png"],
+  };
+  const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
+  assert.doesNotThrow(() =>
+    assertStillImageInputs(options, {
+      inputImages: ["crop", edit.maskSourceUrl, "guide", edit.referenceSourceUrls[0]],
+      prompt: "use the reference material",
+    }),
+  );
+  assert.throws(
+    () => assertStillImageInputs(options, { inputImages: ["crop", edit.maskSourceUrl, "guide", "wrong-reference"] }),
+    /reference metadata must match/i,
+  );
+});
+
+test("enhance edits use the general workflow's drawn-mask slot", () => {
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    mode: "enhance",
+    documentId: "editdoc_12345678",
+    crop: { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+    mask: { width: 1200, height: 800, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+    referenceSourceUrls: [],
+  };
+  const options = normalizeStillImageOptions({ categoryId: "general-enhancement", edit });
+  assert.doesNotThrow(() =>
+    assertStillImageInputs(options, { inputImages: ["crop", edit.maskSourceUrl], prompt: "increase the detail" }),
+  );
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "general-enhancement",
+        edit: { ...edit, referenceSourceUrls: ["/api/media?path=reference.png"] },
+      }),
+    /does not yet support reference images/i,
+  );
+});

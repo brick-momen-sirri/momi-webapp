@@ -19,6 +19,7 @@ import {
 import {
   archiveJob,
   cancelJob,
+  createCompletedStillImageEditJob,
   createJob,
   createJobIdempotent,
   getJob,
@@ -29,6 +30,7 @@ import {
 } from "../jobQueue.js";
 import { createJobSubmissionHandler } from "../jobSubmissionRoute.js";
 import { getProject } from "../projectService.js";
+import { parseFinalizeStillImageEditRequest } from "../stillImageEditFinalization.js";
 import { getWorkflowModel } from "../workflowService.js";
 
 export const jobRouter = express.Router();
@@ -84,6 +86,39 @@ jobRouter.post(
     createJob: createJobIdempotent,
   }),
 );
+
+jobRouter.post("/api/still-image-edits/finalize", async (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    if (isDemoAccount(user)) {
+      return res.status(403).json({ error: "Demo accounts are view-only and cannot finalize edits." });
+    }
+    const request = parseFinalizeStillImageEditRequest(req.body);
+    const project = getProject(request.projectId);
+    if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canCreateJobInProject(user, project)) return res.status(403).json({ error: "Project editor access required." });
+
+    await validateJobMediaReferences(
+      {
+        projectId: project.id,
+        modelId: "still_image-editing",
+        inputImages: [
+          request.originalSourceUrl,
+          ...request.layers.flatMap((layer) => [layer.generatedCropUrl, layer.maskSourceUrl]),
+        ],
+        userId: user.id,
+      },
+      project,
+      user,
+    );
+    const job = await createCompletedStillImageEditJob({ ...request, userId: user.id });
+    res.status(201).json({ job });
+  } catch (error) {
+    res.status(httpStatusFromError(error, 400)).json({
+      error: error instanceof Error ? error.message : "Could not finalize the edited composite.",
+    });
+  }
+});
 
 jobRouter.post("/api/jobs/:jobId/retry", async (req, res) => {
   try {

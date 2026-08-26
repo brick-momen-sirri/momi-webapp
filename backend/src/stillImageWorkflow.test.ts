@@ -32,10 +32,26 @@ async function build(categoryId: string, settings: Record<string, unknown>, imag
 const link = (graph: StillImageGraph, nodeId: string, input: string) => graph[nodeId]?.inputs?.[input];
 const value = (graph: StillImageGraph, nodeId: string, input: string) => graph[nodeId]?.inputs?.[input];
 
+// Slots and a node floor per preset. Driven off STILL_IMAGE_CATEGORY_IDS rather
+// than a literal list so adding a preset without a graph fails here.
+const PRESET_SHAPE: Record<string, { images: string[]; minNodes: number }> = {
+  "general-enhancement": { images: ["a"], minNodes: 30 },
+  "pro-upscaler": { images: ["a"], minNodes: 30 },
+  "reference-generator": { images: ["a", "b"], minNodes: 30 },
+  "qwen-edit": { images: ["a"], minNodes: 30 },
+  // Ten nodes, and eight of them are plumbing around one remote call. A floor in
+  // the thirties is a sampling graph's shape, not this one's.
+  "image-editing": { images: ["a", "b", "c"], minNodes: 8 },
+};
+
 test("every preset resolves to a graph file that exists and parses", async () => {
-  for (const categoryId of ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"] as const) {
-    const built = await build(categoryId, {}, categoryId === "reference-generator" ? ["a", "b"] : ["a"], "prompt");
-    assert.ok(Object.keys(built).length > 30, `${categoryId} graph looks too small`);
+  const { STILL_IMAGE_CATEGORY_IDS } = await import("./stillImageCategories.js");
+
+  for (const categoryId of STILL_IMAGE_CATEGORY_IDS) {
+    const shape = PRESET_SHAPE[categoryId];
+    assert.ok(shape, `${categoryId} has no entry in PRESET_SHAPE`);
+    const built = await build(categoryId, {}, shape.images, "prompt");
+    assert.ok(Object.keys(built).length >= shape.minNodes, `${categoryId} graph looks too small`);
     assert.ok(stillImageWorkflowPath(categoryId).endsWith(`${categoryId}.json`));
   }
 });
@@ -69,6 +85,7 @@ test("every configured binding is satisfied by the real exported graph", async (
     "pro-upscaler": 1,
     "reference-generator": 2,
     "qwen-edit": 3,
+    "image-editing": 3,
   };
 
   for (const [categoryId, imageCount] of Object.entries(counts)) {
@@ -270,6 +287,20 @@ test("general enhancement randomizes all four seeds", async () => {
     [1, 2, 3, 4],
     "each seed comes from a fresh draw, so repeat runs differ",
   );
+});
+
+test("editor enhancement loads the painted mask and activates the drawn-mask route", async () => {
+  const edit = editMetadata("enhance", []);
+  const graph = await buildStillImageWorkflow({
+    options: normalizeStillImageOptions({ categoryId: "general-enhancement", settings: {}, edit }),
+    images: ["SOURCE_BASE64", "MASK_BASE64"],
+    prompt: "enhance the stone detail",
+    nextSeed: seeds,
+  });
+
+  assert.equal(value(graph, "63", "image"), "SOURCE_BASE64");
+  assert.equal(value(graph, "86", "image"), "MASK_BASE64");
+  assert.deepEqual(link(graph, "13", "mask"), ["88", 0]);
 });
 
 test("reference generator randomizes its sampler seeds but not the captioner", async () => {
@@ -574,6 +605,89 @@ test("qwen edit always saves through the final crop", async () => {
   assert.equal(value(graph, "182", "multiple_of"), 1);
 });
 
+test("image editing fills the source, mask and guide slots in that order", async () => {
+  // Slot order is the whole reason markRegion can drop one input without
+  // disturbing the others, so it is asserted on the real graph rather than
+  // inferred from the binding table that produced it.
+  const graph = await build("image-editing", {}, ["src.png", "mask.png", "guide.png"], "make it brick");
+
+  assert.equal(value(graph, "3", "image"), "src.png");
+  assert.equal(value(graph, "20", "image"), "mask.png");
+  assert.equal(value(graph, "12", "image"), "guide.png");
+});
+
+test("image editing sends the prompt, seed and model options to the Nano Banana node", async () => {
+  const graph = await build("image-editing", { resolution: "4K", thinking: "HIGH" }, ["a", "b", "c"], "  add a window  ");
+
+  assert.equal(value(graph, "1", "prompt"), "add a window");
+  assert.equal(value(graph, "1", "seed"), 1);
+  assert.equal(value(graph, "1", "resolution"), "4K");
+  assert.equal(value(graph, "1", "thinking_level"), "HIGH");
+  // auto is what keeps the returned framing matching the source, which the
+  // composite then relies on. Nothing may write over it.
+  assert.equal(value(graph, "1", "aspect_ratio"), "auto");
+});
+
+test("image editing batches the guide in behind the source, and drops it when unmarked", async () => {
+  const marked = await build("image-editing", { markRegion: true }, ["a", "b", "c"], "p");
+  assert.deepEqual(link(marked, "11", "images.image0"), ["3", 0]);
+  assert.deepEqual(link(marked, "11", "images.image1"), ["12", 0]);
+
+  const plain = await build("image-editing", { markRegion: false }, ["a", "b"], "p");
+  assert.deepEqual(link(plain, "11", "images.image0"), ["3", 0]);
+  // Left connected, the batch would point at a LoadImage holding a filename
+  // nothing was uploaded for, and the graph would fail inside ComfyUI.
+  assert.equal("images.image1" in (plain["11"].inputs ?? {}), false);
+});
+
+test("image editing appends reference images to Nano Banana conditioning in order", async () => {
+  const edit = editMetadata("inpaint", ["ref-one.png", "ref-two.png"]);
+  const graph = await buildStillImageWorkflow({
+    options: normalizeStillImageOptions({ categoryId: "image-editing", settings: {}, edit }),
+    images: ["source.png", "mask.png", "guide.png", "ref-one.png", "ref-two.png"],
+    prompt: "match the reference chair",
+    nextSeed: seeds,
+  });
+
+  assert.equal(value(graph, "30", "image"), "ref-one.png");
+  assert.equal(value(graph, "31", "image"), "ref-two.png");
+  assert.deepEqual(link(graph, "11", "images.image2"), ["30", 0]);
+  assert.deepEqual(link(graph, "11", "images.image3"), ["31", 0]);
+  assert.equal("images.image4" in (graph["11"].inputs ?? {}), false);
+});
+
+test("image editing pastes the result back through the painted mask", async () => {
+  const graph = await build("image-editing", { preserveUnmasked: true }, ["a", "b", "c"], "p");
+
+  assert.deepEqual(link(graph, "10", "images"), ["24", 0]);
+  assert.deepEqual(link(graph, "24", "destination"), ["3", 0]);
+  assert.deepEqual(link(graph, "24", "source"), ["22", 0]);
+  assert.deepEqual(link(graph, "24", "mask"), ["23", 0]);
+  // The mask comes from the painted slot, and the composite source is the model
+  // output resized to the source's own dimensions -- both are what make every
+  // pixel outside the region identical to the input.
+  assert.deepEqual(link(graph, "23", "image"), ["20", 0]);
+  assert.deepEqual(link(graph, "22", "image"), ["1", 0]);
+  assert.deepEqual(link(graph, "22", "width"), ["21", 0]);
+  assert.deepEqual(link(graph, "22", "height"), ["21", 1]);
+  assert.deepEqual(link(graph, "21", "image"), ["3", 0]);
+  assert.equal(value(graph, "24", "resize_source"), false);
+});
+
+test("image editing can save the raw model output instead of the composite", async () => {
+  const graph = await build("image-editing", { preserveUnmasked: false }, ["a", "b", "c"], "p");
+  assert.deepEqual(link(graph, "10", "images"), ["1", 0]);
+});
+
+test("image editing runs on the shared endpoint and the GPU presets do not", async () => {
+  const { stillImageRunsOnSharedEndpoint } = await import("./stillImageWorkflow.js");
+
+  assert.equal(stillImageRunsOnSharedEndpoint("image-editing"), true);
+  for (const categoryId of ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"] as const) {
+    assert.equal(stillImageRunsOnSharedEndpoint(categoryId), false, categoryId);
+  }
+});
+
 test("every progress label points at a node the real graph contains", async () => {
   // The labels are keyed by ComfyUI node id, which is a contract with the
   // exported graph exactly like the input bindings are. A re-export that
@@ -604,3 +718,19 @@ test("a subgraph node id resolves through its outer id when unlabelled", async (
   assert.equal(stillImageNodeStatusLabel("general-enhancement", "32:9"), "Sampling tiles");
   assert.equal(stillImageNodeStatusLabel("general-enhancement", "9999"), undefined);
 });
+
+function editMetadata(mode: "inpaint" | "enhance", referenceSourceUrls: string[]) {
+  return {
+    layerId: "edit_12345678",
+    operation: "create",
+    mode,
+    documentId: "editdoc_12345678",
+    crop: { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+    mask: { width: 1200, height: 800, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+    referenceSourceUrls,
+  };
+}

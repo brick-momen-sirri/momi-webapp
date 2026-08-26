@@ -39,11 +39,13 @@ test("an animation model id is not mistaken for a preset", () => {
   assert.equal(isStillImageModelId("still_"), false);
 });
 
-test("qwen edit advertises three slots and the single-input presets one", () => {
+test("models advertise their maximum graph slots", () => {
   assert.equal(stillImageWorkflowModel(stillImageModelId("qwen-edit"))?.imageSlotCount, 3);
   assert.equal(stillImageWorkflowModel(stillImageModelId("reference-generator"))?.imageSlotCount, 2);
   assert.equal(stillImageWorkflowModel(stillImageModelId("pro-upscaler"))?.imageSlotCount, 1);
-  assert.equal(stillImageWorkflowModel(stillImageModelId("general-enhancement"))?.imageSlotCount, 1);
+  // Ordinary enhancement uses one input; the integrated editor activates the
+  // graph's dormant second mask binding.
+  assert.equal(stillImageWorkflowModel(stillImageModelId("general-enhancement"))?.imageSlotCount, 2);
 });
 
 test("presets carry no resolution or duration options", () => {

@@ -1,5 +1,8 @@
 import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal } from "lucide-react";
-import type { Project, UploadedImage } from "../types";
+import { useState } from "react";
+import type { Project, StillImageEditMode, UploadedImage } from "../types";
+import type { MaskDrawing } from "../features/still-images/maskDrawing";
+import { visibleEditLayers } from "../features/still-images/imageEditLayers";
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
@@ -16,6 +19,9 @@ import {
   type StillImageSettingValue,
 } from "../features/still-images/stillImageCategories";
 import { ImageUploader } from "./ImageUploader";
+import { EditLayersPanel } from "./EditLayersPanel";
+import { EditActionPanel } from "./EditActionPanel";
+import { MaskRegionField } from "./MaskRegionField";
 import { ResultDestinationControl } from "./ResultDestinationControl";
 import { ResultNamingControl } from "./ResultNamingControl";
 
@@ -28,12 +34,22 @@ type StillImagesSettingsPanelProps = {
   saveNumber: string;
   onCategoryChange: (categoryId: StillImageCategoryId) => void;
   onImagesChange: (images: UploadedImage[]) => void;
+  onMaskChange: (mask: MaskDrawing | undefined) => void;
   onPromptChange: (prompt: string) => void;
   onSeedChange: (seed: string) => void;
   onSettingChange: (settingId: string, value: StillImageSettingValue) => void;
   onTargetFolderChange: (folderId: string) => void;
   onSaveNumberChange: (value: string) => void;
   onGenerate: () => void;
+  onNewEditLayer?: () => void;
+  onSelectEditLayer?: (layerId: string) => void;
+  onToggleEditLayer?: (layerId: string) => void;
+  onDeleteEditLayer?: (layerId: string) => void;
+  onMoveEditLayer?: (layerId: string, direction: -1 | 1) => void;
+  onEditModeChange?: (mode: StillImageEditMode) => void;
+  onEditReferencesChange?: (references: UploadedImage[]) => void;
+  onFinishEditing?: (drawing: MaskDrawing) => boolean | void | Promise<boolean | void>;
+  finishingEdit?: boolean;
   submitting?: boolean;
   submitError?: string;
 };
@@ -47,22 +63,60 @@ export function StillImagesSettingsPanel({
   saveNumber,
   onCategoryChange,
   onImagesChange,
+  onMaskChange,
   onPromptChange,
   onSeedChange,
   onSettingChange,
   onTargetFolderChange,
   onSaveNumberChange,
   onGenerate,
+  onNewEditLayer = () => undefined,
+  onSelectEditLayer = () => undefined,
+  onToggleEditLayer = () => undefined,
+  onDeleteEditLayer = () => undefined,
+  onMoveEditLayer = () => undefined,
+  onEditModeChange = () => undefined,
+  onEditReferencesChange = () => undefined,
+  onFinishEditing,
+  finishingEdit = false,
   submitting = false,
   submitError,
 }: StillImagesSettingsPanelProps) {
+  const [regionOpenRequest, setRegionOpenRequest] = useState(0);
   const CategoryIcon = category.icon;
-  const imageSlotCount = stillImageSlotCount(category, state);
-  const slotLabels = stillImageSlotLabels(category, state);
   const showPrompt = shouldShowStillImagePrompt(category, state);
   const modeGuidance = stillImageModeGuidance(category, state);
-  const requiredImagesReady = Array.from({ length: imageSlotCount }, (_, index) => state.images[index]).every(Boolean);
-  const readyToGenerate = requiredImagesReady && Boolean(selectedProject);
+  // Image Editing's later slots are drawn from the painted region rather than
+  // uploaded, so the uploader shows one slot and the mask card stands in for the
+  // rest. Every other preset fills every slot it declares.
+  const paintsItsOwnSlots = category.id === "image-editing";
+  const uploadSlotCount = paintsItsOwnSlots ? 1 : stillImageSlotCount(category, state);
+  const slotLabels = stillImageSlotLabels(category, state);
+  const requiredImagesReady = Array.from({ length: uploadSlotCount }, (_, index) => state.images[index]).every(Boolean);
+  const regionReady = !paintsItsOwnSlots || Boolean(state.mask?.strokes.length);
+  const readyToGenerate = requiredImagesReady && regionReady && Boolean(selectedProject);
+  const editorPromptReady = Boolean(state.prompt.trim());
+  const editorCanGenerate = readyToGenerate && editorPromptReady;
+  const compositeLayers = paintsItsOwnSlots ? visibleEditLayers(state) : [];
+  const editorProcessing =
+    submitting ||
+    Boolean(paintsItsOwnSlots && state.editLayers?.some((layer) => ["queued", "sending", "running"].includes(layer.status)));
+  const editorProcessingLabel =
+    (state.editMode ?? "inpaint") === "enhance" ? "Enhancing selected region" : "Inpainting selected region";
+  const activeLayerError = state.editLayers?.find(
+    (layer) => layer.id === state.activeEditLayerId && layer.status === "failed",
+  )?.errorMessage;
+  const editorError = submitError ?? activeLayerError;
+  const displayedSettings = visibleStillImageSettings(category, state).filter(
+    (setting) => !(paintsItsOwnSlots && state.activeEditLayerId && setting.id === "variations"),
+  );
+
+  function handleImagesChange(images: UploadedImage[]) {
+    if (paintsItsOwnSlots && images[0] && images[0].id !== state.images[0]?.id) {
+      setRegionOpenRequest((request) => request + 1);
+    }
+    onImagesChange(images);
+  }
   const settingsCard = (
     <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
       <div className="mb-3 flex items-center gap-2">
@@ -70,7 +124,7 @@ export function StillImagesSettingsPanel({
         <h2 className="text-sm font-semibold">Settings</h2>
       </div>
       <div className="space-y-3">
-        {visibleStillImageSettings(category, state).map((setting) => (
+        {displayedSettings.map((setting) => (
           <StillImageSettingField
             key={setting.id}
             setting={setting}
@@ -78,6 +132,11 @@ export function StillImagesSettingsPanel({
             onChange={(value) => onSettingChange(setting.id, value)}
           />
         ))}
+        {paintsItsOwnSlots && state.activeEditLayerId ? (
+          <p className="rounded-md bg-stone-100 px-3 py-2 text-[11px] leading-5 text-stone-600">
+            Regeneration replaces this layer with one new result and reuses the exact base captured when it was created.
+          </p>
+        ) : null}
       </div>
       {modeGuidance ? (
         <div className="mt-3 rounded-md bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800">
@@ -151,10 +210,10 @@ export function StillImagesSettingsPanel({
 
       <ImageUploader
         images={state.images}
-        onChange={onImagesChange}
+        onChange={handleImagesChange}
         selectedResolution="1024x1024"
         requiresTwoImages={false}
-        imageSlotCount={imageSlotCount}
+        imageSlotCount={uploadSlotCount}
         requiresLandscape={false}
         enable16By9Cropping={false}
         show16By9CropToggle={false}
@@ -164,7 +223,70 @@ export function StillImagesSettingsPanel({
         slotLabels={slotLabels}
       />
 
-      {showPrompt && category.prompt ? (
+      {paintsItsOwnSlots ? (
+        <MaskRegionField
+          image={state.images[0]}
+          layers={compositeLayers}
+          editorLayers={compositeLayers}
+          drawing={state.mask}
+          onChange={onMaskChange}
+          onEditorDraftChange={onMaskChange}
+          openRequest={regionOpenRequest}
+          editorKey={`${state.editDocumentId ?? "edit"}:${state.activeEditLayerId ?? `new-${regionOpenRequest}`}`}
+          finishing={finishingEdit}
+          processing={editorProcessing}
+          processingLabel={editorProcessingLabel}
+          onFinish={onFinishEditing}
+          leftPanel={
+            <EditLayersPanel
+              layers={state.editLayers ?? []}
+              activeLayerId={state.activeEditLayerId}
+              onNew={() => {
+                onNewEditLayer();
+                setRegionOpenRequest((request) => request + 1);
+              }}
+              onSelect={onSelectEditLayer}
+              onEditMask={(layerId) => {
+                onSelectEditLayer(layerId);
+                setRegionOpenRequest((request) => request + 1);
+              }}
+              onToggle={onToggleEditLayer}
+              onDelete={onDeleteEditLayer}
+              onMove={onMoveEditLayer}
+              disabled={editorProcessing}
+              processingLabel={editorProcessingLabel}
+            />
+          }
+          floatingPanel={
+            state.mask?.strokes.length ? (
+              <EditActionPanel
+                mode={state.editMode ?? "inpaint"}
+                prompt={state.prompt}
+                references={state.editReferences ?? []}
+                variations={Math.max(1, Math.min(4, Number(state.settings.variations) || 1))}
+                regenerating={Boolean(state.activeEditLayerId)}
+                submitting={editorProcessing}
+                error={editorError}
+                canGenerate={editorCanGenerate}
+                disabledReason={
+                  !selectedProject
+                    ? "Select a project before generating."
+                    : !editorPromptReady
+                      ? "Describe the edit first."
+                      : undefined
+                }
+                onModeChange={onEditModeChange}
+                onPromptChange={onPromptChange}
+                onReferencesChange={onEditReferencesChange}
+                onVariationsChange={(value) => onSettingChange("variations", value)}
+                onGenerate={onGenerate}
+              />
+            ) : null
+          }
+        />
+      ) : null}
+
+      {!paintsItsOwnSlots && showPrompt && category.prompt ? (
         <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
           <div className="mb-3 flex items-center gap-2">
             <ImageIcon className="h-4 w-4 text-stone-500" />
@@ -182,54 +304,56 @@ export function StillImagesSettingsPanel({
         </section>
       ) : null}
 
-      {category.id !== "qwen-edit" ? settingsCard : null}
+      {category.id !== "qwen-edit" && !paintsItsOwnSlots ? settingsCard : null}
 
       {/* Empty is the normal state: the server draws a seed and records it on the
           job. A value here is almost always one restored from an earlier result
           through Reuse settings, to render that take again. */}
-      <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
-        <div className="mb-3 flex items-center gap-2">
-          <Dices className="h-4 w-4 text-stone-500" />
-          <h2 className="text-sm font-semibold">Seed</h2>
-        </div>
-        <input
-          type="text"
-          inputMode="numeric"
-          aria-label="Seed"
-          value={state.seed}
-          onChange={(event) => onSeedChange(event.target.value)}
-          placeholder="New seed each run"
-          className="h-10 w-full min-w-0 rounded-md border border-line bg-white px-3 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
-        />
-        {/* Pin, walk, release. Exploring a setting around one take used to mean
+      {!paintsItsOwnSlots ? (
+        <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
+          <div className="mb-3 flex items-center gap-2">
+            <Dices className="h-4 w-4 text-stone-500" />
+            <h2 className="text-sm font-semibold">Seed</h2>
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Seed"
+            value={state.seed}
+            onChange={(event) => onSeedChange(event.target.value)}
+            placeholder="New seed each run"
+            className="h-10 w-full min-w-0 rounded-md border border-line bg-white px-3 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+          />
+          {/* Pin, walk, release. Exploring a setting around one take used to mean
             reading the seed off a finished card and retyping it here, because the only
             control was Clear and the only other way to fill the field was Reuse
             settings on a job that had already run. */}
-        <div className="mt-2 flex gap-2">
-          <SeedButton label="Random" onClick={() => onSeedChange(randomStillImageSeedValue())}>
-            <Dices className="h-3.5 w-3.5" />
-            Random
-          </SeedButton>
-          <SeedButton
-            label="Previous seed"
-            disabled={!state.seed}
-            onClick={() => onSeedChange(stepStillImageSeed(state.seed, -1))}
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </SeedButton>
-          <SeedButton label="Next seed" disabled={!state.seed} onClick={() => onSeedChange(stepStillImageSeed(state.seed, 1))}>
-            <Plus className="h-3.5 w-3.5" />
-          </SeedButton>
-          <SeedButton label="Clear seed" disabled={!state.seed} onClick={() => onSeedChange("")}>
-            Clear
-          </SeedButton>
-        </div>
-        <p className="mt-2 text-xs leading-5 text-stone-500">
-          {state.seed
-            ? "This exact seed will be used, so the same inputs and settings reproduce that render. Stepping moves to a neighbouring take, which is a different render, not a nudged one."
-            : "A new seed is drawn for each run and saved on the result, so any render can be reproduced later."}
-        </p>
-      </section>
+          <div className="mt-2 flex gap-2">
+            <SeedButton label="Random" onClick={() => onSeedChange(randomStillImageSeedValue())}>
+              <Dices className="h-3.5 w-3.5" />
+              Random
+            </SeedButton>
+            <SeedButton
+              label="Previous seed"
+              disabled={!state.seed}
+              onClick={() => onSeedChange(stepStillImageSeed(state.seed, -1))}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </SeedButton>
+            <SeedButton label="Next seed" disabled={!state.seed} onClick={() => onSeedChange(stepStillImageSeed(state.seed, 1))}>
+              <Plus className="h-3.5 w-3.5" />
+            </SeedButton>
+            <SeedButton label="Clear seed" disabled={!state.seed} onClick={() => onSeedChange("")}>
+              Clear
+            </SeedButton>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-stone-500">
+            {state.seed
+              ? "This exact seed will be used, so the same inputs and settings reproduce that render. Stepping moves to a neighbouring take, which is a different render, not a nudged one."
+              : "A new seed is drawn for each run and saved on the result, so any render can be reproduced later."}
+          </p>
+        </section>
+      ) : null}
 
       <ResultNamingControl label="Camera number" value={saveNumber} onChange={onSaveNumberChange} />
       <ResultDestinationControl
@@ -238,50 +362,63 @@ export function StillImagesSettingsPanel({
         onTargetFolderChange={onTargetFolderChange}
       />
 
-      <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
-        <div
-          className={cn(
-            "mb-3 flex items-start gap-2 rounded-md px-3 py-2 text-xs leading-5",
-            submitError
-              ? "bg-rose-50 text-rose-800"
-              : readyToGenerate
-                ? "bg-teal-50 text-teal-800"
-                : "bg-amber-50 text-amber-800",
-          )}
-          role="status"
-        >
-          {readyToGenerate && !submitError ? (
-            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          ) : (
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          )}
-          <span>
-            {submitError
-              ? submitError
-              : readyToGenerate
-                ? "Inputs are ready."
-                : `Add ${!requiredImagesReady ? "the required image input" : "a project destination"} to generate.`}
-          </span>
-        </div>
-        <button
-          type="button"
-          disabled={!readyToGenerate || submitting}
-          onClick={onGenerate}
-          className={cn(
-            "flex h-12 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-bold text-white transition",
-            readyToGenerate && !submitting
-              ? "cursor-pointer bg-accent hover:brightness-105"
-              : "cursor-not-allowed bg-stone-300 opacity-80",
-          )}
-        >
-          <Play className="h-4 w-4" />
-          {submitting ? "Sending..." : "Generate"}
-        </button>
-        <p className="mt-2 flex min-h-5 items-center gap-1.5 text-xs leading-5 text-stone-500">
-          {readyToGenerate ? null : <LockKeyhole className="h-3.5 w-3.5" />}
-          {readyToGenerate ? "Runs on this preset's dedicated pod." : "Complete the inputs above to enable generation."}
-        </p>
-      </section>
+      {!paintsItsOwnSlots ? (
+        <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
+          <div
+            className={cn(
+              "mb-3 flex items-start gap-2 rounded-md px-3 py-2 text-xs leading-5",
+              submitError
+                ? "bg-rose-50 text-rose-800"
+                : readyToGenerate
+                  ? "bg-teal-50 text-teal-800"
+                  : "bg-amber-50 text-amber-800",
+            )}
+            role="status"
+          >
+            {readyToGenerate && !submitError ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            )}
+            <span>
+              {submitError
+                ? submitError
+                : readyToGenerate
+                  ? "Inputs are ready."
+                  : `Add ${missingInput(requiredImagesReady, regionReady)} to generate.`}
+            </span>
+          </div>
+          <button
+            type="button"
+            aria-label="Generate"
+            disabled={!readyToGenerate || submitting}
+            onClick={onGenerate}
+            className={cn(
+              "flex h-12 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-bold text-white transition",
+              readyToGenerate && !submitting
+                ? "cursor-pointer bg-accent hover:brightness-105"
+                : "cursor-not-allowed bg-stone-300 opacity-80",
+            )}
+          >
+            <Play className="h-4 w-4" />
+            {submitting
+              ? "Sending..."
+              : state.activeEditLayerId
+                ? "Regenerate layer"
+                : paintsItsOwnSlots
+                  ? "Generate edit layer"
+                  : "Generate"}
+          </button>
+          <p className="mt-2 flex min-h-5 items-center gap-1.5 text-xs leading-5 text-stone-500">
+            {readyToGenerate ? null : <LockKeyhole className="h-3.5 w-3.5" />}
+            {!readyToGenerate
+              ? "Complete the inputs above to enable generation."
+              : paintsItsOwnSlots
+                ? "Runs on the shared worker, through the Nano Banana API."
+                : "Runs on this preset's dedicated pod."}
+          </p>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -380,4 +517,16 @@ function StillImageSettingField({ setting, value, onChange }: StillImageSettingF
       />
     </label>
   );
+}
+
+/**
+ * What is still missing, in the order the panel asks for it.
+ *
+ * The image first because painting needs one, then the region, then the project.
+ * Naming whichever is furthest along would send the artist back and forth.
+ */
+function missingInput(imagesReady: boolean, regionReady: boolean) {
+  if (!imagesReady) return "the required image input";
+  if (!regionReady) return "a painted region";
+  return "a project destination";
 }

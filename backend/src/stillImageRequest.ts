@@ -15,9 +15,10 @@ import {
   acceptsStillImagePrompt,
   getStillImageCategory,
   isStillImageCategoryId,
-  stillImageSlotCount,
+  stillImageRequestSlotCount,
   visibleStillImageSettings,
   type StillImageOptions,
+  type StillImageEditOptions,
   type StillImageSettingDefinition,
   type StillImageSettingValue,
 } from "./stillImageCategories.js";
@@ -67,7 +68,21 @@ export function normalizeStillImageOptions(value: unknown, mintSeed: () => numbe
     settings[setting.id] = resolved[setting.id];
   }
 
-  return { categoryId: category.id, seed, settings };
+  const edit = options.edit === undefined ? undefined : normalizedImageEdit(options.edit);
+  if (edit && category.id !== "image-editing" && category.id !== "general-enhancement") {
+    throw new Error("stillImage edit metadata is only supported by the Image Editing and General Enhancement presets.");
+  }
+  if (edit?.mode === "inpaint" && category.id !== "image-editing") {
+    throw new Error("Inpaint edit metadata must use the image-editing preset.");
+  }
+  if (edit?.mode === "enhance" && category.id !== "general-enhancement") {
+    throw new Error("Enhance edit metadata must use the general-enhancement preset.");
+  }
+  if (edit?.mode === "enhance" && edit.referenceSourceUrls.length) {
+    throw new Error("The General Enhancement workflow does not yet support reference images.");
+  }
+
+  return edit ? { categoryId: category.id, seed, settings, edit } : { categoryId: category.id, seed, settings };
 }
 
 /**
@@ -83,12 +98,25 @@ export function assertStillImageInputs(
 ) {
   const category = getStillImageCategory(options.categoryId);
 
-  const expectedSlots = stillImageSlotCount(category, options.settings);
+  const expectedSlots = stillImageRequestSlotCount(options);
   const images = request.inputImages ?? [];
   if (images.length !== expectedSlots) {
     throw new Error(
       `This still image preset needs exactly ${expectedSlots} input image${expectedSlots === 1 ? "" : "s"}; received ${images.length}.`,
     );
+  }
+  if (options.edit && options.edit.maskSourceUrl !== images[1]) {
+    throw new Error("The edit mask metadata must reference input image slot 2.");
+  }
+  if (options.edit) {
+    const referenceStart = options.edit.mode === "enhance" ? 2 : 3;
+    const requestReferences = images.slice(referenceStart);
+    if (
+      requestReferences.length !== options.edit.referenceSourceUrls.length ||
+      requestReferences.some((value, index) => value !== options.edit?.referenceSourceUrls[index])
+    ) {
+      throw new Error("The edit reference metadata must match the additional input image slots in order.");
+    }
   }
 
   if (!acceptsStillImagePrompt(category, options.settings) && request.prompt?.trim()) {
@@ -140,4 +168,144 @@ function plainRecord(value: unknown, label: string) {
     throw new Error(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
+}
+
+function normalizedImageEdit(value: unknown): StillImageEditOptions {
+  const edit = plainRecord(value, "stillImage edit metadata");
+  const layerId = boundedIdentifier(edit.layerId, "stillImage edit layerId");
+  if (edit.operation !== "create" && edit.operation !== "regenerate") {
+    throw new Error("stillImage edit operation must be create or regenerate.");
+  }
+  const mode = edit.mode === undefined ? "inpaint" : edit.mode;
+  if (mode !== "inpaint" && mode !== "enhance") {
+    throw new Error("stillImage edit mode must be inpaint or enhance.");
+  }
+  const documentId =
+    edit.documentId === undefined ? `legacy_${layerId}` : boundedIdentifier(edit.documentId, "stillImage edit documentId");
+  const crop = normalizedCrop(edit.crop, "stillImage edit crop");
+  const mask = normalizedMask(edit.mask, crop);
+  const originalSourceUrl = mediaReference(edit.originalSourceUrl, "stillImage edit originalSourceUrl");
+  const maskSourceUrl = mediaReference(edit.maskSourceUrl, "stillImage edit maskSourceUrl");
+  const baseLayerIds = identifierArray(edit.baseLayerIds, "stillImage edit baseLayerIds");
+  const rawReferences = edit.referenceSourceUrls === undefined ? [] : edit.referenceSourceUrls;
+  if (!Array.isArray(rawReferences) || rawReferences.length > 3) {
+    throw new Error("stillImage edit referenceSourceUrls must be an array with at most 3 entries.");
+  }
+  const referenceSourceUrls = rawReferences.map((entry, index) =>
+    mediaReference(entry, `stillImage edit referenceSourceUrls[${index}]`),
+  );
+  const rawBaseLayers = edit.baseLayers === undefined ? [] : edit.baseLayers;
+  if (!Array.isArray(rawBaseLayers) || rawBaseLayers.length > 100) {
+    throw new Error("stillImage edit baseLayers must be an array with at most 100 entries.");
+  }
+  const baseLayers = rawBaseLayers.map((entry, index) => {
+    const layer = plainRecord(entry, `stillImage edit baseLayers[${index}]`);
+    const baseCrop = normalizedCrop(layer.crop, `stillImage edit baseLayers[${index}].crop`);
+    if (baseCrop.sourceWidth !== crop.sourceWidth || baseCrop.sourceHeight !== crop.sourceHeight) {
+      throw new Error(`stillImage edit baseLayers[${index}].crop must use the original image dimensions.`);
+    }
+    return {
+      layerId: boundedIdentifier(layer.layerId, `stillImage edit baseLayers[${index}].layerId`),
+      crop: baseCrop,
+      generatedCropUrl: mediaReference(layer.generatedCropUrl, `stillImage edit baseLayers[${index}].generatedCropUrl`),
+      maskSourceUrl: mediaReference(layer.maskSourceUrl, `stillImage edit baseLayers[${index}].maskSourceUrl`),
+    };
+  });
+  if (
+    baseLayerIds.length !== baseLayers.length ||
+    baseLayerIds.some((layerId, index) => layerId !== baseLayers[index]?.layerId)
+  ) {
+    throw new Error("stillImage edit baseLayerIds must match baseLayers in layer order.");
+  }
+
+  return {
+    layerId,
+    operation: edit.operation as StillImageEditOptions["operation"],
+    mode: mode as StillImageEditOptions["mode"],
+    documentId,
+    crop,
+    mask,
+    originalSourceUrl,
+    maskSourceUrl,
+    baseLayerIds,
+    baseLayers,
+    referenceSourceUrls,
+    // generatedCropUrl is backend-owned and is deliberately stripped from input.
+  };
+}
+
+function normalizedCrop(value: unknown, label: string) {
+  const crop = plainRecord(value, label);
+  const sourceWidth = boundedWholeNumber(crop.sourceWidth, `${label}.sourceWidth`, 1, 100_000);
+  const sourceHeight = boundedWholeNumber(crop.sourceHeight, `${label}.sourceHeight`, 1, 100_000);
+  const size = boundedWholeNumber(crop.size, `${label}.size`, 1, Math.min(sourceWidth, sourceHeight));
+  const x = boundedWholeNumber(crop.x, `${label}.x`, 0, sourceWidth - size);
+  const y = boundedWholeNumber(crop.y, `${label}.y`, 0, sourceHeight - size);
+  return { x, y, size, sourceWidth, sourceHeight };
+}
+
+function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>) {
+  const mask = plainRecord(value, "stillImage edit mask");
+  const width = boundedWholeNumber(mask.width, "stillImage edit mask.width", 1, 100_000);
+  const height = boundedWholeNumber(mask.height, "stillImage edit mask.height", 1, 100_000);
+  if (width !== crop.sourceWidth || height !== crop.sourceHeight) {
+    throw new Error("stillImage edit mask dimensions must match the original image dimensions.");
+  }
+  const softness = boundedWholeNumber(mask.softness, "stillImage edit mask.softness", 0, 100);
+  if (!Array.isArray(mask.strokes) || mask.strokes.length > 10_000) {
+    throw new Error("stillImage edit mask.strokes must be an array with at most 10000 entries.");
+  }
+  let pointCount = 0;
+  const strokes = mask.strokes.map((entry, strokeIndex) => {
+    const stroke = plainRecord(entry, `stillImage edit mask.strokes[${strokeIndex}]`);
+    if (stroke.tool !== "brush" && stroke.tool !== "eraser" && stroke.tool !== "lasso") {
+      throw new Error(`stillImage edit mask.strokes[${strokeIndex}].tool is not supported.`);
+    }
+    const radius = finiteNumber(stroke.radius, `stillImage edit mask.strokes[${strokeIndex}].radius`, 0, 10_000);
+    if (!Array.isArray(stroke.points)) {
+      throw new Error(`stillImage edit mask.strokes[${strokeIndex}].points must be an array.`);
+    }
+    pointCount += stroke.points.length;
+    if (pointCount > 100_000) throw new Error("stillImage edit mask contains too many points.");
+    const points = stroke.points.map((entryPoint, pointIndex) => {
+      const point = plainRecord(entryPoint, `stillImage edit mask point ${strokeIndex}.${pointIndex}`);
+      return {
+        x: finiteNumber(point.x, `stillImage edit mask point ${strokeIndex}.${pointIndex}.x`, -10_000, width + 10_000),
+        y: finiteNumber(point.y, `stillImage edit mask point ${strokeIndex}.${pointIndex}.y`, -10_000, height + 10_000),
+      };
+    });
+    return { tool: stroke.tool as StillImageEditOptions["mask"]["strokes"][number]["tool"], radius, points };
+  });
+  return { width, height, softness, strokes };
+}
+
+function boundedIdentifier(value: unknown, label: string) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{8,200}$/.test(value)) {
+    throw new Error(`${label} must be 8-200 letters, numbers, underscores, or hyphens.`);
+  }
+  return value;
+}
+
+function identifierArray(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.length > 100) throw new Error(`${label} must be an array with at most 100 entries.`);
+  return value.map((entry, index) => boundedIdentifier(entry, `${label}[${index}]`));
+}
+
+function mediaReference(value: unknown, label: string) {
+  if (typeof value !== "string" || !value || value.length > 8192) throw new Error(`${label} must be a media URL.`);
+  return value;
+}
+
+function boundedWholeNumber(value: unknown, label: string, minimum: number, maximum: number) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} must be a whole number between ${minimum} and ${maximum}.`);
+  }
+  return value;
+}
+
+function finiteNumber(value: unknown, label: string, minimum: number, maximum: number) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} must be a number between ${minimum} and ${maximum}.`);
+  }
+  return value;
 }

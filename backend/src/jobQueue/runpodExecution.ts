@@ -10,12 +10,7 @@ import {
   isCreditExemptJob,
 } from "../creditUsageAccounting.js";
 import { logMemory } from "../memoryLogger.js";
-import {
-  mergeRunpodTiming,
-  POD_RUNTIME_SOURCE,
-  podRuntimeCost,
-  podRuntimePricingConfigured,
-} from "../podRuntimeCost.js";
+import { mergeRunpodTiming, POD_RUNTIME_SOURCE, podRuntimeCost, podRuntimePricingConfigured } from "../podRuntimeCost.js";
 import { resolveRunpodWorkerGpu } from "../runpodWorkerGpu.js";
 import { projectFolderName } from "../projectFolderName.js";
 import { getProject } from "../projectService.js";
@@ -28,7 +23,7 @@ import {
   type RunpodMediaResult,
 } from "../runpodComfyService.js";
 import { resolveRunpodEndpoint } from "../runpodEndpoints.js";
-import { getStillImageCategory, stillImageSlotCount, type StillImageOptions } from "../stillImageCategories.js";
+import { stillImageRequestSlotCount, type StillImageOptions } from "../stillImageCategories.js";
 import { buildStillImageWorkflow, stillImageNodeStatusLabel } from "../stillImageWorkflow.js";
 import { materializeStillImageInputs } from "./stillImageInputMaterializer.js";
 import {
@@ -524,8 +519,7 @@ async function prepareAnimationSubmission(
  * inline image costs nothing and cannot produce a paid RunPod call.
  */
 async function prepareStillImageSubmission(job: Job, stillImage: StillImageOptions): Promise<PreparedSubmission> {
-  const category = getStillImageCategory(stillImage.categoryId);
-  const imageCount = stillImageSlotCount(category, stillImage.settings);
+  const imageCount = stillImageRequestSlotCount(stillImage);
   const materialized = await materializeStillImageInputs({
     categoryId: stillImage.categoryId,
     imageCount,
