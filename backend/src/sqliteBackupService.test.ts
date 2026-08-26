@@ -15,6 +15,7 @@ import {
   backupOneDatabase,
   runBackupCycle,
   runAzcopy,
+  uploadViaAzcopy,
 } from "./sqliteBackupService.js";
 
 async function tempDir() {
@@ -43,6 +44,28 @@ test("buildAzcopyDest inserts a dated prefix before the SAS query string", () =>
 test("buildAzcopyDest works without a query string", () => {
   const dest = buildAzcopyDest("https://acct.blob.core.windows.net/backups", "p", "f.sqlite");
   assert.equal(dest, "https://acct.blob.core.windows.net/backups/p/f.sqlite");
+});
+
+test("uploadViaAzcopy attempts every database and reports all per-file failures", async () => {
+  const files = ["jobs.sqlite", "archived-items.sqlite", "app-state.sqlite"];
+  const attempted: string[] = [];
+  const runner = async (_azcopyPath: string, args: string[]) => {
+    const file = path.basename(args[1] ?? "");
+    attempted.push(file);
+    if (file !== "archived-items.sqlite") throw new Error("403 AuthorizationPermissionMismatch");
+  };
+
+  await assert.rejects(
+    uploadViaAzcopy(files, "https://acct.blob.core.windows.net/backups?sig=secret", "momi", "azcopy", runner),
+    (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /2 of 3 database uploads failed/);
+      assert.match(error.message, /jobs\.sqlite: 403 AuthorizationPermissionMismatch/);
+      assert.match(error.message, /app-state\.sqlite: 403 AuthorizationPermissionMismatch/);
+      return true;
+    },
+  );
+  assert.deepEqual(attempted, files);
 });
 
 test("generated-media staging is claimed once and rejects a foreign source tree", async () => {
@@ -552,4 +575,23 @@ test("runAzcopy drains stdout so a chatty child cannot block on a full OS pipe b
   // below and fail, which is exactly the hang this regression test guards.
   const chattyScript = 'process.stdout.write("x".repeat(5 * 1024 * 1024)); process.exit(0);';
   await runAzcopy(process.execPath, ["-e", chattyScript], 5000);
+});
+
+test("runAzcopy includes Azure's error output but redacts SAS credentials", async () => {
+  const failureScript = [
+    'console.error("403 AuthorizationPermissionMismatch");',
+    'console.error("X-Ms-Error-Code: AuthorizationPermissionMismatch");',
+    'console.error("https://acct.blob.core.windows.net/backups/file.sqlite?sv=2024&sp=rcw&sig=super-secret");',
+    "process.exit(7);",
+  ].join(" ");
+
+  await assert.rejects(runAzcopy(process.execPath, ["-e", failureScript], 5000), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /azcopy exited with code 7/);
+    assert.match(error.message, /403 AuthorizationPermissionMismatch/);
+    assert.match(error.message, /X-Ms-Error-Code: AuthorizationPermissionMismatch/);
+    assert.match(error.message, /\?\[redacted-sas\]/);
+    assert.doesNotMatch(error.message, /super-secret|sig=/);
+    return true;
+  });
 });

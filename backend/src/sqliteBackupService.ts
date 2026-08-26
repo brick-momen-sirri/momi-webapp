@@ -11,6 +11,12 @@ import { emitAlert, type AlertRule, type WebhookFormat } from "./healthWatchdog.
 // `running` guard in startScheduledBackups) forever. Generous because a full
 // hourly snapshot set could legitimately take minutes on a slow link.
 const AZCOPY_TIMEOUT_MS = 15 * 60 * 1000;
+// Keep enough console output to retain Azure's response/error code without
+// allowing a chatty child to grow this process indefinitely. The formatted
+// detail is bounded again before it is included in an alert.
+const AZCOPY_OUTPUT_TAIL_BYTES = 32 * 1024;
+const AZCOPY_OUTPUT_DETAIL_CHARS = 6 * 1024;
+const AZCOPY_OUTPUT_DETAIL_LINES = 12;
 // The first generated-media baseline is currently several GiB and may run on a
 // much slower link than the small SQLite snapshots. Later cycles are deltas,
 // but the initial seed still needs a bounded, realistic window.
@@ -337,10 +343,48 @@ export function buildAzcopyDest(sasUrl: string, prefix: string, fileName: string
   return `${base}/${segments}${query}`;
 }
 
+function appendOutputTail(tail: Buffer, chunk: Buffer | string): Buffer {
+  const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  if (incoming.length >= AZCOPY_OUTPUT_TAIL_BYTES) return incoming.subarray(incoming.length - AZCOPY_OUTPUT_TAIL_BYTES);
+  const keep = Math.min(tail.length, AZCOPY_OUTPUT_TAIL_BYTES - incoming.length);
+  return Buffer.concat([tail.subarray(tail.length - keep), incoming]);
+}
+
+function formatAzcopyOutput(tail: Buffer): string {
+  const sasKeys = "sig|sv|sp|st|se|sr|srt|ss|spr|sip|skoid|sktid|skt|ske|sks|skv";
+  const redacted = tail
+    .toString("utf8")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/https?:\/\/[^\s\"'<>]+/gi, (candidate) => {
+      const queryIndex = candidate.indexOf("?");
+      if (queryIndex === -1) return candidate;
+      const query = candidate.slice(queryIndex + 1);
+      return new RegExp(`(?:^|&)(?:${sasKeys})=`, "i").test(query)
+        ? `${candidate.slice(0, queryIndex)}?[redacted-sas]`
+        : candidate;
+    })
+    // Also cover AzCopy output that prints a bare query fragment rather than a
+    // complete URL. In particular, never put the SAS signature in an alert.
+    .replace(new RegExp(`\\b(${sasKeys})=([^&\\s\"']+)`, "gi"), "$1=[redacted]");
+  const lines = redacted
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-AZCOPY_OUTPUT_DETAIL_LINES);
+  const detail = lines.join("\n");
+  return detail.length > AZCOPY_OUTPUT_DETAIL_CHARS ? `...${detail.slice(-AZCOPY_OUTPUT_DETAIL_CHARS)}` : detail;
+}
+
 export function runAzcopy(azcopyPath: string, args: string[], timeoutMs = AZCOPY_TIMEOUT_MS): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(azcopyPath, args, { windowsHide: true });
     let settled = false;
+    let outputTail: Buffer = Buffer.alloc(0);
+
+    const errorWithOutput = (message: string) => {
+      const detail = formatAzcopyOutput(outputTail);
+      return new Error(detail ? `${message}\nAzCopy output (tail):\n${detail}` : message);
+    };
 
     const timer = setTimeout(() => {
       if (settled) return;
@@ -350,16 +394,20 @@ export function runAzcopy(azcopyPath: string, args: string[], timeoutMs = AZCOPY
       } else {
         child.kill("SIGKILL");
       }
-      reject(new Error(`azcopy timed out after ${timeoutMs}ms`));
+      reject(errorWithOutput(`azcopy timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref?.();
 
     // azcopy writes progress lines and a job summary to stdout/stderr. Nothing
-    // here needs that output, but it MUST be drained: an unconsumed pipe can
+    // here needs the full output, but it MUST be drained: an unconsumed pipe can
     // fill its OS buffer and make azcopy block on write(), hanging this promise
-    // (and, transitively, every future scheduled cycle) forever.
-    child.stdout?.resume();
-    child.stderr?.resume();
+    // (and, transitively, every future scheduled cycle) forever. Retain only a
+    // bounded tail so a failure includes Azure's useful response/error code.
+    const captureOutput = (chunk: Buffer | string) => {
+      outputTail = appendOutputTail(outputTail, chunk);
+    };
+    child.stdout?.on("data", captureOutput);
+    child.stderr?.on("data", captureOutput);
 
     child.on("error", (error) => {
       if (settled) return;
@@ -367,14 +415,17 @@ export function runAzcopy(azcopyPath: string, args: string[], timeoutMs = AZCOPY
       clearTimeout(timer);
       reject(new Error(`azcopy failed to start: ${error.message}`));
     });
-    child.on("exit", (code) => {
+    // `close` waits for stdout/stderr to close, unlike `exit`, so the final
+    // Azure error lines are guaranteed to have reached captureOutput first.
+    child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`azcopy exited with code ${code}`));
+        const signalDetail = signal ? ` (signal ${signal})` : "";
+        reject(errorWithOutput(`azcopy exited with code ${code ?? "unknown"}${signalDetail}`));
       }
     });
   });
@@ -382,11 +433,30 @@ export function runAzcopy(azcopyPath: string, args: string[], timeoutMs = AZCOPY
 
 // Never logs the SAS URL (it is a credential). Uploads each file under a dated
 // prefix and requests server-side overwrite so a re-run is idempotent.
-export async function uploadViaAzcopy(files: string[], sasUrl: string, prefix: string, azcopyPath: string): Promise<void> {
+export async function uploadViaAzcopy(
+  files: string[],
+  sasUrl: string,
+  prefix: string,
+  azcopyPath: string,
+  runner: typeof runAzcopy = runAzcopy,
+): Promise<void> {
   const dateFolder = backupLabel(Date.now()).slice(0, 10); // YYYY-MM-DD
+  const failures: Array<{ file: string; error: Error }> = [];
   for (const file of files) {
     const dest = buildAzcopyDest(sasUrl, `${prefix}/${dateFolder}`, path.basename(file));
-    await runAzcopy(azcopyPath, ["copy", file, dest, "--overwrite=true", "--log-level=ERROR"]);
+    try {
+      await runner(azcopyPath, ["copy", file, dest, "--overwrite=true", "--log-level=ERROR"]);
+    } catch (error) {
+      failures.push({ file, error: error instanceof Error ? error : new Error(String(error)) });
+    }
+  }
+
+  if (failures.length) {
+    const detail = failures.map(({ file, error }) => `${path.basename(file)}: ${error.message}`).join("\n\n");
+    throw new AggregateError(
+      failures.map(({ error }) => error),
+      `${failures.length} of ${files.length} database uploads failed:\n${detail}`,
+    );
   }
 }
 
