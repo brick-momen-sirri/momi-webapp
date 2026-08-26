@@ -337,6 +337,14 @@ the media leg's restore index wants. Bring a replacement back in line with §3.
 
 ### Swapping the SAS without losing it on the next reboot
 
+**Do not put it in `.env`.** It will be read, then discarded. `src/env.ts` only
+fills a key that is *absent* from `process.env`, and `ecosystem.config.cjs` sets
+`BACKUP_AZURE_SAS_URL: process.env.BACKUP_AZURE_SAS_URL || ""` unconditionally --
+so the key is always present, empty when nothing supplied it, and the file value
+loses. `ALERT_WEBHOOK_URL` behaves the same way. Both must come from **User
+scope**. A value in `.env` looks set on disk, reads as empty in the process, and
+produces exactly the silent-but-configured failure this runbook exists for.
+
 Both layers are needed, and the middle step is the one that has bitten twice:
 
 1. Set it at **User scope**, so a fresh `pm2 start` inherits it:
