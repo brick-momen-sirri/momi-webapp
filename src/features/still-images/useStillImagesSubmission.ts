@@ -425,7 +425,9 @@ async function uploadPaintedSlots(options: {
   referenceSourceUrls: string[];
   layers: EditLayerCompositeDescriptor[];
 }) {
-  const source = await loadImageElement(options.sourceUrl);
+  // Same as the editor: saved project media needs the media credential to decode,
+  // and a blob: URL from an upload resolves to itself.
+  const source = await loadImageElement(resolveMediaUrl(options.sourceUrl));
   const drawing: MaskDrawing = {
     ...options.drawing,
     width: source.naturalWidth || source.width,

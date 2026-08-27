@@ -8,6 +8,16 @@ import {
   type MaskDrawing,
 } from "../features/still-images/maskDrawing";
 
+vi.mock("../services/api/mediaAccess", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/api/mediaAccess")>();
+  return {
+    ...actual,
+    // Stands in for the media credential the real one appends when there is no
+    // cookie, so a test can tell a resolved URL from a raw one.
+    resolveMediaUrl: (url: string) => (url.startsWith("/api/") ? `${url}&access_token=test` : url),
+  };
+});
+
 vi.mock("../features/still-images/maskRaster", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../features/still-images/maskRaster")>();
   return {
@@ -571,6 +581,38 @@ describe("MaskRegionField", () => {
     expect(Number(screen.getByTestId("mask-editor-layers-rail").getAttribute("data-width"))).toBe(before + 10);
     fireEvent.keyDown(handle, { key: "Home" });
     expect(screen.getByTestId("mask-editor-layers-rail")).toHaveAttribute("data-width", "220");
+  });
+
+  it("resolves saved project media before decoding it, and leaves an upload alone", async () => {
+    const { loadImageElement } = await import("../features/still-images/maskRaster");
+    const decode = vi.mocked(loadImageElement);
+
+    // A document reopened from its jobs, or a chained result: saved media, which
+    // needs the media credential before the browser will decode it.
+    decode.mockClear();
+    const saved = render(
+      <MaskRegionField
+        image={{ id: "saved", name: "original.png", url: "/api/media?path=original.png" }}
+        onChange={() => undefined}
+        openRequest={1}
+      />,
+    );
+    await screen.findByRole("dialog");
+    expect(decode).toHaveBeenCalledWith("/api/media?path=original.png&access_token=test");
+    expect(screen.queryByText(/could not be opened for painting/i)).not.toBeInTheDocument();
+    saved.unmount();
+
+    // An ordinary upload is a blob: URL and must pass through untouched.
+    decode.mockClear();
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        openRequest={1}
+      />,
+    );
+    await screen.findByRole("dialog");
+    expect(decode).toHaveBeenCalledWith("blob:source");
   });
 
   it("keeps the canvas visibly busy and read-only for the real processing lifecycle", async () => {

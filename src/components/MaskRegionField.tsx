@@ -103,7 +103,13 @@ export function MaskRegionField({
     if (!sourceUrl) return;
 
     let live = true;
-    loadImageElement(sourceUrl).then(
+    // Resolved, not used raw. An uploaded file is a blob: URL that resolves to
+    // itself, but a source that came from saved project media -- a chained
+    // result, or a document reopened from its jobs -- is an /api/media path that
+    // needs the media credential before it will decode. The layer crops below
+    // have always been resolved; this one was only ever handed blob: URLs until
+    // there was a way to open an existing document.
+    loadImageElement(resolveMediaUrl(sourceUrl)).then(
       (loaded) => {
         if (live) setDecoded({ url: sourceUrl, element: loaded });
       },
