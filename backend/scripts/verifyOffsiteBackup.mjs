@@ -108,6 +108,20 @@ function diagnose({ sas, authProbe, knownProbe, listProbe, writeProbe }) {
   if (sas.expired) return ["FAIL", `The SAS expired at ${sas.expiry?.toISOString()}. Mint a new one.`];
   if (sas.notYetValid) return ["FAIL", "The SAS start time (st) is in the future. Check the host clock and the SAS."];
 
+  // Billing, not storage. Seen 2026-08-27: the account had spent the previous
+  // six days refusing writes as AuthorizationPermissionMismatch -- a permission
+  // error, and a misleading one -- while reads still returned 200, then went to
+  // AccountIsDisabled on every request including reads. So a permission-shaped
+  // 403 on this container is worth suspecting of being a disabled account
+  // part-way through being shut off, and no SAS can be minted to fix it.
+  if (authProbe.code === "AccountIsDisabled") {
+    return [
+      "FAIL",
+      "The storage account is DISABLED -- this is a subscription/billing state, not a permissions problem, and no new SAS can work. " +
+        "Check the subscription status and Cost Management + Billing (spending limit, expired trial, unpaid invoice). " +
+        "Existing offsite backups are unreachable while it lasts and Azure eventually DELETES data on a disabled account, so treat this as time-bounded.",
+    ];
+  }
   if (authProbe.code === "AuthenticationFailed") {
     return ["FAIL", "The signature was rejected: the account key that signed this SAS has been rotated, or the SAS is malformed. Mint a new one from a current key."];
   }

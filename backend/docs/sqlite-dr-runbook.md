@@ -320,9 +320,29 @@ permission the backup SAS has always carried (`r`) against one it does not
 | `KeyBasedAuthenticationNotPermitted` | `allowSharedKeyAccess` is off; no account-key SAS can work. |
 | `AuthorizationFailure`        | Refused before permissions — a storage firewall / network rule. |
 | `NETWORK`                     | Egress or DNS, not Azure.                                      |
+| `AccountIsDisabled`           | Billing, not storage. See below — no SAS can fix it.           |
 
-**Reads succeed and writes are refused** is the case seen on 2026-08-21. Worth
-knowing what it is *not*: not expiry (`se` was three months out), not the key
+**A disabled storage account is the cause of the August 2026 outage**, and it is
+worth reading carefully because of how it presented. From 2026-08-21 to 08-27 the
+container refused every write with `AuthorizationPermissionMismatch` — a
+*permission* error — while reads returned 200 on real data. That combination sent
+the investigation at the SAS, which was healthy the whole time. On 08-27 the
+portal said plainly "The specified account is disabled" and the data plane
+switched to `AccountIsDisabled` on every request, reads included.
+
+The lesson: a permission-shaped 403 on this container is worth suspecting of
+being an account part-way through being shut off. Check the subscription state
+*before* minting a replacement SAS, because no token can write to a disabled
+account and a fresh SAS proves nothing. The trigger is billing — spending limit,
+expired trial, unpaid invoice — so the fix is in Cost Management + Billing, not
+in storage. **Disabled is time-bounded: Azure eventually deletes the data**, so
+the existing offsite history has a clock on it, and local snapshots are the only
+DR copy until the subscription is restored. Once it is, the existing SAS resumes
+working with no config change and no restart — the next hourly cycle heals
+itself.
+
+**Reads succeed and writes are refused** was how that outage looked for its first
+six days. Worth knowing what it is *not*: not expiry (`se` was three months out), not the key
 (that fails the read too), not shared-key being disabled, not a network rule,
 and not immutability or a legal hold — a `HEAD` on a real blob carried no
 `x-ms-immutability-policy-*` or `x-ms-legal-hold` header and the lease was
