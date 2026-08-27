@@ -30,24 +30,52 @@ export function parseFinalizeStillImageEditRequest(value: unknown): FinalizeStil
 
 function parseLayer(value: unknown, index: number): StillImageEditBaseLayer {
   const layer = record(value, `Layer ${index + 1}`);
+  const crop = parseCrop(layer.crop, index);
   return {
     layerId: boundedString(layer.layerId, `Layer ${index + 1} id`, 160),
-    crop: parseCrop(layer.crop, index),
+    crop,
     generatedCropUrl: boundedString(layer.generatedCropUrl, `Layer ${index + 1} result`, 8_192),
     maskSourceUrl: boundedString(layer.maskSourceUrl, `Layer ${index + 1} mask`, 8_192),
+    ...parsePlacement(layer, index, crop),
+  };
+}
+
+/** Opacity and displacement, both optional, both defaulting to "as generated". */
+function parsePlacement(layer: Record<string, unknown>, index: number, crop: StillImageEditCrop) {
+  const opacity = layer.opacity === undefined ? undefined : boundedInteger(layer.opacity, `Layer ${index + 1} opacity`, 0, 100);
+  let offset: { x: number; y: number } | undefined;
+  if (layer.offset !== undefined) {
+    const point = record(layer.offset, `Layer ${index + 1} offset`);
+    offset = {
+      x: boundedInteger(point.x, `Layer ${index + 1} offset x`, -crop.sourceWidth, crop.sourceWidth),
+      y: boundedInteger(point.y, `Layer ${index + 1} offset y`, -crop.sourceHeight, crop.sourceHeight),
+    };
+  }
+  return {
+    ...(opacity === undefined || opacity === 100 ? {} : { opacity }),
+    ...(offset === undefined || (offset.x === 0 && offset.y === 0) ? {} : { offset }),
   };
 }
 
 function parseCrop(value: unknown, index: number): StillImageEditCrop {
   const crop = record(value, `Layer ${index + 1} crop`);
+  const hasRectangularDimensions = crop.width !== undefined || crop.height !== undefined;
+  if (hasRectangularDimensions && (crop.width === undefined || crop.height === undefined)) {
+    throw new Error(`Layer ${index + 1} crop width and height must be provided together.`);
+  }
+  const legacySize = hasRectangularDimensions ? undefined : integer(crop.size, "Crop size", 1);
+  const width = hasRectangularDimensions ? integer(crop.width, "Crop width", 1) : (legacySize as number);
+  const height = hasRectangularDimensions ? integer(crop.height, "Crop height", 1) : (legacySize as number);
   const parsed = {
     x: integer(crop.x, "Crop x", 0),
     y: integer(crop.y, "Crop y", 0),
-    size: integer(crop.size, "Crop size", 1),
+    size: Math.max(width, height),
+    width,
+    height,
     sourceWidth: integer(crop.sourceWidth, "Source width", 1),
     sourceHeight: integer(crop.sourceHeight, "Source height", 1),
   };
-  if (parsed.x + parsed.size > parsed.sourceWidth || parsed.y + parsed.size > parsed.sourceHeight) {
+  if (parsed.x + parsed.width > parsed.sourceWidth || parsed.y + parsed.height > parsed.sourceHeight) {
     throw new Error(`Layer ${index + 1} crop is outside the source image.`);
   }
   return parsed;
@@ -71,6 +99,13 @@ function optionalString(value: unknown, label: string, maximum: number) {
   const result = value.trim();
   if (result.length > maximum) throw new Error(`${label} is too long.`);
   return result || null;
+}
+
+function boundedInteger(value: unknown, label: string, minimum: number, maximum: number) {
+  if (!Number.isInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return Number(value);
 }
 
 function integer(value: unknown, label: string, minimum: number) {

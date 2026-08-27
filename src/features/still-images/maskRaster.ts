@@ -1,9 +1,9 @@
-// Turning painted strokes into the two images the graph is sent.
+// Turning a painted mask or rectangle selection into the images the graph is sent.
 //
 // The Image Editing preset uploads three slots: the source the artist chose, a
 // black-and-white mask, and the source with the masked region washed over. Only
 // the first exists as a file; the other two are drawn here, at the source's own
-// resolution, from the stroke list in maskDrawing.ts.
+// resolution, from the source-coordinate geometry in maskDrawing.ts.
 //
 // Both go up as PNG. The mask has to be lossless -- a JPEG's ringing along a hard
 // edge would read as a gradient in ImageToMask and bleed the edit past where it
@@ -16,8 +16,21 @@
 // happened to be under them.
 
 import type { StillImageEditCrop } from "../../types";
-import { drawingForCrop, EDIT_CROP_PADDING_RATIO, squareEditCrop, type MaskBounds } from "./imageEditLayers";
-import { imagePointFromViewport, maskBlurPixels, type MaskDrawing, type MaskStroke, type MaskView } from "./maskDrawing";
+import { aspectEditCrop, drawingForCrop, editCropHeight, editCropWidth, type MaskBounds } from "./imageEditLayers";
+import {
+  conjugateTransform,
+  imagePointFromViewport,
+  isIdentityTransform,
+  maskBlurPixels,
+  maskCropAspect,
+  maskCropMargin,
+  maskTransform,
+  scaleTransform,
+  type MaskDrawing,
+  type MaskPoint,
+  type MaskStroke,
+  type MaskView,
+} from "./maskDrawing";
 
 /**
  * The wash colour on the guide.
@@ -37,7 +50,7 @@ const DEFAULT_CROP_SAMPLE_SIDE = 768;
 export type MaskRenderTarget = HTMLCanvasElement;
 
 /**
- * The strokes as coverage, on a transparent canvas.
+ * Painted strokes or a rectangle selection as coverage, on a transparent canvas.
  *
  * The shared step behind both outputs: the mask flattens it onto black, the guide
  * tints it. Erasers are `destination-out`, which is why this stage has to keep an
@@ -53,13 +66,40 @@ export function renderMaskAlphaCanvas(drawing: MaskDrawing): HTMLCanvasElement {
   context.fillStyle = "#ffffff";
   context.strokeStyle = "#ffffff";
 
+  // The free transform is set on the context rather than applied to each point,
+  // so a scaled brush stroke gets a scaled pen and a rotated selection is a
+  // rotated rectangle -- both of which drawing pre-transformed points with an
+  // untransformed pen would get wrong.
+  const transform = maskTransform(drawing);
+  const transformed = !isIdentityTransform(transform);
+  if (transformed) context.setTransform(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
+
+  if (drawing.selection) {
+    context.fillRect(drawing.selection.x, drawing.selection.y, drawing.selection.width, drawing.selection.height);
+  }
+
   for (const stroke of drawing.strokes) {
     context.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
     paintStroke(context, stroke);
   }
 
   context.globalCompositeOperation = "source-over";
-  return canvas;
+  if (transformed) context.setTransform(1, 0, 0, 1, 0, 0);
+  // Inversion is a whole-mask operation, so it happens after every stroke has been
+  // composited rather than per stroke: punching the painted shape out of a full
+  // sheet is the only way overlapping brush and eraser work still add up to one
+  // region once it is flipped.
+  if (!drawing.inverted) return canvas;
+
+  const complement = createCanvas(drawing.width, drawing.height);
+  const complementContext = complement.getContext("2d");
+  if (!complementContext) return canvas;
+  complementContext.fillStyle = "#ffffff";
+  complementContext.fillRect(0, 0, complement.width, complement.height);
+  complementContext.globalCompositeOperation = "destination-out";
+  complementContext.drawImage(canvas, 0, 0);
+  complementContext.globalCompositeOperation = "source-over";
+  return complement;
 }
 
 function paintStroke(context: CanvasRenderingContext2D, stroke: MaskStroke) {
@@ -113,6 +153,19 @@ export function renderMaskCanvas(drawing: MaskDrawing): HTMLCanvasElement {
   return canvas;
 }
 
+/**
+ * A small black-and-white preview of a mask, for the Layers panel.
+ *
+ * Photoshop shows the mask beside the layer's pixels precisely because a mask is
+ * hard to reason about from a checkbox. Drawn at thumbnail scale rather than full
+ * size and then shrunk by CSS: this is re-rendered on every stroke of the
+ * selected layer, and a 6000px mask per keystroke is not a thumbnail budget.
+ */
+export function renderMaskThumbnailCanvas(drawing: MaskDrawing, maximumSide = 128): HTMLCanvasElement {
+  const scale = Math.min(1, maximumSide / Math.max(1, drawing.width, drawing.height));
+  return renderMaskCanvas(scaledDrawing(drawing, scale));
+}
+
 /** Convert an opaque black/white saved mask into an alpha canvas for local compositing. */
 export function maskImageToAlphaCanvas(mask: CanvasImageSource, width: number, height: number) {
   const canvas = createCanvas(width, height);
@@ -132,7 +185,7 @@ export function maskImageToAlphaCanvas(mask: CanvasImageSource, width: number, h
   return canvas;
 }
 
-/** The source with the painted region washed over, for the model to read. */
+/** The source with the chosen region washed over, for the model to read. */
 export function renderGuideCanvas(source: CanvasImageSource, drawing: MaskDrawing): HTMLCanvasElement {
   const ink = renderMaskAlphaCanvas(drawing);
   const canvas = createCanvas(drawing.width, drawing.height);
@@ -192,6 +245,16 @@ export const MASK_DRAFT_EDGE = EDITOR_EDGE;
  * on very large source images.
  */
 export function maskCoverageBounds(drawing: MaskDrawing, maximumSide = DEFAULT_CROP_SAMPLE_SIDE): MaskBounds | undefined {
+  // A rectangle is already exact source-pixel geometry; sampling it would expand
+  // its edges by up to one low-resolution sample cell and weaken precise stitching.
+  if (drawing.selection) {
+    return {
+      left: drawing.selection.x,
+      top: drawing.selection.y,
+      right: drawing.selection.x + drawing.selection.width,
+      bottom: drawing.selection.y + drawing.selection.height,
+    };
+  }
   const scale = Math.min(1, Math.max(1, maximumSide) / Math.max(1, drawing.width, drawing.height));
   const sample = renderMaskAlphaCanvas(scaledDrawing({ ...drawing, softness: 0 }, scale));
   const context = sample.getContext("2d", { willReadFrequently: true });
@@ -205,14 +268,14 @@ export function maskCoverageBounds(drawing: MaskDrawing, maximumSide = DEFAULT_C
   }
 }
 
-/** The 1:1 crop around what is covered now, not around historical positive strokes. */
+/** The selected-aspect crop around what is covered now, not historical strokes. */
 export function currentMaskEditCrop(
   drawing: MaskDrawing,
-  paddingRatio = EDIT_CROP_PADDING_RATIO,
+  paddingRatio = maskCropMargin(drawing) / 100,
   maximumSide = DEFAULT_CROP_SAMPLE_SIDE,
 ) {
   const bounds = maskCoverageBounds(drawing, maximumSide);
-  return bounds ? squareEditCrop(drawing, paddingRatio, bounds) : undefined;
+  return bounds ? aspectEditCrop(drawing, maskCropAspect(drawing), paddingRatio, bounds) : undefined;
 }
 
 export function maskBoundsFromPixels(
@@ -254,10 +317,26 @@ export type EditCompositeLayerSource = {
   drawing?: MaskDrawing;
   /** Frozen crop-local mask asset used when reproducing an older layer base. */
   mask?: CanvasImageSource;
+  /** 0-100, Photoshop's layer opacity. Applied to the masked layer as a whole. */
+  opacity?: number;
+  /** Non-destructive content displacement, in original-image pixels. */
+  offset?: MaskPoint;
+  /** Mask displacement. Equal to offset while the mask is linked to its layer. */
+  maskOffset?: MaskPoint;
+  /** A disabled mask reveals the layer's whole crop, exactly as in Photoshop. */
+  maskEnabled?: boolean;
 };
 
+const NO_OFFSET: MaskPoint = { x: 0, y: 0 };
+
+/** Photoshop layer opacity as a canvas alpha, with the 100% default. */
+function layerAlpha(layer: EditCompositeLayerSource) {
+  const opacity = layer.opacity === undefined ? 100 : layer.opacity;
+  return Math.min(1, Math.max(0, opacity / 100));
+}
+
 /**
- * Build only the square sent to the provider, directly from original pixels.
+ * Build only the crop sent to the provider, directly from original pixels.
  *
  * Existing layers are pasted into this small canvas in order. No full-resolution
  * composite canvas is allocated, which keeps a 10K original from being duplicated
@@ -268,27 +347,54 @@ export function renderEditCropCanvas(
   crop: StillImageEditCrop,
   layers: EditCompositeLayerSource[] = [],
 ): HTMLCanvasElement {
-  const canvas = createCanvas(crop.size, crop.size);
+  const cropWidth = editCropWidth(crop);
+  const cropHeight = editCropHeight(crop);
+  const canvas = createCanvas(cropWidth, cropHeight);
   const context = canvas.getContext("2d");
   if (!context) return canvas;
 
-  context.drawImage(source, crop.x, crop.y, crop.size, crop.size, 0, 0, crop.size, crop.size);
+  context.drawImage(source, crop.x, crop.y, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
   for (const layer of layers) {
-    const pixels = createCanvas(crop.size, crop.size);
+    const alpha = layerAlpha(layer);
+    if (alpha <= 0) continue;
+    const layerWidth = editCropWidth(layer.crop);
+    const layerHeight = editCropHeight(layer.crop);
+    const offset = layer.offset ?? NO_OFFSET;
+    // An unlinked mask keeps its own position; a linked one rides the content.
+    const maskOffset = layer.maskOffset ?? offset;
+    const pixels = createCanvas(cropWidth, cropHeight);
     const layerContext = pixels.getContext("2d");
     if (!layerContext) continue;
-    layerContext.drawImage(layer.image, layer.crop.x - crop.x, layer.crop.y - crop.y, layer.crop.size, layer.crop.size);
-    layerContext.globalCompositeOperation = "destination-in";
-    if (layer.drawing) {
-      layerContext.drawImage(renderMaskAlphaCanvas(drawingForCrop(layer.drawing, crop)), 0, 0);
-    } else if (layer.mask) {
-      layerContext.drawImage(layer.mask, layer.crop.x - crop.x, layer.crop.y - crop.y, layer.crop.size, layer.crop.size);
-    } else {
-      continue;
+    layerContext.drawImage(
+      layer.image,
+      layer.crop.x + offset.x - crop.x,
+      layer.crop.y + offset.y - crop.y,
+      layerWidth,
+      layerHeight,
+    );
+    if (layer.maskEnabled !== false) {
+      layerContext.globalCompositeOperation = "destination-in";
+      if (layer.drawing) {
+        // Already in this crop's coordinates, so only the mask's own displacement
+        // is left to apply.
+        layerContext.drawImage(renderMaskAlphaCanvas(drawingForCrop(layer.drawing, crop)), maskOffset.x, maskOffset.y);
+      } else if (layer.mask) {
+        layerContext.drawImage(
+          layer.mask,
+          layer.crop.x + maskOffset.x - crop.x,
+          layer.crop.y + maskOffset.y - crop.y,
+          layerWidth,
+          layerHeight,
+        );
+      } else {
+        continue;
+      }
+      layerContext.globalCompositeOperation = "source-over";
     }
-    layerContext.globalCompositeOperation = "source-over";
+    context.globalAlpha = alpha;
     context.drawImage(pixels, 0, 0);
+    context.globalAlpha = 1;
   }
 
   return canvas;
@@ -309,24 +415,35 @@ export function renderEditCompositePreview(
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
 
   for (const layer of layers) {
-    const size = Math.max(1, Math.round(layer.crop.size * scale));
-    const left = Math.round(layer.crop.x * scale);
-    const top = Math.round(layer.crop.y * scale);
+    const alpha = layerAlpha(layer);
+    if (alpha <= 0) continue;
+    const offset = layer.offset ?? NO_OFFSET;
+    const maskOffset = layer.maskOffset ?? offset;
+    const width = Math.max(1, Math.round(editCropWidth(layer.crop) * scale));
+    const height = Math.max(1, Math.round(editCropHeight(layer.crop) * scale));
+    const left = Math.round((layer.crop.x + offset.x) * scale);
+    const top = Math.round((layer.crop.y + offset.y) * scale);
+    const maskLeft = Math.round((layer.crop.x + maskOffset.x) * scale);
+    const maskTop = Math.round((layer.crop.y + maskOffset.y) * scale);
     const pixels = createCanvas(canvas.width, canvas.height);
     const layerContext = pixels.getContext("2d");
     if (!layerContext) continue;
-    layerContext.drawImage(layer.image, left, top, size, size);
-    layerContext.globalCompositeOperation = "destination-in";
-    if (layer.drawing) {
-      const cropDrawing = scaledDrawing(drawingForCrop(layer.drawing, layer.crop), scale);
-      layerContext.drawImage(renderMaskAlphaCanvas(cropDrawing), left, top, size, size);
-    } else if (layer.mask) {
-      layerContext.drawImage(layer.mask, left, top, size, size);
-    } else {
-      continue;
+    layerContext.drawImage(layer.image, left, top, width, height);
+    if (layer.maskEnabled !== false) {
+      layerContext.globalCompositeOperation = "destination-in";
+      if (layer.drawing) {
+        const cropDrawing = scaledDrawing(drawingForCrop(layer.drawing, layer.crop), scale);
+        layerContext.drawImage(renderMaskAlphaCanvas(cropDrawing), maskLeft, maskTop, width, height);
+      } else if (layer.mask) {
+        layerContext.drawImage(layer.mask, maskLeft, maskTop, width, height);
+      } else {
+        continue;
+      }
+      layerContext.globalCompositeOperation = "source-over";
     }
-    layerContext.globalCompositeOperation = "source-over";
+    context.globalAlpha = alpha;
     context.drawImage(pixels, 0, 0);
+    context.globalAlpha = 1;
   }
 
   return canvas;
@@ -352,6 +469,19 @@ function scaledDrawing(drawing: MaskDrawing, scale: number): MaskDrawing {
     width: Math.max(1, Math.round(drawing.width * scale)),
     height: Math.max(1, Math.round(drawing.height * scale)),
     blurPixels: drawing.blurPixels === undefined ? undefined : drawing.blurPixels * scale,
+    // Every point below is rewritten into smaller coordinates, so the transform
+    // has to be re-expressed in them or it would be applied twice over.
+    transform: drawing.transform
+      ? conjugateTransform(drawing.transform, scaleTransform({ x: 0, y: 0 }, scale, scale))
+      : undefined,
+    selection: drawing.selection
+      ? {
+          x: drawing.selection.x * scale,
+          y: drawing.selection.y * scale,
+          width: drawing.selection.width * scale,
+          height: drawing.selection.height * scale,
+        }
+      : undefined,
     strokes: drawing.strokes.map((stroke) => ({
       ...stroke,
       radius: stroke.radius * scale,
@@ -396,6 +526,9 @@ function outlineCanvas(ink: HTMLCanvasElement, colour: string) {
 }
 
 function blurFilter(drawing: MaskDrawing) {
+  // Rectangle selection is an exact hard-edged edit boundary. Brush softness is
+  // deliberately ignored so the returned result cannot bleed past that box.
+  if (drawing.selection) return "none";
   const blur = drawing.blurPixels ?? maskBlurPixels(drawing.softness, drawing.width, drawing.height);
   return blur > 0 ? `blur(${blur}px)` : "none";
 }

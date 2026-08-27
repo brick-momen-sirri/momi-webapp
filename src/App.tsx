@@ -595,9 +595,17 @@ function App() {
                 onGenerate={handleStillImagesGenerate}
                 onNewEditLayer={stillImagesForm.startNewEditLayer}
                 onSelectEditLayer={stillImagesForm.selectEditLayer}
+                onEditTargetChange={stillImagesForm.setEditTarget}
                 onToggleEditLayer={stillImagesForm.toggleEditLayer}
                 onDeleteEditLayer={stillImagesForm.deleteEditLayer}
+                onDuplicateEditLayer={stillImagesForm.duplicateEditLayer}
                 onMoveEditLayer={stillImagesForm.moveEditLayer}
+                onMoveEditLayerBy={stillImagesForm.moveEditLayerBy}
+                onRenameEditLayer={stillImagesForm.renameEditLayer}
+                onEditLayerOpacityChange={stillImagesForm.setEditLayerOpacity}
+                onEditLayerMaskEnabledChange={stillImagesForm.setEditLayerMaskEnabled}
+                onEditLayerMaskLinkedChange={stillImagesForm.setEditLayerMaskLinked}
+                onResetEditLayerOffset={stillImagesForm.resetEditLayerOffset}
                 onEditModeChange={stillImagesForm.setEditMode}
                 onEditReferencesChange={stillImagesForm.setEditReferences}
                 onFinishEditing={handleFinishStillImageEdit}

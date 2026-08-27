@@ -271,6 +271,42 @@ describe("useStillImagesSubmission", () => {
     expect(onEditJobCompleted).toHaveBeenCalledWith(expect.objectContaining({ id: "job_1", status: "completed" }));
   });
 
+  it("submits a rectangle selection without requiring a painted stroke", async () => {
+    const { hook } = setup();
+    const mask = {
+      width: 1200,
+      height: 800,
+      softness: 35,
+      cropMargin: 50,
+      cropAspect: "16:9" as const,
+      selection: { x: 200, y: 150, width: 320, height: 180 },
+      strokes: [],
+    };
+
+    await act(async () => {
+      await hook.result.current.submit({
+        projectId: "prj_1",
+        categoryId: "image-editing",
+        categoryState: {
+          ...state["image-editing"],
+          images: [image("source")],
+          mask,
+          prompt: "replace the selected sign",
+          editMode: "inpaint",
+          editDocumentId: "editdoc_selection",
+        },
+        targetFolderId: "",
+        saveNumber: "0001",
+      });
+    });
+
+    expect(createBackendJob).toHaveBeenCalledTimes(1);
+    expect(createBackendJob.mock.calls[0][0].workflowOptions.stillImage.edit).toMatchObject({
+      mask,
+      crop: { x: 100, y: 50, size: 400 },
+    });
+  });
+
   it("stays processing until the exact submitted edit job returns its completed crop", async () => {
     const { hook, onJobUpdated, onEditJobCompleted } = setup();
     let submittedWorkflow: unknown;

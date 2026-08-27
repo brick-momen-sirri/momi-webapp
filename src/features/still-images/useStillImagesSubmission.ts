@@ -6,8 +6,15 @@ import type { Job, StillImageEditWorkflow, UploadedImage } from "../../types";
 import { createClientId } from "../../utils/id";
 // Shared media helper; features/jobs uses the same one for the Animation path.
 import { uploadJobMediaUrl } from "../generation/generationUtils";
-import { drawingForCrop, editGenerationBaseLayers, type EditLayerCompositeDescriptor } from "./imageEditLayers";
-import type { MaskDrawing } from "./maskDrawing";
+import {
+  drawingForCrop,
+  editCropHeight,
+  editCropWidth,
+  descriptorMaskDrawing,
+  editGenerationBaseLayers,
+  type EditLayerCompositeDescriptor,
+} from "./imageEditLayers";
+import { hasPaintedRegion, type MaskDrawing } from "./maskDrawing";
 import {
   canvasToPngFile,
   currentMaskEditCrop,
@@ -88,8 +95,8 @@ export function useStillImagesSubmission(options: {
       if (images.length !== uploadedSlotCount) {
         return fail(`This workflow needs ${uploadedSlotCount} input image${uploadedSlotCount === 1 ? "" : "s"}.`);
       }
-      if (paintsItsOwnSlots && !input.categoryState.mask?.strokes.length) {
-        return fail("Paint the region to edit before generating.");
+      if (paintsItsOwnSlots && !hasPaintedRegion(input.categoryState.mask)) {
+        return fail("Paint or select the region to edit before generating.");
       }
       // React cannot paint the disabled button until this event returns. A ref is
       // the synchronous guard that closes the tiny gap in which a fast double-click
@@ -149,7 +156,7 @@ export function useStillImagesSubmission(options: {
               layers: editGenerationBaseLayers(input.categoryState),
             })
           : undefined;
-        // Image Editing sends the square source/mask/guide only. The durable
+        // Image Editing sends the cropped source/mask/guide only. The durable
         // original URL lives in edit metadata for the backend composite step, but
         // is deliberately absent from the RunPod payload.
         const inputImages = painted?.inputImages ?? uploaded;
@@ -393,7 +400,7 @@ function steppedSeed(seed: number, offset: number) {
 }
 
 /**
- * Render the painted region into the slots the graph expects, and save them.
+ * Render the painted or rectangle-selected region into the graph's image slots.
  *
  * Slot 2 is the mask, slot 3 the source with the region washed over. Both are
  * drawn at the source's own resolution -- the graph pastes the result back through
@@ -422,20 +429,34 @@ async function uploadPaintedSlots(options: {
   // something. Painting an area and then erasing all of it leaves strokes and no
   // coverage, and that mask would let the model repaint the whole frame.
   if (!maskHasCoverage(drawing)) {
-    throw new Error("The painted region is empty. Paint the area to change, or clear the mask and start again.");
+    throw new Error("The edit region is empty. Paint or select the area to change, then try again.");
   }
 
   const crop = currentMaskEditCrop(drawing);
   if (!crop) {
-    throw new Error("The painted region is empty. Paint the area to change, or clear the mask and start again.");
+    throw new Error("The edit region is empty. Paint or select the area to change, then try again.");
   }
   const layerSources = await Promise.all(
     options.layers.map(async (layer) => {
       const image = await loadImageElement(layer.generatedCropUrl ?? resolveMediaUrl(layer.generatedCropSourceUrl));
-      if (layer.mask) return { image, crop: layer.crop, drawing: layer.mask };
+      // The model has to be shown the composite the artist is looking at, so a
+      // faded, moved or unmasked layer goes into the crop faded, moved and
+      // unmasked rather than at the values it was generated with.
+      const placement = {
+        crop: layer.crop,
+        opacity: layer.opacity,
+        offset: layer.offset,
+        maskOffset: layer.maskOffset,
+        maskEnabled: layer.maskEnabled,
+      };
+      if (layer.mask) return { image, ...placement, drawing: layer.mask };
       if (layer.maskSourceUrl) {
         const mask = await loadImageElement(resolveMediaUrl(layer.maskSourceUrl));
-        return { image, crop: layer.crop, mask: maskImageToAlphaCanvas(mask, layer.crop.size, layer.crop.size) };
+        return {
+          image,
+          ...placement,
+          mask: maskImageToAlphaCanvas(mask, editCropWidth(layer.crop), editCropHeight(layer.crop)),
+        };
       }
       throw new Error(`The saved base for ${layer.layerId} is missing its mask.`);
     }),
@@ -458,8 +479,12 @@ async function uploadPaintedSlots(options: {
   const baseLayers = await Promise.all(
     options.layers.map(async (layer) => {
       let maskSourceUrl = layer.maskSourceUrl;
-      if (layer.mask) {
-        const file = await canvasToPngFile(renderMaskCanvas(drawingForCrop(layer.mask, layer.crop)), `${layer.layerId}-mask.png`);
+      const resolvedMask = descriptorMaskDrawing(layer);
+      if (resolvedMask) {
+        const file = await canvasToPngFile(
+          renderMaskCanvas(drawingForCrop(resolvedMask, layer.crop)),
+          `${layer.layerId}-mask.png`,
+        );
         maskSourceUrl = await uploadBackendMedia(file, {
           projectId: options.projectId,
           kind: "image",
@@ -472,6 +497,8 @@ async function uploadPaintedSlots(options: {
         crop: layer.crop,
         generatedCropUrl: layer.generatedCropSourceUrl,
         maskSourceUrl,
+        opacity: layer.opacity,
+        offset: layer.offset,
       };
     }),
   );
@@ -495,7 +522,7 @@ async function uploadPaintedSlots(options: {
 }
 
 function imageSourceUrl(image: UploadedImage) {
-  // No 16:9 crop surface in Still Images, so the cropped variant is only used when
-  // the uploader produced one anyway.
+  // Use the upload's prepared source when one exists. The mask editor's own crop
+  // aspect is independent and is calculated later around current mask coverage.
   return image.croppedUrl ?? image.url;
 }

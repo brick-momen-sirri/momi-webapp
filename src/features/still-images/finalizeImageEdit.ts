@@ -2,7 +2,7 @@ import { finalizeBackendStillImageEdit, uploadBackendMedia } from "../../service
 import type { Job } from "../../types";
 import { createClientId } from "../../utils/id";
 import { uploadJobMediaUrl } from "../generation/generationUtils";
-import { drawingForCrop, visibleEditLayers } from "./imageEditLayers";
+import { descriptorMaskDrawing, drawingForCrop, visibleEditLayers } from "./imageEditLayers";
 import type { MaskDrawing } from "./maskDrawing";
 import { canvasToPngFile, renderMaskCanvas } from "./maskRaster";
 import type { StillImageCategoryState } from "./stillImageCategories";
@@ -42,9 +42,12 @@ export async function finalizeImageEdit(input: {
   const layers = await Promise.all(
     descriptors.map(async (layer) => {
       let maskSourceUrl = layer.maskSourceUrl;
-      if (layer.mask) {
+      // The mask that is uploaded is the one the editor was showing, with a
+      // disabled or unchained mask already resolved into geometry.
+      const resolvedMask = descriptorMaskDrawing(layer);
+      if (resolvedMask) {
         const maskFile = await canvasToPngFile(
-          renderMaskCanvas(drawingForCrop(layer.mask, layer.crop)),
+          renderMaskCanvas(drawingForCrop(resolvedMask, layer.crop)),
           `${layer.layerId}-final-mask.png`,
         );
         maskSourceUrl = await uploadBackendMedia(maskFile, {
@@ -59,6 +62,8 @@ export async function finalizeImageEdit(input: {
         crop: layer.crop,
         generatedCropUrl: layer.generatedCropSourceUrl,
         maskSourceUrl,
+        opacity: layer.opacity,
+        offset: layer.offset,
       };
     }),
   );

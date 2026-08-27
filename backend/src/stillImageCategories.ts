@@ -88,6 +88,8 @@ export type StillImageEditCrop = {
   x: number;
   y: number;
   size: number;
+  width?: number;
+  height?: number;
   sourceWidth: number;
   sourceHeight: number;
 };
@@ -96,6 +98,13 @@ export type StillImageEditMask = {
   width: number;
   height: number;
   softness: number;
+  cropMargin?: number;
+  cropAspect?: "1:1" | "16:9" | "9:16";
+  selection?: { x: number; y: number; width: number; height: number };
+  /** The mask covers everything the strokes do not. Round-tripped, never applied here. */
+  inverted?: boolean;
+  /** A free transform on the mask, as canvas takes it. Round-tripped, never applied here. */
+  transform?: { a: number; b: number; c: number; d: number; e: number; f: number };
   strokes: Array<{
     tool: "brush" | "eraser" | "lasso";
     radius: number;
@@ -108,6 +117,10 @@ export type StillImageEditBaseLayer = {
   crop: StillImageEditCrop;
   generatedCropUrl: string;
   maskSourceUrl: string;
+  /** Photoshop layer opacity, 0-100. Absent means fully opaque. */
+  opacity?: number;
+  /** Where the layer's pixels now sit relative to the crop they were generated in. */
+  offset?: { x: number; y: number };
 };
 
 export type StillImageEditMode = "inpaint" | "enhance";

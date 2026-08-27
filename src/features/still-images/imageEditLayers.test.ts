@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { drawingForCrop, editGenerationBaseLayers, squareEditCrop, visibleEditLayers } from "./imageEditLayers";
-import type { MaskDrawing } from "./maskDrawing";
+import {
+  aspectEditCrop,
+  drawingForCrop,
+  editCropHeight,
+  editCropWidth,
+  editGenerationBaseLayers,
+  squareEditCrop,
+  visibleEditLayers,
+  descriptorMaskDrawing,
+} from "./imageEditLayers";
+import {
+  createMaskDrawing,
+  maskTransform,
+  rotationTransform,
+  scaleTransform,
+  setMaskRectangleSelection,
+  setMaskTransform,
+  transformPoint,
+  type MaskDrawing,
+} from "./maskDrawing";
 import type { StillImageCategoryState, StillImageEditLayer } from "./stillImageCategories";
 
 function drawing(overrides: Partial<MaskDrawing> = {}): MaskDrawing {
@@ -20,6 +38,8 @@ describe("squareEditCrop", () => {
       x: 1700,
       y: 200,
       size: 200,
+      width: 200,
+      height: 200,
       sourceWidth: 2000,
       sourceHeight: 1200,
     });
@@ -72,6 +92,59 @@ describe("squareEditCrop", () => {
         }),
       ),
     ).toThrow(/too wide for a square crop/i);
+  });
+});
+
+describe("aspectEditCrop", () => {
+  const bounds = { left: 350, top: 450, right: 450, bottom: 550 };
+
+  it("creates an exact 16:9 crop that contains the mask and remains in bounds", () => {
+    const crop = aspectEditCrop(drawing(), "16:9", 0.5, bounds);
+    expect(crop.width).toBe(368);
+    expect(crop.height).toBe(207);
+    expect(editCropWidth(crop) / editCropHeight(crop)).toBe(16 / 9);
+    expect(crop.x).toBeGreaterThanOrEqual(0);
+    expect(crop.y).toBeGreaterThanOrEqual(0);
+    expect(crop.x + editCropWidth(crop)).toBeLessThanOrEqual(crop.sourceWidth);
+    expect(crop.y + editCropHeight(crop)).toBeLessThanOrEqual(crop.sourceHeight);
+  });
+
+  it("lets a smaller margin shrink the crop around the same mask", () => {
+    const tight = aspectEditCrop(drawing(), "16:9", 0, bounds);
+    const roomy = aspectEditCrop(drawing(), "16:9", 1, bounds);
+    expect(editCropWidth(tight)).toBeLessThan(editCropWidth(roomy));
+    expect(editCropHeight(tight)).toBeLessThan(editCropHeight(roomy));
+  });
+
+  it("reads old square crops without explicit rectangular dimensions", () => {
+    const legacy = { x: 0, y: 0, size: 320, sourceWidth: 1000, sourceHeight: 800 };
+    expect(editCropWidth(legacy)).toBe(320);
+    expect(editCropHeight(legacy)).toBe(320);
+  });
+
+  it("uses a rectangle selection as exact coverage and translates it into crop coordinates", () => {
+    const source = drawing({
+      strokes: [],
+      selection: { x: 400, y: 300, width: 320, height: 180 },
+    });
+    const crop = aspectEditCrop(source, "16:9", 0);
+    expect(crop.width).toBe(320);
+    expect(crop.height).toBe(180);
+    expect(crop.x).toBe(400);
+    expect(crop.y).toBe(300);
+    expect(drawingForCrop(source, crop).selection).toEqual({ x: 0, y: 0, width: 320, height: 180 });
+  });
+
+  it("creates an exact 9:16 crop for a portrait selection", () => {
+    const source = drawing({
+      strokes: [],
+      selection: { x: 400, y: 200, width: 180, height: 320 },
+      cropAspect: "9:16",
+    });
+    const crop = aspectEditCrop(source, "9:16", 0);
+
+    expect(crop).toMatchObject({ x: 400, y: 200, width: 180, height: 320 });
+    expect(editCropWidth(crop) / editCropHeight(crop)).toBe(9 / 16);
   });
 });
 
@@ -156,5 +229,140 @@ describe("edit layer bases", () => {
     const lower = layer("lower", 0);
     const selected = layer("selected", 1, { baseLayers: [] });
     expect(editGenerationBaseLayers(stateWith([lower, selected], selected.id))).toEqual([]);
+  });
+});
+
+const base = setMaskRectangleSelection(createMaskDrawing(400, 300), { x: 40, y: 40, width: 60, height: 60 });
+const crop = { x: 20, y: 20, size: 100, width: 100, height: 100, sourceWidth: 400, sourceHeight: 300 };
+
+describe("descriptorMaskDrawing", () => {
+  it("hands back the mask untouched when nothing has been done to it", () => {
+    const resolved = descriptorMaskDrawing({ layerId: "a", crop, generatedCropSourceUrl: "a.png", mask: base });
+    expect(resolved).toBe(base);
+  });
+
+  it("keeps a chained mask in step with its layer rather than moving it twice", () => {
+    const resolved = descriptorMaskDrawing({
+      layerId: "a",
+      crop,
+      generatedCropSourceUrl: "a.png",
+      mask: base,
+      offset: { x: 30, y: 10 },
+      maskOffset: { x: 30, y: 10 },
+    });
+    expect(resolved?.selection).toEqual(base.selection);
+  });
+
+  it("writes an unchained mask's own position into its geometry", () => {
+    // The content moved by 30,10 and the mask stayed, so relative to the moved
+    // layer the mask is 30,10 the other way.
+    const resolved = descriptorMaskDrawing({
+      layerId: "a",
+      crop,
+      generatedCropSourceUrl: "a.png",
+      mask: base,
+      offset: { x: 30, y: 10 },
+      maskOffset: { x: 0, y: 0 },
+    });
+    expect(resolved?.selection).toEqual({ x: 10, y: 30, width: 60, height: 60 });
+  });
+
+  it("turns a disabled mask into one that hides nothing", () => {
+    const resolved = descriptorMaskDrawing({
+      layerId: "a",
+      crop,
+      generatedCropSourceUrl: "a.png",
+      mask: base,
+      maskEnabled: false,
+    });
+    expect(resolved).toMatchObject({ inverted: true, softness: 0, strokes: [], selection: undefined });
+  });
+
+  it("has nothing to resolve for a frozen layer that only has a mask asset", () => {
+    expect(
+      descriptorMaskDrawing({ layerId: "a", crop, generatedCropSourceUrl: "a.png", maskSourceUrl: "mask.png" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("visibleEditLayers placement", () => {
+  function placedLayer(id: string, order: number, overrides: Partial<StillImageEditLayer>): StillImageEditLayer {
+    return {
+      id,
+      name: id,
+      mask: base,
+      crop,
+      prompt: "",
+      mode: "inpaint",
+      references: [],
+      documentId: "editdoc_test",
+      jobId: `job_${id}`,
+      createdAt: "2026-08-27T09:00:00.000Z",
+      updatedAt: "2026-08-27T09:00:00.000Z",
+      visible: true,
+      order,
+      revision: 1,
+      status: "completed",
+      generatedCropSourceUrl: `/api/media?path=${id}.png`,
+      ...overrides,
+    };
+  }
+
+  it("carries opacity, the move and the mask switch onto every descriptor", () => {
+    const layers = [
+      placedLayer("edit_a", 0, { opacity: 45, offset: { x: 8, y: -3 }, maskEnabled: false }),
+      placedLayer("edit_b", 1, { maskLinked: false, offset: { x: 5, y: 5 } }),
+    ];
+    const [first, second] = visibleEditLayers({
+      images: [],
+      prompt: "",
+      seed: "",
+      settings: {},
+      editLayers: layers,
+    } as StillImageCategoryState);
+
+    expect(first).toMatchObject({ opacity: 45, offset: { x: 8, y: -3 }, maskOffset: { x: 8, y: -3 }, maskEnabled: false });
+    // An unchained mask stays where it was painted while the content moves.
+    expect(second).toMatchObject({ opacity: 100, offset: { x: 5, y: 5 }, maskOffset: { x: 0, y: 0 }, maskEnabled: true });
+  });
+});
+
+describe("a transformed mask through the crop", () => {
+  const transformed = setMaskTransform(
+    setMaskRectangleSelection(createMaskDrawing(400, 300), { x: 40, y: 40, width: 60, height: 60 }),
+    scaleTransform({ x: 100, y: 100 }, 2, 2),
+  );
+  const cropped = { x: 20, y: 20, size: 100, width: 100, height: 100, sourceWidth: 400, sourceHeight: 300 };
+
+  it("re-expresses the transform in the crop's coordinates so the mask lands in the same place", () => {
+    const local = drawingForCrop(transformed, cropped);
+    const point = { x: 40, y: 40 };
+    const inOriginal = transformPoint(maskTransform(transformed), point);
+    const inCrop = transformPoint(maskTransform(local), { x: point.x - cropped.x, y: point.y - cropped.y });
+    expect(inCrop).toEqual({ x: inOriginal.x - cropped.x, y: inOriginal.y - cropped.y });
+  });
+
+  it("moves the fallback crop bound onto wherever the mask was turned to", () => {
+    const bar = setMaskRectangleSelection(createMaskDrawing(1000, 1000), { x: 400, y: 480, width: 200, height: 40 });
+    const turned = setMaskTransform(bar, rotationTransform({ x: 500, y: 500 }, Math.PI / 4));
+    const crop = squareEditCrop(turned, 0);
+
+    // The fallback bound has no raster to sample, so what it owes the caller is
+    // simply that everything the artist painted is still inside the crop.
+    for (const corner of [
+      { x: 400, y: 480 },
+      { x: 600, y: 480 },
+      { x: 600, y: 520 },
+      { x: 400, y: 520 },
+    ]) {
+      const landed = transformPoint(maskTransform(turned), corner);
+      expect(landed.x).toBeGreaterThanOrEqual(crop.x - 1);
+      expect(landed.x).toBeLessThanOrEqual(crop.x + (crop.width ?? crop.size) + 1);
+      expect(landed.y).toBeGreaterThanOrEqual(crop.y - 1);
+      expect(landed.y).toBeLessThanOrEqual(crop.y + (crop.height ?? crop.size) + 1);
+    }
+    // A 200x40 bar laid at 45 degrees is a different shape from a flat one, so it
+    // must not be handed the flat one's crop.
+    expect(crop).not.toEqual(squareEditCrop(bar, 0));
   });
 });

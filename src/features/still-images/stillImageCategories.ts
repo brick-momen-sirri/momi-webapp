@@ -77,7 +77,7 @@ export type StillImageCategoryState = {
    */
   seed: string;
   /**
-   * The painted region, for the preset that has one.
+   * The painted or rectangle-selected region, for the preset that has one.
    *
    * Held beside the images rather than inside them because it is not an upload:
    * the mask and the marked guide are drawn from it at submit time and take slots
@@ -96,6 +96,15 @@ export type StillImageCategoryState = {
   editLayers?: StillImageEditLayer[];
   /** Undefined means a new edit above every existing layer. */
   activeEditLayerId?: string;
+  /**
+   * Whether the tools act on the selected layer's pixels or on its mask.
+   *
+   * Photoshop keeps this on the layer itself, shown as a ring around one of the
+   * two thumbnails. It lives on the session here because it is a property of
+   * what the artist is doing, not of the layer, and it must be unambiguous:
+   * every destructive tool reads it before it does anything.
+   */
+  editTarget?: StillImageEditTarget;
   /** One continuous editor session for this uploaded original. */
   editDocumentId?: string;
   editMode?: StillImageEditMode;
@@ -105,10 +114,21 @@ export type StillImageCategoryState = {
   settings: Record<string, StillImageSettingValue>;
 };
 
+/** Which half of a selected layer the tools currently act on. */
+export type StillImageEditTarget = "content" | "mask";
+
 export type StillImageEditLayer = {
   id: string;
   name: string;
   mask: MaskDrawing;
+  /** Photoshop layer opacity, 0-100. Live in the composite, never regenerated. */
+  opacity?: number;
+  /** A disabled mask reveals the layer's whole crop without discarding the mask. */
+  maskEnabled?: boolean;
+  /** Move the content and the mask together, as Photoshop's chain icon does. */
+  maskLinked?: boolean;
+  /** Non-destructive content displacement, in original-image pixels. */
+  offset?: { x: number; y: number };
   crop: StillImageEditCrop;
   prompt: string;
   mode: StillImageEditMode;

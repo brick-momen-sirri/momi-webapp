@@ -119,7 +119,10 @@ export type StillImageEditCrop = {
   /** Original-image pixel coordinates. Never display/CSS coordinates. */
   x: number;
   y: number;
+  /** Long side retained for compatibility with square edits saved before width/height existed. */
   size: number;
+  width?: number;
+  height?: number;
   sourceWidth: number;
   sourceHeight: number;
 };
@@ -128,6 +131,12 @@ export type StillImageEditMask = {
   width: number;
   height: number;
   softness: number;
+  cropMargin?: number;
+  cropAspect?: "1:1" | "16:9" | "9:16";
+  selection?: { x: number; y: number; width: number; height: number };
+  inverted?: boolean;
+  /** A free transform on the mask, as canvas takes it. Round-tripped, never applied here. */
+  transform?: { a: number; b: number; c: number; d: number; e: number; f: number };
   strokes: Array<{
     tool: "brush" | "eraser" | "lasso";
     radius: number;
@@ -140,6 +149,22 @@ export type StillImageEditBaseLayer = {
   crop: StillImageEditCrop;
   generatedCropUrl: string;
   maskSourceUrl: string;
+  /**
+   * Photoshop layer opacity, 0-100. Absent means fully opaque.
+   *
+   * Carried on the wire because the backend rebuilds the full-resolution
+   * composite from these crops: a layer the artist took to 50% has to arrive at
+   * 50%, or the delivered result stops matching the editor preview.
+   */
+  opacity?: number;
+  /**
+   * Non-destructive content displacement, in original-image pixels.
+   *
+   * The crop stays where it was generated -- it is the provenance of the pixels
+   * -- and this says where those pixels now sit. A displaced mask is baked into
+   * the uploaded mask PNG instead, so only one of the two needs a wire field.
+   */
+  offset?: { x: number; y: number };
 };
 
 export type StillImageEditMode = "inpaint" | "enhance";

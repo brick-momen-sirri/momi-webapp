@@ -9,17 +9,19 @@ import { Brush, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { EditLayerCompositeDescriptor } from "../features/still-images/imageEditLayers";
-import type { MaskDrawing } from "../features/still-images/maskDrawing";
+import { editCropHeight, editCropWidth, type EditLayerCompositeDescriptor } from "../features/still-images/imageEditLayers";
+import { hasPaintedRegion, type MaskDrawing } from "../features/still-images/maskDrawing";
 import {
   loadImageElement,
   maskImageToAlphaCanvas,
   renderEditCompositePreview,
   renderOverlayCanvas,
 } from "../features/still-images/maskRaster";
+import { exportLayeredPsd } from "../features/still-images/psdExport";
+import type { StillImageEditLayer } from "../features/still-images/stillImageCategories";
 import { resolveMediaUrl } from "../services/api/mediaAccess";
 import type { UploadedImage } from "../types";
-import { MaskEditorDialog } from "./MaskEditorDialog";
+import { MaskEditorDialog, type EditorLayerContext } from "./MaskEditorDialog";
 
 type MaskRegionFieldProps = {
   image?: UploadedImage;
@@ -27,6 +29,8 @@ type MaskRegionFieldProps = {
   layers?: EditLayerCompositeDescriptor[];
   /** Frozen generation base shown behind the mask in the full editor. */
   editorLayers?: EditLayerCompositeDescriptor[];
+  /** Complete layer stack, including hidden layers, for Photoshop export. */
+  exportLayers?: StillImageEditLayer[];
   drawing?: MaskDrawing;
   onChange: (drawing: MaskDrawing | undefined) => void;
   /** Incremented only by an upload/drop, so ordinary rerenders do not reopen it. */
@@ -39,6 +43,8 @@ type MaskRegionFieldProps = {
   finishing?: boolean;
   processing?: boolean;
   processingLabel?: string;
+  /** The selected layer, so the editor can say and change what it acts on. */
+  layerContext?: EditorLayerContext;
 };
 
 type DecodedSource = { url: string; element?: HTMLImageElement; failed?: boolean };
@@ -48,6 +54,7 @@ export function MaskRegionField({
   image,
   layers = [],
   editorLayers = layers,
+  exportLayers = [],
   drawing,
   onChange,
   openRequest = 0,
@@ -59,6 +66,7 @@ export function MaskRegionField({
   finishing = false,
   processing = false,
   processingLabel,
+  layerContext,
 }: MaskRegionFieldProps) {
   // Stamped with the URL it came from and read back through it, rather than being
   // cleared when the source changes. Clearing would mean writing state during the
@@ -66,6 +74,8 @@ export function MaskRegionField({
   // the one that matches, and the only writes happen when a decode finishes.
   const [decoded, setDecoded] = useState<DecodedSource | undefined>(undefined);
   const [editing, setEditing] = useState(false);
+  const [exportingPsd, setExportingPsd] = useState(false);
+  const [psdExportError, setPsdExportError] = useState<string | undefined>(undefined);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
   const openedRequestRef = useRef(0);
 
@@ -122,7 +132,7 @@ export function MaskRegionField({
     if (drawing.width !== width || drawing.height !== height) onChange(undefined);
   }, [drawing, element, onChange]);
 
-  const overlay = useMemo(() => (drawing?.strokes.length ? renderOverlayCanvas(drawing) : undefined), [drawing]);
+  const overlay = useMemo(() => (hasPaintedRegion(drawing) ? renderOverlayCanvas(drawing as MaskDrawing) : undefined), [drawing]);
 
   useEffect(() => {
     const canvas = previewRef.current;
@@ -141,18 +151,38 @@ export function MaskRegionField({
     if (overlay) context.drawImage(overlay, 0, 0, canvas.width, canvas.height);
   }, [element, overlay, previewSource]);
 
-  const painted = Boolean(drawing?.strokes.length);
+  const regionSelected = hasPaintedRegion(drawing);
+  const psdExportAvailable = exportLayers.some((layer) => Boolean(layer.generatedCropUrl ?? layer.generatedCropSourceUrl));
+
+  async function handleExportPsd() {
+    if (!element || exportingPsd || !psdExportAvailable) return;
+    setExportingPsd(true);
+    setPsdExportError(undefined);
+    try {
+      await exportLayeredPsd({
+        source: element,
+        width: element.naturalWidth || element.width,
+        height: element.naturalHeight || element.height,
+        imageName: image?.name ?? "edited-composite.png",
+        layers: exportLayers,
+      });
+    } catch (error) {
+      setPsdExportError(error instanceof Error ? error.message : "Could not export the layered PSD.");
+    } finally {
+      setExportingPsd(false);
+    }
+  }
 
   return (
     <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
       <div className="mb-3 flex items-center gap-2">
         <Brush className="h-4 w-4 text-stone-500" />
-        <h2 className="text-sm font-semibold">Current composite &amp; mask</h2>
+        <h2 className="text-sm font-semibold">Current composite &amp; region</h2>
       </div>
 
       {!image ? (
         <p className="rounded-md bg-mist px-3 py-2 text-xs leading-5 text-stone-600">
-          Upload a source image above, then paint the part of it you want changed.
+          Upload a source image above, then paint or select the part you want changed.
         </p>
       ) : failed ? (
         <p className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
@@ -162,7 +192,7 @@ export function MaskRegionField({
       ) : (
         <>
           <div className="overflow-hidden rounded-md border border-line bg-stone-100">
-            <canvas ref={previewRef} className="block h-auto w-full" aria-label="The painted region on the source image" />
+            <canvas ref={previewRef} className="block h-auto w-full" aria-label="The selected edit region on the source image" />
           </div>
 
           <div className="mt-2 flex gap-2">
@@ -173,15 +203,15 @@ export function MaskRegionField({
               className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-bold text-white transition hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Brush className="h-3.5 w-3.5" />
-              {painted ? "Edit region" : "Paint region"}
+              {regionSelected ? "Edit region" : "Choose region"}
             </button>
-            {painted ? (
+            {regionSelected ? (
               <button
                 type="button"
                 onClick={() => onChange(undefined)}
                 disabled={processing}
-                aria-label="Clear the painted region"
-                title="Clear the painted region"
+                aria-label="Clear the edit region"
+                title="Clear the edit region"
                 className="flex h-9 w-9 items-center justify-center rounded-md border border-line text-stone-500 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <X className="h-4 w-4" />
@@ -190,9 +220,9 @@ export function MaskRegionField({
           </div>
 
           <p className="mt-2 text-xs leading-5 text-stone-500">
-            {painted
-              ? "Only the washed area is re-rendered. Everything outside it is kept from the original."
-              : "Nothing is painted yet, so there is no region to edit."}
+            {regionSelected
+              ? "Only the selected area is re-rendered. Everything outside it is kept from the original."
+              : "Nothing is selected yet. Paint a mask or draw a rectangle in the editor."}
           </p>
         </>
       )}
@@ -212,15 +242,20 @@ export function MaskRegionField({
           readOnly={processing}
           processing={processing}
           processingLabel={processingLabel}
+          layerContext={layerContext}
+          onExportPsd={handleExportPsd}
+          psdExportAvailable={psdExportAvailable}
+          exportingPsd={exportingPsd}
+          psdExportError={psdExportError}
           closeLabel="Close"
           onApply={(next) => {
             setEditing(false);
-            onChange(next.strokes.length ? next : undefined);
+            onChange(hasPaintedRegion(next) ? next : undefined);
           }}
           onFinish={
             onFinish
               ? (next) => {
-                  onChange(next.strokes.length ? next : undefined);
+                  onChange(hasPaintedRegion(next) ? next : undefined);
                   void Promise.resolve(onFinish(next)).then((close) => {
                     if (close !== false) setEditing(false);
                   });
@@ -266,18 +301,85 @@ function useLayerComposite(element: HTMLImageElement | undefined, layers: EditLa
   return composite.canvas;
 }
 
+/**
+ * Decoded layer bitmaps, kept for the life of the tab.
+ *
+ * Opacity is a slider: dragging it rebuilds the composite on every frame, and
+ * each rebuild used to re-decode every layer's PNG. The bytes are already in the
+ * browser cache, but the decode is not free and it is the same handful of small
+ * crops every time. Keyed by URL, which is content-addressed here -- a
+ * regenerated layer gets a new one rather than replacing what a URL points at.
+ *
+ * Bounded, because that same content-addressing means the keys only ever grow: a
+ * long session of regenerations would otherwise hold every take it had ever
+ * shown. Oldest out first, which is the take least likely to still be on screen.
+ */
+const DECODED_LAYER_LIMIT = 64;
+const decodedLayerImages = new Map<string, Promise<HTMLImageElement>>();
+
+function decodeLayerImage(url: string) {
+  const cached = decodedLayerImages.get(url);
+  if (cached) {
+    // Refresh its position so the layers currently in the composite are the last
+    // ones to be dropped.
+    decodedLayerImages.delete(url);
+    decodedLayerImages.set(url, cached);
+    return cached;
+  }
+  const decoding = loadImageElement(url).catch((error) => {
+    decodedLayerImages.delete(url);
+    throw error;
+  });
+  decodedLayerImages.set(url, decoding);
+  while (decodedLayerImages.size > DECODED_LAYER_LIMIT) {
+    const oldest = decodedLayerImages.keys().next();
+    if (oldest.done) break;
+    decodedLayerImages.delete(oldest.value);
+  }
+  return decoding;
+}
+
 async function loadCompositeLayer(layer: EditLayerCompositeDescriptor) {
-  const image = await loadImageElement(layer.generatedCropUrl ?? resolveMediaUrl(layer.generatedCropSourceUrl));
-  if (layer.mask) return { image, crop: layer.crop, drawing: layer.mask };
+  const image = await decodeLayerImage(layer.generatedCropUrl ?? resolveMediaUrl(layer.generatedCropSourceUrl));
+  const placement = {
+    crop: layer.crop,
+    opacity: layer.opacity,
+    offset: layer.offset,
+    maskOffset: layer.maskOffset,
+    maskEnabled: layer.maskEnabled,
+  };
+  if (layer.mask) return { image, ...placement, drawing: layer.mask };
   if (layer.maskSourceUrl) {
-    const mask = await loadImageElement(resolveMediaUrl(layer.maskSourceUrl));
-    return { image, crop: layer.crop, mask: maskImageToAlphaCanvas(mask, layer.crop.size, layer.crop.size) };
+    const mask = await decodeLayerImage(resolveMediaUrl(layer.maskSourceUrl));
+    return {
+      image,
+      ...placement,
+      mask: maskImageToAlphaCanvas(mask, editCropWidth(layer.crop), editCropHeight(layer.crop)),
+    };
   }
   throw new Error(`Layer ${layer.layerId} has no mask source.`);
 }
 
+/**
+ * Everything that changes what the composite looks like, as one string.
+ *
+ * The composite is rebuilt when this changes and only when it changes, so
+ * anything the artist can adjust live -- opacity, a move, the mask switch -- has
+ * to appear here or the canvas quietly keeps showing the previous state.
+ */
 function compositeDescriptorKey(layers: EditLayerCompositeDescriptor[]) {
   return layers
-    .map((layer) => `${layer.layerId}:${layer.generatedCropSourceUrl}:${layer.maskSourceUrl ?? "drawing"}:${layer.revision ?? 0}`)
+    .map((layer) =>
+      [
+        layer.layerId,
+        layer.generatedCropSourceUrl,
+        layer.maskSourceUrl ?? "drawing",
+        layer.revision ?? 0,
+        layer.opacity ?? 100,
+        `${layer.offset?.x ?? 0},${layer.offset?.y ?? 0}`,
+        `${layer.maskOffset?.x ?? 0},${layer.maskOffset?.y ?? 0}`,
+        layer.maskEnabled === false ? "nomask" : "mask",
+      ].join(":"),
+    )
     .join("|");
 }

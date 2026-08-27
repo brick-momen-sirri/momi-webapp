@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { maskBoundsFromPixels } from "./maskRaster";
+import { currentMaskEditCrop, maskBoundsFromPixels, maskCoverageBounds, renderMaskAlphaCanvas } from "./maskRaster";
+import { createMaskDrawing, setMaskCropAspect, setMaskCropMargin, setMaskRectangleSelection } from "./maskDrawing";
 
 function alphaPixels(width: number, height: number, active: Array<[number, number, number]>) {
   const pixels = new Uint8ClampedArray(width * height * 4);
@@ -34,4 +35,43 @@ describe("maskBoundsFromPixels", () => {
     ]);
     expect(maskBoundsFromPixels(pixels, 4, 3, 1, 4, 3)).toEqual({ left: 3, top: 2, right: 4, bottom: 3 });
   });
+});
+
+it("keeps rectangle selection bounds exact without raster sampling", () => {
+  const drawing = setMaskRectangleSelection(setMaskCropAspect(setMaskCropMargin(createMaskDrawing(6000, 4000), 0), "16:9"), {
+    x: 1234,
+    y: 567,
+    width: 1600,
+    height: 900,
+  });
+  expect(maskCoverageBounds(drawing)).toEqual({ left: 1234, top: 567, right: 2834, bottom: 1467 });
+  expect(currentMaskEditCrop(drawing)).toMatchObject({ x: 1234, y: 567, width: 1600, height: 900 });
+});
+
+it("rasterizes a rectangle selection as a solid exact alpha region", () => {
+  const fillRect = vi.fn();
+  const context = {
+    fillRect,
+    lineCap: "butt",
+    lineJoin: "miter",
+    fillStyle: "",
+    strokeStyle: "",
+    globalCompositeOperation: "source-over",
+  } as unknown as CanvasRenderingContext2D;
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+  try {
+    const drawing = setMaskRectangleSelection(createMaskDrawing(800, 600), {
+      x: 123,
+      y: 45,
+      width: 320,
+      height: 180,
+    });
+    const canvas = renderMaskAlphaCanvas(drawing);
+    expect(canvas.width).toBe(800);
+    expect(canvas.height).toBe(600);
+    expect(fillRect).toHaveBeenCalledOnce();
+    expect(fillRect).toHaveBeenCalledWith(123, 45, 320, 180);
+  } finally {
+    getContext.mockRestore();
+  }
 });

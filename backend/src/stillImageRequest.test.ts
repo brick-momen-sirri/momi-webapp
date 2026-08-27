@@ -303,13 +303,51 @@ test("image edit crop and editable mask metadata survive normalization", () => {
     generatedCropUrl: "/api/media?path=caller-must-not-set.png",
   };
   const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
-  assert.deepEqual(options.edit?.crop, edit.crop);
+  assert.deepEqual(options.edit?.crop, { ...edit.crop, width: 400, height: 400 });
   assert.deepEqual(options.edit?.mask, edit.mask);
   assert.equal(options.edit?.generatedCropUrl, undefined);
   assert.doesNotThrow(() =>
     assertStillImageInputs(options, {
       inputImages: ["/api/media?path=crop.png", edit.maskSourceUrl, "/api/media?path=guide.png"],
     }),
+  );
+});
+
+test("rectangular image edit crops and their controls survive normalization", () => {
+  const edit = {
+    layerId: "edit_rectangular",
+    operation: "create",
+    crop: { x: 100, y: 50, size: 640, width: 360, height: 640, sourceWidth: 1200, sourceHeight: 800 },
+    mask: {
+      width: 1200,
+      height: 800,
+      softness: 20,
+      cropMargin: 75,
+      cropAspect: "9:16",
+      selection: { x: 100, y: 50, width: 360, height: 640 },
+      strokes: [],
+    },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+  };
+  const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
+  assert.deepEqual(options.edit?.crop, edit.crop);
+  assert.deepEqual(options.edit?.mask, edit.mask);
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: {
+          ...edit,
+          mask: {
+            ...edit.mask,
+            strokes: [{ tool: "brush", radius: 10, points: [{ x: 120, y: 80 }] }],
+          },
+        },
+      }),
+    /either a rectangle selection or painted strokes/i,
   );
 });
 
@@ -388,5 +426,135 @@ test("enhance edits use the general workflow's drawn-mask slot", () => {
         edit: { ...edit, referenceSourceUrls: ["/api/media?path=reference.png"] },
       }),
     /does not yet support reference images/i,
+  );
+});
+
+test("layer opacity, displacement and mask inversion survive normalization", () => {
+  const crop = { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 };
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    crop,
+    mask: {
+      width: 1200,
+      height: 800,
+      softness: 20,
+      inverted: true,
+      strokes: [{ tool: "brush", radius: 25, points: [{ x: 250, y: 200 }] }],
+    },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: ["edit_87654321", "edit_11112222"],
+    baseLayers: [
+      {
+        layerId: "edit_87654321",
+        crop,
+        generatedCropUrl: "/api/media?path=lower.png",
+        maskSourceUrl: "/api/media?path=lower-mask.png",
+        opacity: 55,
+        offset: { x: -30, y: 12 },
+      },
+      // Defaults are dropped rather than written out, so an untouched layer
+      // serialises exactly as it did before layers had these properties.
+      {
+        layerId: "edit_11112222",
+        crop,
+        generatedCropUrl: "/api/media?path=upper.png",
+        maskSourceUrl: "/api/media?path=upper-mask.png",
+        opacity: 100,
+        offset: { x: 0, y: 0 },
+      },
+    ],
+  };
+
+  const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
+  assert.equal(options.edit?.mask.inverted, true);
+  assert.equal(options.edit?.baseLayers[0].opacity, 55);
+  assert.deepEqual(options.edit?.baseLayers[0].offset, { x: -30, y: 12 });
+  assert.equal(options.edit?.baseLayers[1].opacity, undefined);
+  assert.equal(options.edit?.baseLayers[1].offset, undefined);
+});
+
+test("out-of-range layer opacity and displacement are refused", () => {
+  const crop = { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 };
+  const baseLayer = {
+    layerId: "edit_87654321",
+    crop,
+    generatedCropUrl: "/api/media?path=lower.png",
+    maskSourceUrl: "/api/media?path=lower-mask.png",
+  };
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    crop,
+    mask: { width: 1200, height: 800, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: ["edit_87654321"],
+    baseLayers: [baseLayer],
+  };
+
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, baseLayers: [{ ...baseLayer, opacity: 250 }] },
+      }),
+    /baseLayers\[0\]\.opacity/,
+  );
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, baseLayers: [{ ...baseLayer, offset: { x: 99_999, y: 0 } }] },
+      }),
+    /baseLayers\[0\]\.offset\.x/,
+  );
+  assert.throws(
+    () => normalizeStillImageOptions({ categoryId: "image-editing", edit: { ...edit, mask: { ...edit.mask, inverted: "yes" } } }),
+    /mask\.inverted/,
+  );
+});
+
+test("a mask's free transform is carried through untouched, and a broken one is refused", () => {
+  const crop = { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 };
+  const transform = { a: 1.5, b: 0.25, c: -0.25, d: 1.5, e: -40, f: 12 };
+  const edit = {
+    layerId: "edit_12345678",
+    operation: "create",
+    crop,
+    mask: { width: 1200, height: 800, softness: 20, transform, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+  };
+
+  // The client has already rasterised the mask, so this side only has to hand the
+  // matrix back so the layer the artist reopens is the one they transformed.
+  assert.deepEqual(normalizeStillImageOptions({ categoryId: "image-editing", edit }).edit?.mask.transform, transform);
+  assert.equal(
+    normalizeStillImageOptions({
+      categoryId: "image-editing",
+      edit: { ...edit, mask: { width: 1200, height: 800, softness: 20, strokes: [] } },
+    }).edit?.mask.transform,
+    undefined,
+  );
+
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, mask: { ...edit.mask, transform: { ...transform, a: 5_000 } } },
+      }),
+    /mask\.transform\.a/,
+  );
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, mask: { ...edit.mask, transform: { ...transform, f: Number.POSITIVE_INFINITY } } },
+      }),
+    /mask\.transform\.f/,
   );
 });

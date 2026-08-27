@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
+import type { Job } from "../../types";
+import { appendMaskStroke, createMaskDrawing } from "./maskDrawing";
 import { DEFAULT_STILL_IMAGE_RESULT_FILTERS } from "./resultFilters";
 import { createInitialStillImagesState } from "./stillImageCategories";
 import {
@@ -145,7 +147,176 @@ describe("useStillImagesForm", () => {
 
     expect(renderHook(() => useStillImagesForm()).result.current.selectedCategoryId).toBe("reference-generator");
   });
+
+  it("keeps a completed layer but resets the editor for the next mask", () => {
+    const form = renderHook(() => useStillImagesForm());
+    const mask = appendMaskStroke(createMaskDrawing(1200, 800), {
+      tool: "brush",
+      radius: 40,
+      points: [{ x: 300, y: 250 }],
+    });
+
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => {
+      form.result.current.setImages([{ id: "source", name: "source.png", url: "blob:source" }]);
+      form.result.current.setMask(mask);
+      form.result.current.setPrompt("replace the chair");
+      form.result.current.setEditReferences([{ id: "ref", name: "reference.png", url: "blob:reference" }]);
+    });
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+
+    expect(form.result.current.selectedState).toMatchObject({
+      activeEditLayerId: undefined,
+      mask: undefined,
+      prompt: "",
+      editReferences: [],
+    });
+    expect(form.result.current.selectedState.editLayers).toHaveLength(1);
+    expect(form.result.current.selectedState.editLayers?.[0]).toMatchObject({
+      id: "edit_layer_1",
+      prompt: "replace the chair",
+      visible: true,
+      status: "completed",
+      generatedCropSourceUrl: "/api/media?path=generated-v1.png",
+    });
+  });
+
+  it("resets to a new draft after regenerating without duplicating the layer", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => form.result.current.selectEditLayer("edit_layer_1"));
+    expect(form.result.current.selectedState.activeEditLayerId).toBe("edit_layer_1");
+
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v2.png", "regenerate")));
+
+    expect(form.result.current.selectedState.editLayers).toHaveLength(1);
+    expect(form.result.current.selectedState.editLayers?.[0]?.generatedCropSourceUrl).toBe("/api/media?path=generated-v2.png");
+    expect(form.result.current.selectedState).toMatchObject({
+      activeEditLayerId: undefined,
+      mask: undefined,
+      prompt: "",
+      editReferences: [],
+    });
+  });
+
+  it("arms the layer's pixels on selection and its mask only when the mask is asked for", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+
+    act(() => form.result.current.selectEditLayer("edit_layer_1"));
+    expect(form.result.current.selectedState.editTarget).toBe("content");
+
+    act(() => form.result.current.selectEditLayer("edit_layer_1", "mask"));
+    expect(form.result.current.selectedState.editTarget).toBe("mask");
+
+    act(() => form.result.current.setEditTarget("content"));
+    expect(form.result.current.selectedState.editTarget).toBe("content");
+  });
+
+  it("keeps opacity and the mask switch across a regeneration", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => {
+      form.result.current.setEditLayerOpacity("edit_layer_1", 35);
+      form.result.current.setEditLayerMaskEnabled("edit_layer_1", false);
+    });
+    act(() => form.result.current.selectEditLayer("edit_layer_1"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v2.png", "regenerate")));
+
+    // The new take replaces the pixels; how the artist had set the layer up is a
+    // property of the layer and survives.
+    expect(form.result.current.selectedState.editLayers?.[0]).toMatchObject({
+      generatedCropSourceUrl: "/api/media?path=generated-v2.png",
+      opacity: 35,
+      maskEnabled: false,
+    });
+  });
+
+  it("moves an unchained mask in the session draft as well as on the layer", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => form.result.current.selectEditLayer("edit_layer_1", "mask"));
+    act(() => form.result.current.setEditLayerMaskLinked("edit_layer_1", false));
+    act(() => form.result.current.moveEditLayerBy("edit_layer_1", "mask", { x: 40, y: -10 }));
+
+    const layer = form.result.current.selectedState.editLayers?.[0];
+    expect(layer?.mask.strokes[0].points).toEqual([{ x: 340, y: 240 }]);
+    // The editor is holding the same drawing, so it has to move with it or the
+    // next stroke lands against the position the mask used to be in.
+    expect(form.result.current.selectedState.mask).toBe(layer?.mask);
+  });
+
+  it("moves the whole layer, mask included, while the chain is on", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => form.result.current.selectEditLayer("edit_layer_1", "content"));
+    act(() => form.result.current.moveEditLayerBy("edit_layer_1", "content", { x: 12, y: 8 }));
+
+    const layer = form.result.current.selectedState.editLayers?.[0];
+    expect(layer?.offset).toEqual({ x: 12, y: 8 });
+    expect(layer?.mask.strokes[0].points).toEqual([{ x: 300, y: 250 }]);
+  });
+
+  it("duplicates a layer above its source without touching the selection", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => form.result.current.duplicateEditLayer("edit_layer_1"));
+
+    const layers = form.result.current.selectedState.editLayers ?? [];
+    expect(layers).toHaveLength(2);
+    expect(layers[1].name).toBe("Edit Layer 01 copy");
+    expect(layers[1].id).not.toBe("edit_layer_1");
+    expect(layers[1].generatedCropSourceUrl).toBe("/api/media?path=generated-v1.png");
+  });
 });
+
+function completedEditJob(generatedCropUrl: string, operation: "create" | "regenerate" = "create"): Job {
+  return {
+    id: `job_${operation}`,
+    projectId: "prj_1",
+    userId: "usr_1",
+    modelType: "Image Editing",
+    inputType: "multi_image",
+    prompt: "replace the chair",
+    resolution: "Unknown",
+    status: "completed",
+    inputImages: [],
+    resultUrl: `/api/jobs/job_${operation}/result-media?index=0`,
+    resultSourceUrls: [generatedCropUrl],
+    createdAt: "2026-08-27T08:00:00.000Z",
+    completedAt: "2026-08-27T08:01:00.000Z",
+    workflowOptions: {
+      stillImage: {
+        categoryId: "image-editing",
+        settings: {},
+        edit: {
+          layerId: "edit_layer_1",
+          operation,
+          mode: "inpaint",
+          documentId: "editdoc_12345678",
+          crop: { x: 100, y: 50, size: 400, sourceWidth: 1200, sourceHeight: 800 },
+          mask: appendMaskStroke(createMaskDrawing(1200, 800), {
+            tool: "brush",
+            radius: 40,
+            points: [{ x: 300, y: 250 }],
+          }),
+          originalSourceUrl: "/api/media?path=original.png",
+          maskSourceUrl: "/api/media?path=mask.png",
+          baseLayerIds: [],
+          baseLayers: [],
+          referenceSourceUrls: [],
+          generatedCropUrl,
+        },
+      },
+    },
+  };
+}
 
 describe("the results view across a reload", () => {
   it("starts unfiltered, in cards", () => {

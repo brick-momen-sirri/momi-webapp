@@ -1,8 +1,21 @@
 import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { Project, StillImageEditMode, UploadedImage } from "../types";
-import type { MaskDrawing } from "../features/still-images/maskDrawing";
-import { visibleEditLayers } from "../features/still-images/imageEditLayers";
+import {
+  clearMaskStrokes,
+  hasPaintedRegion,
+  invertMaskDrawing,
+  resetMaskTransform,
+  type MaskDrawing,
+  type MaskPoint,
+} from "../features/still-images/maskDrawing";
+import {
+  layerMaskEnabled,
+  layerMaskLinked,
+  layerOffset,
+  layerOpacity,
+  visibleEditLayers,
+} from "../features/still-images/imageEditLayers";
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
@@ -15,6 +28,7 @@ import {
   type StillImageCategoryDefinition,
   type StillImageCategoryId,
   type StillImageCategoryState,
+  type StillImageEditTarget,
   type StillImageSettingDefinition,
   type StillImageSettingValue,
 } from "../features/still-images/stillImageCategories";
@@ -42,10 +56,18 @@ type StillImagesSettingsPanelProps = {
   onSaveNumberChange: (value: string) => void;
   onGenerate: () => void;
   onNewEditLayer?: () => void;
-  onSelectEditLayer?: (layerId: string) => void;
+  onSelectEditLayer?: (layerId: string, target?: StillImageEditTarget) => void;
+  onEditTargetChange?: (target: StillImageEditTarget) => void;
   onToggleEditLayer?: (layerId: string) => void;
   onDeleteEditLayer?: (layerId: string) => void;
+  onDuplicateEditLayer?: (layerId: string) => void;
   onMoveEditLayer?: (layerId: string, direction: -1 | 1) => void;
+  onMoveEditLayerBy?: (layerId: string, target: StillImageEditTarget, delta: MaskPoint) => void;
+  onRenameEditLayer?: (layerId: string, name: string) => void;
+  onEditLayerOpacityChange?: (layerId: string, opacity: number) => void;
+  onEditLayerMaskEnabledChange?: (layerId: string, enabled: boolean) => void;
+  onEditLayerMaskLinkedChange?: (layerId: string, linked: boolean) => void;
+  onResetEditLayerOffset?: (layerId: string) => void;
   onEditModeChange?: (mode: StillImageEditMode) => void;
   onEditReferencesChange?: (references: UploadedImage[]) => void;
   onFinishEditing?: (drawing: MaskDrawing) => boolean | void | Promise<boolean | void>;
@@ -72,9 +94,17 @@ export function StillImagesSettingsPanel({
   onGenerate,
   onNewEditLayer = () => undefined,
   onSelectEditLayer = () => undefined,
+  onEditTargetChange = () => undefined,
   onToggleEditLayer = () => undefined,
   onDeleteEditLayer = () => undefined,
+  onDuplicateEditLayer = () => undefined,
   onMoveEditLayer = () => undefined,
+  onMoveEditLayerBy = () => undefined,
+  onRenameEditLayer = () => undefined,
+  onEditLayerOpacityChange = () => undefined,
+  onEditLayerMaskEnabledChange = () => undefined,
+  onEditLayerMaskLinkedChange = () => undefined,
+  onResetEditLayerOffset = () => undefined,
   onEditModeChange = () => undefined,
   onEditReferencesChange = () => undefined,
   onFinishEditing,
@@ -93,7 +123,7 @@ export function StillImagesSettingsPanel({
   const uploadSlotCount = paintsItsOwnSlots ? 1 : stillImageSlotCount(category, state);
   const slotLabels = stillImageSlotLabels(category, state);
   const requiredImagesReady = Array.from({ length: uploadSlotCount }, (_, index) => state.images[index]).every(Boolean);
-  const regionReady = !paintsItsOwnSlots || Boolean(state.mask?.strokes.length);
+  const regionReady = !paintsItsOwnSlots || hasPaintedRegion(state.mask);
   const readyToGenerate = requiredImagesReady && regionReady && Boolean(selectedProject);
   const editorPromptReady = Boolean(state.prompt.trim());
   const editorCanGenerate = readyToGenerate && editorPromptReady;
@@ -103,9 +133,28 @@ export function StillImagesSettingsPanel({
     Boolean(paintsItsOwnSlots && state.editLayers?.some((layer) => ["queued", "sending", "running"].includes(layer.status)));
   const editorProcessingLabel =
     (state.editMode ?? "inpaint") === "enhance" ? "Enhancing selected region" : "Inpainting selected region";
-  const activeLayerError = state.editLayers?.find(
-    (layer) => layer.id === state.activeEditLayerId && layer.status === "failed",
-  )?.errorMessage;
+  const activeLayer = state.editLayers?.find((layer) => layer.id === state.activeEditLayerId);
+  const activeLayerError = activeLayer?.status === "failed" ? activeLayer.errorMessage : undefined;
+  const editTarget: StillImageEditTarget = state.editTarget ?? "content";
+  // The editor is handed the selected layer as a small controlled bundle rather
+  // than the layer record: it needs to know what is armed and how to move it, and
+  // nothing else about how layers are stored.
+  const editorLayerContext =
+    paintsItsOwnSlots && activeLayer
+      ? {
+          layerId: activeLayer.id,
+          name: activeLayer.name,
+          target: editTarget,
+          crop: activeLayer.crop,
+          opacity: layerOpacity(activeLayer),
+          visible: activeLayer.visible,
+          maskEnabled: layerMaskEnabled(activeLayer),
+          maskLinked: layerMaskLinked(activeLayer),
+          offset: layerOffset(activeLayer),
+          onTargetChange: onEditTargetChange,
+          onMoveBy: (delta: MaskPoint) => onMoveEditLayerBy(activeLayer.id, editTarget, delta),
+        }
+      : undefined;
   const editorError = submitError ?? activeLayerError;
   const displayedSettings = visibleStillImageSettings(category, state).filter(
     (setting) => !(paintsItsOwnSlots && state.activeEditLayerId && setting.id === "variations"),
@@ -228,6 +277,7 @@ export function StillImagesSettingsPanel({
           image={state.images[0]}
           layers={compositeLayers}
           editorLayers={compositeLayers}
+          exportLayers={state.editLayers ?? []}
           drawing={state.mask}
           onChange={onMaskChange}
           onEditorDraftChange={onMaskChange}
@@ -237,28 +287,44 @@ export function StillImagesSettingsPanel({
           processing={editorProcessing}
           processingLabel={editorProcessingLabel}
           onFinish={onFinishEditing}
+          layerContext={editorLayerContext}
           leftPanel={
             <EditLayersPanel
               layers={state.editLayers ?? []}
               activeLayerId={state.activeEditLayerId}
+              activeTarget={editTarget}
               onNew={() => {
                 onNewEditLayer();
                 setRegionOpenRequest((request) => request + 1);
               }}
               onSelect={onSelectEditLayer}
-              onEditMask={(layerId) => {
-                onSelectEditLayer(layerId);
-                setRegionOpenRequest((request) => request + 1);
-              }}
               onToggle={onToggleEditLayer}
               onDelete={onDeleteEditLayer}
+              onDuplicate={onDuplicateEditLayer}
               onMove={onMoveEditLayer}
+              onRename={onRenameEditLayer}
+              onOpacityChange={onEditLayerOpacityChange}
+              onMaskEnabledChange={onEditLayerMaskEnabledChange}
+              onMaskLinkedChange={onEditLayerMaskLinkedChange}
+              onResetOffset={onResetEditLayerOffset}
+              onInvertMask={state.mask ? () => onMaskChange(invertMaskDrawing(state.mask as MaskDrawing)) : undefined}
+              onClearMask={state.mask ? () => onMaskChange(clearMaskStrokes(state.mask as MaskDrawing)) : undefined}
+              onResetMaskTransform={state.mask ? () => onMaskChange(resetMaskTransform(state.mask as MaskDrawing)) : undefined}
+              onRegenerate={activeLayer ? onGenerate : undefined}
+              canRegenerate={editorCanGenerate}
+              regenerateHint={
+                !selectedProject
+                  ? "Select a project before generating."
+                  : !editorPromptReady
+                    ? "Describe the edit first."
+                    : "Choose a region first."
+              }
               disabled={editorProcessing}
               processingLabel={editorProcessingLabel}
             />
           }
           floatingPanel={
-            state.mask?.strokes.length ? (
+            hasPaintedRegion(state.mask) ? (
               <EditActionPanel
                 mode={state.editMode ?? "inpaint"}
                 prompt={state.prompt}
@@ -527,6 +593,6 @@ function StillImageSettingField({ setting, value, onChange }: StillImageSettingF
  */
 function missingInput(imagesReady: boolean, regionReady: boolean) {
   if (!imagesReady) return "the required image input";
-  if (!regionReady) return "a painted region";
+  if (!regionReady) return "a painted or selected region";
   return "a project destination";
 }

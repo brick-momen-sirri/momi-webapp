@@ -1,6 +1,19 @@
 import type { Job, StillImageEditBaseLayer, StillImageEditCrop } from "../../types";
 import { resolveMediaUrl } from "../../services/api/mediaAccess";
-import { maskBlurPixels, type MaskDrawing, type MaskPoint } from "./maskDrawing";
+import {
+  boxCorners,
+  conjugateTransform,
+  maskBlurPixels,
+  maskGeometryBounds,
+  maskInverted,
+  maskTransform,
+  transformPoint,
+  translateMaskDrawing,
+  translationTransform,
+  type EditCropAspect,
+  type MaskDrawing,
+  type MaskPoint,
+} from "./maskDrawing";
 import type { StillImageCategoryState, StillImageEditLayer } from "./stillImageCategories";
 
 export const EDIT_CROP_PADDING_RATIO = 0.5;
@@ -16,7 +29,55 @@ export type EditLayerCompositeDescriptor = {
   mask?: MaskDrawing;
   maskSourceUrl?: string;
   revision?: number;
+  /** 0-100. Applied when the layer is composited, never baked into its pixels. */
+  opacity?: number;
+  /** Content displacement in original-image pixels. */
+  offset?: MaskPoint;
+  /** Mask displacement. Equal to offset while the mask is linked. */
+  maskOffset?: MaskPoint;
+  /** False keeps the mask but stops it hiding anything. */
+  maskEnabled?: boolean;
 };
+
+export const NO_LAYER_OFFSET: MaskPoint = { x: 0, y: 0 };
+
+export function layerOpacity(layer: { opacity?: number }) {
+  const opacity = layer.opacity === undefined ? 100 : layer.opacity;
+  return Math.min(100, Math.max(0, Math.round(opacity)));
+}
+
+export function layerOffset(layer: { offset?: MaskPoint }): MaskPoint {
+  return layer.offset ?? NO_LAYER_OFFSET;
+}
+
+export function layerMaskEnabled(layer: { maskEnabled?: boolean }) {
+  return layer.maskEnabled !== false;
+}
+
+export function layerMaskLinked(layer: { maskLinked?: boolean }) {
+  return layer.maskLinked !== false;
+}
+
+/**
+ * The mask exactly as it will be rasterised, for the paths that upload one.
+ *
+ * The wire format carries a layer's opacity and its position but has no field
+ * for a switched-off or unchained mask, so both are resolved into ordinary mask
+ * geometry here: disabled becomes a mask that hides nothing, and an unchained
+ * mask is written at its own position relative to the moved content. Doing it in
+ * one place is what keeps the uploaded PNG, the provider crop and the final
+ * composite describing the same picture.
+ */
+export function descriptorMaskDrawing(layer: EditLayerCompositeDescriptor): MaskDrawing | undefined {
+  if (!layer.mask) return undefined;
+  // Reveal the whole crop: an inverted mask with nothing painted is white.
+  if (layer.maskEnabled === false) {
+    return { ...layer.mask, selection: undefined, strokes: [], softness: 0, inverted: true };
+  }
+  const offset = layer.offset ?? NO_LAYER_OFFSET;
+  const maskOffset = layer.maskOffset ?? offset;
+  return translateMaskDrawing(layer.mask, maskOffset.x - offset.x, maskOffset.y - offset.y);
+}
 
 /**
  * A square crop around the supplied current mask coverage, in source pixels.
@@ -30,41 +91,77 @@ export function squareEditCrop(
   paddingRatio = EDIT_CROP_PADDING_RATIO,
   coverageBounds?: MaskBounds,
 ): StillImageEditCrop {
+  return aspectEditCrop(drawing, "1:1", paddingRatio, coverageBounds);
+}
+
+/** A source-pixel crop that fully contains the current mask at the chosen aspect. */
+export function aspectEditCrop(
+  drawing: MaskDrawing,
+  aspect: EditCropAspect,
+  paddingRatio = EDIT_CROP_PADDING_RATIO,
+  coverageBounds?: MaskBounds,
+): StillImageEditCrop {
   const bounds = coverageBounds ?? positiveStrokeBounds(drawing);
-  if (!bounds) throw new Error("Paint the region to edit before generating.");
+  if (!bounds) throw new Error("Paint or select the region to edit before generating.");
 
   const sourceWidth = positiveInteger(drawing.width);
   const sourceHeight = positiveInteger(drawing.height);
-  const maximumSquare = Math.min(sourceWidth, sourceHeight);
+  const [aspectWidth, aspectHeight] = aspect === "16:9" ? [16, 9] : aspect === "9:16" ? [9, 16] : [1, 1];
+  const maximumUnit = Math.min(Math.floor(sourceWidth / aspectWidth), Math.floor(sourceHeight / aspectHeight));
   const maskWidth = Math.max(1, bounds.right - bounds.left);
   const maskHeight = Math.max(1, bounds.bottom - bounds.top);
+  const minimumUnit = Math.ceil(Math.max(maskWidth / aspectWidth, maskHeight / aspectHeight));
 
-  // A square wholly inside a non-square source cannot contain a region wider or
-  // taller than its short edge. Failing explicitly is safer than silently sending
-  // only part of what the artist painted.
-  if (maskWidth > maximumSquare || maskHeight > maximumSquare) {
-    throw new Error("The painted region is too wide for a square crop on this image. Paint a smaller region and try again.");
+  // Failing explicitly is safer than silently clipping part of what the artist
+  // painted. Integer aspect units also keep a 16:9 crop exactly 16:9.
+  if (maximumUnit < 1 || minimumUnit > maximumUnit) {
+    if (aspect === "1:1") {
+      throw new Error(
+        "The selected region is too wide for a square crop on this image. Choose a smaller region or switch crop shape.",
+      );
+    }
+    throw new Error(
+      `The selected region is too wide or tall for a ${aspect} crop on this image. Choose a smaller region or switch to 1:1.`,
+    );
   }
 
-  const blur = maskBlurPixels(drawing.softness, sourceWidth, sourceHeight);
+  const blur = drawing.selection ? 0 : maskBlurPixels(drawing.softness, sourceWidth, sourceHeight);
   const subjectSize = Math.max(maskWidth, maskHeight);
-  const context = Math.max(subjectSize * Math.max(0, paddingRatio), maximumSquare * 0.04, blur * 2);
-  const size = Math.min(maximumSquare, Math.max(1, Math.ceil(subjectSize + context * 2)));
+  const context = Math.max(subjectSize * Math.max(0, paddingRatio), blur * 2);
+  const requestedUnit = Math.ceil(Math.max((maskWidth + context * 2) / aspectWidth, (maskHeight + context * 2) / aspectHeight));
+  const unit = Math.min(maximumUnit, Math.max(minimumUnit, requestedUnit));
+  const width = unit * aspectWidth;
+  const height = unit * aspectHeight;
   const centreX = (bounds.left + bounds.right) / 2;
   const centreY = (bounds.top + bounds.bottom) / 2;
-  const x = clampInteger(Math.round(centreX - size / 2), 0, sourceWidth - size);
-  const y = clampInteger(Math.round(centreY - size / 2), 0, sourceHeight - size);
+  const x = clampInteger(Math.round(centreX - width / 2), 0, sourceWidth - width);
+  const y = clampInteger(Math.round(centreY - height / 2), 0, sourceHeight - height);
 
-  return { x, y, size, sourceWidth, sourceHeight };
+  return { x, y, size: Math.max(width, height), width, height, sourceWidth, sourceHeight };
+}
+
+/** Dimensions of new rectangular crops, with a square fallback for saved edits. */
+export function editCropWidth(crop: StillImageEditCrop) {
+  return positiveInteger(crop.width ?? crop.size);
+}
+
+export function editCropHeight(crop: StillImageEditCrop) {
+  return positiveInteger(crop.height ?? crop.size);
 }
 
 /** Translate original-pixel strokes into the crop's pixel coordinate system. */
 export function drawingForCrop(drawing: MaskDrawing, crop: StillImageEditCrop): MaskDrawing {
   return {
     ...drawing,
-    width: crop.size,
-    height: crop.size,
+    width: editCropWidth(crop),
+    height: editCropHeight(crop),
     blurPixels: maskBlurPixels(drawing.softness, drawing.width, drawing.height),
+    // The points below move into the crop's coordinates, so a free transform
+    // written against the original's has to move with them.
+    transform: drawing.transform ? conjugateTransform(drawing.transform, translationTransform(-crop.x, -crop.y)) : undefined,
+    selection: drawing.selection
+      ? { ...drawing.selection, x: drawing.selection.x - crop.x, y: drawing.selection.y - crop.y }
+      : undefined,
     strokes: drawing.strokes.map((stroke) => ({
       ...stroke,
       points: stroke.points.map((point) => ({ x: point.x - crop.x, y: point.y - crop.y })),
@@ -153,6 +250,7 @@ export function baseRevisionId(layers: StillImageEditBaseLayer[]) {
 }
 
 function editLayerDescriptor(layer: StillImageEditLayer): EditLayerCompositeDescriptor {
+  const offset = layerOffset(layer);
   return {
     layerId: layer.id,
     crop: layer.crop,
@@ -161,6 +259,10 @@ function editLayerDescriptor(layer: StillImageEditLayer): EditLayerCompositeDesc
     mask: layer.mask,
     maskSourceUrl: layer.maskSourceUrl,
     revision: layer.revision,
+    opacity: layerOpacity(layer),
+    offset,
+    maskOffset: layerMaskLinked(layer) ? offset : NO_LAYER_OFFSET,
+    maskEnabled: layerMaskEnabled(layer),
   };
 }
 
@@ -171,33 +273,36 @@ function frozenLayerDescriptor(layer: StillImageEditBaseLayer): EditLayerComposi
     generatedCropSourceUrl: layer.generatedCropUrl,
     generatedCropUrl: resolveMediaUrl(layer.generatedCropUrl),
     maskSourceUrl: layer.maskSourceUrl,
+    opacity: layerOpacity(layer),
+    offset: layer.offset,
   };
 }
 
 function positiveStrokeBounds(drawing: MaskDrawing): MaskBounds | undefined {
-  let bounds: MaskBounds | undefined;
-  for (const stroke of drawing.strokes) {
-    if (stroke.tool === "eraser" || !stroke.points.length) continue;
-    const radius = stroke.tool === "lasso" ? 0 : Math.max(0, stroke.radius);
-    for (const point of stroke.points) bounds = includePoint(bounds, point, radius);
-  }
-  if (!bounds) return undefined;
+  // Inverting turns everything the artist did not paint into coverage, and the
+  // only bound that is certainly right for that is the whole image. Callers that
+  // can afford the raster pass supply exact coverageBounds instead.
+  if (maskInverted(drawing)) return { left: 0, top: 0, right: drawing.width, bottom: drawing.height };
+  const box = maskGeometryBounds(drawing);
+  if (!box) return undefined;
+
+  // A transformed mask occupies the upright box around its four carried corners.
+  // Wider than the shape itself when it is rotated, which is the safe direction:
+  // this is the fallback for callers with no raster, and a crop that is slightly
+  // too generous still contains everything the artist painted.
+  const transform = maskTransform(drawing);
+  const corners = boxCorners(box).map((corner) => transformPoint(transform, corner));
+  const bounds = {
+    left: Math.min(...corners.map((corner) => corner.x)),
+    top: Math.min(...corners.map((corner) => corner.y)),
+    right: Math.max(...corners.map((corner) => corner.x)),
+    bottom: Math.max(...corners.map((corner) => corner.y)),
+  };
   return {
     left: clamp(bounds.left, 0, drawing.width),
     top: clamp(bounds.top, 0, drawing.height),
     right: clamp(bounds.right, 0, drawing.width),
     bottom: clamp(bounds.bottom, 0, drawing.height),
-  };
-}
-
-function includePoint(bounds: MaskBounds | undefined, point: MaskPoint, radius: number): MaskBounds {
-  const next = { left: point.x - radius, top: point.y - radius, right: point.x + radius, bottom: point.y + radius };
-  if (!bounds) return next;
-  return {
-    left: Math.min(bounds.left, next.left),
-    top: Math.min(bounds.top, next.top),
-    right: Math.max(bounds.right, next.right),
-    bottom: Math.max(bounds.bottom, next.bottom),
   };
 }
 

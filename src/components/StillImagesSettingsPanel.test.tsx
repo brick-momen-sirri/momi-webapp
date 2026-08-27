@@ -117,7 +117,7 @@ describe("StillImagesSettingsPanel", () => {
     expect(screen.getByLabelText("Upload Source image")).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload Edit mask")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Upload Marked guide")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Current composite & mask" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current composite & region" })).toBeInTheDocument();
 
     // Mask settings and actions now live inside the full-screen studio rather
     // than leaking implementation slots into the sidebar uploader.

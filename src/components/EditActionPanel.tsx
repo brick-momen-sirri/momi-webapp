@@ -100,7 +100,7 @@ export function EditActionPanel({
           disabled={submitting}
           onChange={(event) => onPromptChange(event.target.value)}
           placeholder={
-            mode === "enhance" ? "Describe the detail or quality to improve…" : "Describe what should replace the masked area…"
+            mode === "enhance" ? "Describe the detail or quality to improve…" : "Describe what should replace the selected area…"
           }
           rows={3}
           className="mt-1.5 w-full resize-none rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-5 outline-none transition placeholder:text-stone-400 focus:border-accent focus:ring-2 focus:ring-accent/15 disabled:cursor-not-allowed disabled:bg-stone-50 disabled:text-stone-500"
@@ -179,7 +179,7 @@ export function EditActionPanel({
 
       {submitting ? (
         <p className="mt-2 text-[11px] font-medium leading-4 text-cyan-800" role="status" aria-live="polite">
-          This edit is processing. The mask and controls will unlock when the result is ready.
+          This edit is processing. The region and controls will unlock when the result is ready.
         </p>
       ) : error || disabledReason ? (
         <p

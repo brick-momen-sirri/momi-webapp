@@ -209,6 +209,7 @@ function normalizedImageEdit(value: unknown): StillImageEditOptions {
       crop: baseCrop,
       generatedCropUrl: mediaReference(layer.generatedCropUrl, `stillImage edit baseLayers[${index}].generatedCropUrl`),
       maskSourceUrl: mediaReference(layer.maskSourceUrl, `stillImage edit baseLayers[${index}].maskSourceUrl`),
+      ...normalizedLayerPlacement(layer, `stillImage edit baseLayers[${index}]`, baseCrop),
     };
   });
   if (
@@ -238,10 +239,22 @@ function normalizedCrop(value: unknown, label: string) {
   const crop = plainRecord(value, label);
   const sourceWidth = boundedWholeNumber(crop.sourceWidth, `${label}.sourceWidth`, 1, 100_000);
   const sourceHeight = boundedWholeNumber(crop.sourceHeight, `${label}.sourceHeight`, 1, 100_000);
-  const size = boundedWholeNumber(crop.size, `${label}.size`, 1, Math.min(sourceWidth, sourceHeight));
-  const x = boundedWholeNumber(crop.x, `${label}.x`, 0, sourceWidth - size);
-  const y = boundedWholeNumber(crop.y, `${label}.y`, 0, sourceHeight - size);
-  return { x, y, size, sourceWidth, sourceHeight };
+  const hasRectangularDimensions = crop.width !== undefined || crop.height !== undefined;
+  if (hasRectangularDimensions && (crop.width === undefined || crop.height === undefined)) {
+    throw new Error(`${label}.width and ${label}.height must be provided together.`);
+  }
+  const legacySize = hasRectangularDimensions
+    ? undefined
+    : boundedWholeNumber(crop.size, `${label}.size`, 1, Math.min(sourceWidth, sourceHeight));
+  const width = hasRectangularDimensions
+    ? boundedWholeNumber(crop.width, `${label}.width`, 1, sourceWidth)
+    : (legacySize as number);
+  const height = hasRectangularDimensions
+    ? boundedWholeNumber(crop.height, `${label}.height`, 1, sourceHeight)
+    : (legacySize as number);
+  const x = boundedWholeNumber(crop.x, `${label}.x`, 0, sourceWidth - width);
+  const y = boundedWholeNumber(crop.y, `${label}.y`, 0, sourceHeight - height);
+  return { x, y, size: Math.max(width, height), width, height, sourceWidth, sourceHeight };
 }
 
 function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>) {
@@ -252,6 +265,23 @@ function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>)
     throw new Error("stillImage edit mask dimensions must match the original image dimensions.");
   }
   const softness = boundedWholeNumber(mask.softness, "stillImage edit mask.softness", 0, 100);
+  const cropMargin =
+    mask.cropMargin === undefined ? undefined : boundedWholeNumber(mask.cropMargin, "stillImage edit mask.cropMargin", 0, 100);
+  if (mask.cropAspect !== undefined && mask.cropAspect !== "1:1" && mask.cropAspect !== "16:9" && mask.cropAspect !== "9:16") {
+    throw new Error("stillImage edit mask.cropAspect must be 1:1, 16:9, or 9:16.");
+  }
+  let selection: StillImageEditOptions["mask"]["selection"];
+  if (mask.selection !== undefined) {
+    const rectangle = plainRecord(mask.selection, "stillImage edit mask.selection");
+    const x = boundedWholeNumber(rectangle.x, "stillImage edit mask.selection.x", 0, width - 1);
+    const y = boundedWholeNumber(rectangle.y, "stillImage edit mask.selection.y", 0, height - 1);
+    selection = {
+      x,
+      y,
+      width: boundedWholeNumber(rectangle.width, "stillImage edit mask.selection.width", 1, width - x),
+      height: boundedWholeNumber(rectangle.height, "stillImage edit mask.selection.height", 1, height - y),
+    };
+  }
   if (!Array.isArray(mask.strokes) || mask.strokes.length > 10_000) {
     throw new Error("stillImage edit mask.strokes must be an array with at most 10000 entries.");
   }
@@ -276,7 +306,66 @@ function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>)
     });
     return { tool: stroke.tool as StillImageEditOptions["mask"]["strokes"][number]["tool"], radius, points };
   });
-  return { width, height, softness, strokes };
+  if (selection && strokes.length) {
+    throw new Error("stillImage edit mask must use either a rectangle selection or painted strokes, not both.");
+  }
+  if (mask.inverted !== undefined && typeof mask.inverted !== "boolean") {
+    throw new Error("stillImage edit mask.inverted must be a boolean.");
+  }
+  const transform = normalizedMaskTransform(mask.transform);
+  return {
+    width,
+    height,
+    softness,
+    ...(cropMargin === undefined ? {} : { cropMargin }),
+    ...(mask.cropAspect === undefined ? {} : { cropAspect: mask.cropAspect as "1:1" | "16:9" | "9:16" }),
+    ...(selection === undefined ? {} : { selection }),
+    ...(mask.inverted ? { inverted: true } : {}),
+    ...(transform === undefined ? {} : { transform }),
+    strokes,
+  };
+}
+
+/**
+ * The mask's free transform, carried through untouched.
+ *
+ * The client rasterises the mask before it uploads it, so nothing on this side
+ * ever applies this -- it exists so that the layer the artist gets back is still
+ * the layer they transformed. Bounded all the same: it is a matrix from a
+ * request, and an infinity in it would reach a canvas eventually.
+ */
+function normalizedMaskTransform(value: unknown) {
+  if (value === undefined) return undefined;
+  const transform = plainRecord(value, "stillImage edit mask.transform");
+  const scale = (key: "a" | "b" | "c" | "d") =>
+    finiteNumber(transform[key], `stillImage edit mask.transform.${key}`, -1_000, 1_000);
+  const offset = (key: "e" | "f") => finiteNumber(transform[key], `stillImage edit mask.transform.${key}`, -1_000_000, 1_000_000);
+  return { a: scale("a"), b: scale("b"), c: scale("c"), d: scale("d"), e: offset("e"), f: offset("f") };
+}
+
+/**
+ * A layer's opacity and its displacement, as the composite step needs them.
+ *
+ * Both are optional and both default to "exactly where and how it was
+ * generated", so an older client that sends neither still composites the way it
+ * always did. The displacement is bounded by the source rather than by the crop:
+ * a layer may legitimately be dragged clear off the canvas, and the compositor
+ * clips it rather than refusing it.
+ */
+function normalizedLayerPlacement(layer: Record<string, unknown>, label: string, crop: ReturnType<typeof normalizedCrop>) {
+  const opacity = layer.opacity === undefined ? undefined : boundedWholeNumber(layer.opacity, `${label}.opacity`, 0, 100);
+  let offset: { x: number; y: number } | undefined;
+  if (layer.offset !== undefined) {
+    const point = plainRecord(layer.offset, `${label}.offset`);
+    offset = {
+      x: boundedWholeNumber(point.x, `${label}.offset.x`, -crop.sourceWidth, crop.sourceWidth),
+      y: boundedWholeNumber(point.y, `${label}.offset.y`, -crop.sourceHeight, crop.sourceHeight),
+    };
+  }
+  return {
+    ...(opacity === undefined || opacity === 100 ? {} : { opacity }),
+    ...(offset === undefined || (offset.x === 0 && offset.y === 0) ? {} : { offset }),
+  };
 }
 
 function boundedIdentifier(value: unknown, label: string) {
