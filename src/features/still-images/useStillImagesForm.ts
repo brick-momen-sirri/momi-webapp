@@ -14,6 +14,7 @@ import {
   setEditLayerOpacity as setLayerOpacityInList,
   resetEditLayerOffset as resetLayerOffsetInList,
 } from "./editLayerActions";
+import type { RestoredEditDocument } from "./editDocument";
 import { baseRevisionId } from "./imageEditLayers";
 import type { MaskDrawing, MaskPoint } from "./maskDrawing";
 import { normalizeStillImageSeedInput } from "./seed";
@@ -196,6 +197,48 @@ export function useStillImagesForm() {
                 editTarget: undefined,
               }
             : {}),
+        },
+      };
+    });
+  }
+
+  /**
+   * Open a document rebuilt from its jobs.
+   *
+   * Everything the session was holding for Image Editing is replaced, because a
+   * document is the unit here -- half of one stack layered over half of another
+   * would composite into something nobody asked for. The original goes back into
+   * slot 1 as saved media rather than a blob, which is what lets a reopened
+   * document be edited, regenerated and finalized exactly like a fresh one.
+   */
+  function openEditDocument(document: RestoredEditDocument) {
+    setSelectedCategoryId("image-editing");
+    setStateByCategory((current) => {
+      const state = current["image-editing"];
+      state.images.forEach(revokeImageObjectUrls);
+      state.editReferences?.forEach(revokeImageObjectUrls);
+      return {
+        ...current,
+        "image-editing": {
+          ...state,
+          images: [
+            {
+              id: createClientId("editdoc_source_"),
+              name: "Original image",
+              url: document.originalSourceUrl,
+              previewUrl: resolveMediaUrl(document.originalSourceUrl),
+            },
+          ],
+          editLayers: document.layers,
+          editDocumentId: document.documentId,
+          editOriginalSourceUrl: document.originalSourceUrl,
+          // Reopened on the composite, with nothing selected and no region
+          // painted: the same state finishing an edit leaves behind.
+          activeEditLayerId: undefined,
+          editTarget: undefined,
+          mask: undefined,
+          editMode: "inpaint" as const,
+          editReferences: [],
         },
       };
     });
@@ -497,6 +540,7 @@ export function useStillImagesForm() {
     setSaveNumber,
     loadCategoryState,
     useResultAsInput,
+    openEditDocument,
     startNewEditLayer,
     selectEditLayer,
     setEditTarget,

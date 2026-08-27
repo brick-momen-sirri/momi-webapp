@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 import type { Job } from "../../types";
+import { restoreEditDocument } from "./editDocument";
 import { appendMaskStroke, createMaskDrawing } from "./maskDrawing";
 import { DEFAULT_STILL_IMAGE_RESULT_FILTERS } from "./resultFilters";
 import { createInitialStillImagesState } from "./stillImageCategories";
@@ -286,6 +287,36 @@ describe("useStillImagesForm", () => {
     });
   });
 
+  it("opens a rebuilt document over whatever the editor was holding", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    // Something half-done, which reopening a document must replace outright
+    // rather than layer itself over.
+    act(() => {
+      form.result.current.setImages([{ id: "stale", name: "stale.png", url: "blob:stale" }]);
+      form.result.current.setPrompt("half-typed");
+    });
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=stale.png")));
+
+    const restored = restoreEditDocument(
+      [reopenableEditJob("edit_alpha", "2026-08-27T10:00:00.000Z"), reopenableEditJob("edit_beta", "2026-08-27T11:00:00.000Z")],
+      "editdoc_reopened",
+    );
+    act(() => form.result.current.openEditDocument(restored!));
+
+    const state = form.result.current.selectedState;
+    expect(form.result.current.selectedCategoryId).toBe("image-editing");
+    expect(state.editDocumentId).toBe("editdoc_reopened");
+    expect(state.editLayers?.map((layer) => layer.id)).toEqual(["edit_alpha", "edit_beta"]);
+    expect(state.editOriginalSourceUrl).toBe("/api/media?path=reopened-original.png");
+    // The original goes back into slot 1 as saved media, which is what lets the
+    // reopened document be regenerated and finalized like a fresh one.
+    expect(state.images).toHaveLength(1);
+    expect(state.images[0].url).toBe("/api/media?path=reopened-original.png");
+    // And it opens on the composite, with nothing armed.
+    expect(state).toMatchObject({ activeEditLayerId: undefined, mask: undefined, editTarget: undefined });
+  });
+
   it("duplicates a layer above its source without touching the selection", () => {
     const form = renderHook(() => useStillImagesForm());
     act(() => form.result.current.setSelectedCategoryId("image-editing"));
@@ -395,3 +426,40 @@ describe("the results view across a reload", () => {
     expect(readPersistedStillImageResultView()).toEqual({ filters: DEFAULT_STILL_IMAGE_RESULT_FILTERS, layout: "list" });
   });
 });
+
+/** A completed layer job belonging to a document that is not the session's. */
+function reopenableEditJob(layerId: string, at: string): Job {
+  return {
+    id: `job_${layerId}`,
+    projectId: "prj_1",
+    userId: "usr_1",
+    modelType: "Image Editing",
+    inputType: "multi_image",
+    prompt: layerId,
+    resolution: "Unknown",
+    status: "completed",
+    inputImages: [],
+    createdAt: at,
+    completedAt: at,
+    workflowOptions: {
+      stillImage: {
+        categoryId: "image-editing",
+        settings: {},
+        edit: {
+          layerId,
+          operation: "create",
+          mode: "inpaint",
+          documentId: "editdoc_reopened",
+          crop: { x: 0, y: 0, size: 100, width: 100, height: 100, sourceWidth: 1200, sourceHeight: 800 },
+          mask: { width: 1200, height: 800, softness: 35, strokes: [] },
+          originalSourceUrl: "/api/media?path=reopened-original.png",
+          maskSourceUrl: `/api/media?path=${layerId}-mask.png`,
+          baseLayerIds: [],
+          baseLayers: [],
+          referenceSourceUrls: [],
+          generatedCropUrl: `/api/media?path=${layerId}-crop.png`,
+        },
+      },
+    },
+  } as Job;
+}

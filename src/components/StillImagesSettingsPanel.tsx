@@ -76,6 +76,8 @@ type StillImagesSettingsPanelProps = {
   onEditReferencesChange?: (references: UploadedImage[]) => void;
   onFinishEditing?: (drawing: MaskDrawing) => boolean | void | Promise<boolean | void>;
   finishingEdit?: boolean;
+  /** Bumped by the caller to open the full editor -- reopening a document does. */
+  openEditorRequest?: number;
   submitting?: boolean;
   submitError?: string;
 };
@@ -115,10 +117,15 @@ export function StillImagesSettingsPanel({
   onEditReferencesChange = () => undefined,
   onFinishEditing,
   finishingEdit = false,
+  openEditorRequest = 0,
   submitting = false,
   submitError,
 }: StillImagesSettingsPanelProps) {
   const [regionOpenRequest, setRegionOpenRequest] = useState(0);
+  // The panel opens the editor for its own reasons (a fresh upload, "New edit")
+  // and the caller has one of its own, so the request the field sees is the sum
+  // rather than either alone.
+  const editorOpenRequest = regionOpenRequest + openEditorRequest;
   const CategoryIcon = category.icon;
   const showPrompt = shouldShowStillImagePrompt(category, state);
   const modeGuidance = stillImageModeGuidance(category, state);
@@ -317,7 +324,7 @@ export function StillImagesSettingsPanel({
           drawing={state.mask}
           onChange={onMaskChange}
           onEditorDraftChange={onMaskChange}
-          openRequest={regionOpenRequest}
+          openRequest={editorOpenRequest}
           // Keyed by the document, not the selected layer. A layer selection swaps
           // the drawing the editor is holding -- which it already adopts through
           // its own effect -- so remounting for one would only throw away the zoom

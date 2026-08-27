@@ -8,6 +8,7 @@ import {
   Hash,
   ImageIcon,
   Images,
+  Layers3,
   Maximize2,
   Search,
   Star,
@@ -76,6 +77,14 @@ type StillImagesWorkspaceProps = {
   canReuseSettings?: (job: Job) => boolean;
   /** Chain this result into another preset as its first input. */
   onUseAsInput?: (job: Job, categoryId: StillImageCategoryId) => void;
+  /**
+   * Reopen the layer stack this composite was flattened from.
+   *
+   * Offered only where a document can actually be rebuilt, which the caller
+   * decides -- the jobs have to still be loaded for there to be a stack.
+   */
+  onContinueEditing?: (job: Job) => void;
+  canContinueEditing?: (job: Job) => boolean;
   onDownload?: (job: Job) => void;
   onCopyImage?: (job: Job) => void;
   onReuseSettings?: (job: Job) => void;
@@ -554,6 +563,7 @@ function StillImageJobCard({
               job={job}
               url={resultUrl}
               onUseAsInput={actions.onUseAsInput}
+              onContinueEditing={actions.canContinueEditing?.(job) ? actions.onContinueEditing : undefined}
               chainDisabledReason={chainBlockedReason(job, selectedProject)}
             />
           ) : isJobWorking(job.status) ? (
@@ -679,11 +689,13 @@ function StillImageResult({
   job,
   url,
   onUseAsInput,
+  onContinueEditing,
   chainDisabledReason,
 }: {
   job: Job;
   url: string;
   onUseAsInput?: (job: Job, categoryId: StillImageCategoryId) => void;
+  onContinueEditing?: (job: Job) => void;
   chainDisabledReason?: string;
 }) {
   const [containerRef, inView] = useNearViewport<HTMLDivElement>();
@@ -725,6 +737,20 @@ function StillImageResult({
         {/* Chaining costs nothing: the result is already saved project media, so
             the next job is submitted against the same path on disk rather than a
             re-upload of a file that never left the server. */}
+        {onContinueEditing ? (
+          // Distinct from chaining: chaining takes the flattened picture as a new
+          // original, which bakes every layer in. This reopens the stack itself,
+          // so an opacity or a mask set an hour ago is still adjustable.
+          <button
+            type="button"
+            onClick={() => onContinueEditing(job)}
+            title="Reopen this composite's layer stack for further editing"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-white/95 px-2.5 text-xs font-bold text-accent shadow-card transition hover:bg-cyan-50"
+          >
+            <Layers3 className="h-3.5 w-3.5" />
+            Continue editing
+          </button>
+        ) : null}
         {onUseAsInput ? (
           <UseAsInputMenu onSelect={(categoryId) => onUseAsInput(job, categoryId)} disabledReason={chainDisabledReason} />
         ) : null}
