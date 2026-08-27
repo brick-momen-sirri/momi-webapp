@@ -55,6 +55,7 @@ import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } fro
 import { chainableResultImage } from "./features/still-images/chainResult";
 import { finalizeImageEdit } from "./features/still-images/finalizeImageEdit";
 import { editDocumentIdOfJob, restoreEditDocument } from "./features/still-images/editDocument";
+import { fetchBackendEditDocumentJobs } from "./services/backendApi";
 import { layersWithJobs } from "./features/still-images/imageEditLayers";
 import type { MaskDrawing } from "./features/still-images/maskDrawing";
 import { isStillImageJob } from "./features/still-images/jobSection";
@@ -273,6 +274,7 @@ function App() {
   });
   const [finishingStillImageEdit, setFinishingStillImageEdit] = useState(false);
   const [stillImageEditorOpenRequest, setStillImageEditorOpenRequest] = useState(0);
+  const [reopeningEditDocument, setReopeningEditDocument] = useState<string | undefined>(undefined);
   const handleStillImagesGenerate = () => {
     if (!selectedProjectId) return;
     void stillImagesSubmission.submit({
@@ -409,42 +411,43 @@ function App() {
    * downloading a 100 MB PNG and uploading it back.
    */
   /**
-   * Which documents could be reopened from what is currently loaded.
+   * Offered for anything that records the document it came from.
    *
-   * Counted rather than rebuilt, because this runs on every job change and the
-   * rebuild only has to happen when somebody actually clicks. A document whose
-   * layer jobs have fallen off the loaded page cannot be reopened, and the
-   * button is not offered rather than failing after the click.
+   * No longer gated on the layer jobs being loaded: they are fetched by id when
+   * the button is pressed, so a composite finished months ago reopens exactly
+   * like one finished a minute ago.
    */
-  const reopenableEditDocuments = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const job of jobs) {
-      const edit = job.workflowOptions?.stillImage?.edit;
-      if (!edit?.documentId || !edit.generatedCropUrl) continue;
-      counts.set(edit.documentId, (counts.get(edit.documentId) ?? 0) + 1);
-    }
-    return counts;
-  }, [jobs]);
-
   function canContinueEditingComposite(job: Job) {
-    const documentId = editDocumentIdOfJob(job);
-    return Boolean(documentId && reopenableEditDocuments.has(documentId));
+    return Boolean(editDocumentIdOfJob(job));
   }
 
-  function handleContinueEditingComposite(job: Job) {
+  async function handleContinueEditingComposite(job: Job) {
     const documentId = editDocumentIdOfJob(job);
-    const document = documentId ? restoreEditDocument(jobs, documentId) : undefined;
-    if (!document) {
-      showToast("The layers for this composite are no longer loaded. Open the project's earlier results first.", "info");
-      return;
+    if (!documentId) return;
+
+    setReopeningEditDocument(documentId);
+    try {
+      // What is already loaded is used first: for a composite finished in this
+      // session that is every layer, and it saves a round trip. The fetch is for
+      // everything older than the page the browser happens to be holding.
+      const restored =
+        restoreEditDocument(jobs, documentId) ?? restoreEditDocument(await fetchBackendEditDocumentJobs(documentId), documentId);
+      if (!restored) {
+        showToast("This composite has no editable layers left to reopen.", "info");
+        return;
+      }
+      stillImagesForm.openEditDocument(restored);
+      setStillImageEditorOpenRequest((request) => request + 1);
+      const count = restored.layers.length;
+      showToast(
+        `Reopened ${count} layer${count === 1 ? "" : "s"}${restored.inferredOrder ? " — check the stacking order" : ""}.`,
+        "success",
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not load this composite's layers.", "error");
+    } finally {
+      setReopeningEditDocument(undefined);
     }
-    stillImagesForm.openEditDocument(document);
-    setStillImageEditorOpenRequest((request) => request + 1);
-    const count = document.layers.length;
-    showToast(
-      `Reopened ${count} layer${count === 1 ? "" : "s"}${document.inferredOrder ? " — check the stacking order" : ""}.`,
-      "success",
-    );
   }
 
   function handleUseStillResultAsInput(job: Job, categoryId: StillImageCategoryId) {
@@ -710,8 +713,9 @@ function App() {
               // canReuseJobSettings looks for.
               canReuseSettings={(job) => Boolean(reusableStillImageJob(job))}
               onUseAsInput={handleUseStillResultAsInput}
-              onContinueEditing={handleContinueEditingComposite}
+              onContinueEditing={(job) => void handleContinueEditingComposite(job)}
               canContinueEditing={canContinueEditingComposite}
+              reopeningEditDocument={reopeningEditDocument}
               onDownload={handleDownloadJobResult}
               onCopyImage={handleCopyJobImage}
               onReuseSettings={handleReuseJobSettings}

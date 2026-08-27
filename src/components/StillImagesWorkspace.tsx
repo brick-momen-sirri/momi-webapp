@@ -9,6 +9,7 @@ import {
   ImageIcon,
   Images,
   Layers3,
+  LoaderCircle,
   Maximize2,
   Search,
   Star,
@@ -85,6 +86,8 @@ type StillImagesWorkspaceProps = {
    */
   onContinueEditing?: (job: Job) => void;
   canContinueEditing?: (job: Job) => boolean;
+  /** The document being fetched, so its own button can say so. */
+  reopeningEditDocument?: string;
   onDownload?: (job: Job) => void;
   onCopyImage?: (job: Job) => void;
   onReuseSettings?: (job: Job) => void;
@@ -564,6 +567,10 @@ function StillImageJobCard({
               url={resultUrl}
               onUseAsInput={actions.onUseAsInput}
               onContinueEditing={actions.canContinueEditing?.(job) ? actions.onContinueEditing : undefined}
+              reopening={
+                actions.reopeningEditDocument !== undefined &&
+                actions.reopeningEditDocument === job.workflowOptions?.stillImage?.settings?.documentId
+              }
               chainDisabledReason={chainBlockedReason(job, selectedProject)}
             />
           ) : isJobWorking(job.status) ? (
@@ -690,12 +697,14 @@ function StillImageResult({
   url,
   onUseAsInput,
   onContinueEditing,
+  reopening = false,
   chainDisabledReason,
 }: {
   job: Job;
   url: string;
   onUseAsInput?: (job: Job, categoryId: StillImageCategoryId) => void;
   onContinueEditing?: (job: Job) => void;
+  reopening?: boolean;
   chainDisabledReason?: string;
 }) {
   const [containerRef, inView] = useNearViewport<HTMLDivElement>();
@@ -744,11 +753,12 @@ function StillImageResult({
           <button
             type="button"
             onClick={() => onContinueEditing(job)}
+            disabled={reopening}
             title="Reopen this composite's layer stack for further editing"
-            className="flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-white/95 px-2.5 text-xs font-bold text-accent shadow-card transition hover:bg-cyan-50"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-white/95 px-2.5 text-xs font-bold text-accent shadow-card transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60"
           >
-            <Layers3 className="h-3.5 w-3.5" />
-            Continue editing
+            {reopening ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Layers3 className="h-3.5 w-3.5" />}
+            {reopening ? "Opening…" : "Continue editing"}
           </button>
         ) : null}
         {onUseAsInput ? (

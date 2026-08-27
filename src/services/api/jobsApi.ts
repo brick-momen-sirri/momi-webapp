@@ -65,6 +65,18 @@ export async function createBackendJob(
   return { job: mapJob(data.job), replayed: data.replayed === true };
 }
 
+/**
+ * Every layer job of one editing session, straight from the store.
+ *
+ * Reopening a document used to depend on those jobs happening to be on the page
+ * the browser had loaded, which made whether a composite could be worked on
+ * again a question about pagination. This asks for them by name instead.
+ */
+export async function fetchBackendEditDocumentJobs(documentId: string) {
+  const data = await apiRequest<{ jobs: BackendJob[] }>(`/api/still-image-edits/${encodeURIComponent(documentId)}/jobs`);
+  return data.jobs.map(mapJob);
+}
+
 export async function finalizeBackendStillImageEdit(payload: {
   projectId: string;
   targetFolderId?: string | null;

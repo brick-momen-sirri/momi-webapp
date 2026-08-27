@@ -747,3 +747,80 @@ function resolutionFor(value: string) {
   assert.ok(Number.isFinite(width) && Number.isFinite(height), `unsupported test resolution: ${value}`);
   return { width, height, label: value };
 }
+
+test("an edit document's layer jobs are fetchable by id, scoped to who may see them", async () => {
+  // The reopen path does not care whether these jobs are on the page the browser
+  // happens to have loaded, which is the whole point of asking by id.
+  const job = jobQueue.getJob(createdJobId);
+  assert.ok(job);
+  job.workflowOptions = {
+    ...job.workflowOptions,
+    stillImage: {
+      categoryId: "image-editing",
+      settings: {},
+      edit: {
+        layerId: "edit_route_test_1",
+        operation: "create",
+        mode: "inpaint",
+        documentId: "editdoc_route_test",
+        crop: { x: 0, y: 0, size: 64, width: 64, height: 64, sourceWidth: 256, sourceHeight: 256 },
+        mask: { width: 256, height: 256, softness: 35, strokes: [] },
+        originalSourceUrl: "/api/media?path=original.png",
+        maskSourceUrl: "/api/media?path=mask.png",
+        baseLayerIds: [],
+        baseLayers: [],
+        referenceSourceUrls: [],
+        generatedCropUrl: "/api/media?path=crop.png",
+      },
+    },
+  } as typeof job.workflowOptions;
+
+  const found = await asAdmin("GET", "/api/still-image-edits/editdoc_route_test/jobs");
+  assert.equal(found.status, 200, found.text);
+  const returned = (found.body as { jobs?: Array<{ id?: string }> }).jobs ?? [];
+  assert.equal(returned.length, 1);
+  assert.equal(returned[0].id, createdJobId);
+
+  // A document nobody has is an empty list, not an error -- the client turns that
+  // into "no editable layers left" rather than a failure.
+  const empty = await asAdmin("GET", "/api/still-image-edits/editdoc_does_not_exist/jobs");
+  assert.equal(empty.status, 200, empty.text);
+  assert.deepEqual((empty.body as { jobs?: unknown[] }).jobs, []);
+
+  // An id that could not have been minted here is refused before any scan.
+  const malformed = await asAdmin("GET", "/api/still-image-edits/..%2Fetc/jobs");
+  assert.equal(malformed.status, 400, malformed.text);
+
+  // Scoping follows the job, which means it follows the project. Moved onto a
+  // private project, the same document is still the admin's to reopen and is
+  // invisible to an unrelated account -- an empty list rather than a 403, so a
+  // stranger cannot tell a document they may not see from one that never existed.
+  const sealed = await asAdmin("POST", "/api/projects", {
+    name: "Sealed Edits",
+    shortName: "4322",
+    client: "Acme",
+    visibility: "private",
+  });
+  assert.equal(sealed.status, 201, sealed.text);
+  job.projectId = String((sealed.body as { project?: { id?: string } }).project?.id);
+  job.userId = "usr_someone_else";
+
+  const intruder = await authService.createUser({
+    email: "edit-doc-intruder@example.com",
+    name: "Edit Doc Intruder",
+    password: "IntruderPass1",
+    role: "user",
+  });
+  assert.ok(intruder.id);
+  const login = await call("POST", "/api/auth/login", {
+    body: { email: "edit-doc-intruder@example.com", password: "IntruderPass1" },
+  });
+  const intruderToken = String((login.body as { token?: string }).token);
+
+  const blocked = await call("GET", "/api/still-image-edits/editdoc_route_test/jobs", { token: intruderToken });
+  assert.equal(blocked.status, 200, blocked.text);
+  assert.deepEqual((blocked.body as { jobs?: unknown[] }).jobs, []);
+
+  const stillVisible = await asAdmin("GET", "/api/still-image-edits/editdoc_route_test/jobs");
+  assert.equal(((stillVisible.body as { jobs?: unknown[] }).jobs ?? []).length, 1);
+});

@@ -24,6 +24,7 @@ import {
   createJobIdempotent,
   getJob,
   getJobFromAnySource,
+  getJobs,
   getJobsWithExistingMedia,
   permanentlyDeleteArchivedJob,
   restoreArchivedJob,
@@ -86,6 +87,49 @@ jobRouter.post(
     createJob: createJobIdempotent,
   }),
 );
+
+/**
+ * A ceiling on one response. Each layer carries its own mask geometry, which for
+ * a heavily painted layer is thousands of points, so an unbounded document could
+ * be tens of megabytes. Two hundred layers is far past any real session.
+ */
+const MAX_EDIT_DOCUMENT_JOBS = 200;
+
+/**
+ * Every layer job belonging to one editing session.
+ *
+ * The browser can only reopen a document whose layer jobs happen to be on the
+ * page it has loaded, which makes "can I keep working on this?" a question about
+ * pagination rather than about the work. This answers it from the store instead.
+ *
+ * A filter over the in-memory job list rather than a query: the layer jobs are
+ * already resident, `documentId` lives inside the JSON blob with no column or
+ * index behind it, and this runs once when somebody clicks a button. Adding a
+ * generated column to make an occasional scan of a few hundred rows faster would
+ * be paying schema complexity for nothing.
+ */
+jobRouter.get("/api/still-image-edits/:documentId/jobs", (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    const documentId = req.params.documentId;
+    if (!/^[A-Za-z0-9_-]{8,200}$/.test(documentId)) {
+      return res.status(400).json({ error: "Edit document id is invalid." });
+    }
+
+    const jobs = getJobs()
+      .filter((job) => job.workflowOptions?.stillImage?.edit?.documentId === documentId && canAccessJob(user, job))
+      // Oldest first, which is the order the layers were created in and the
+      // order the client's reconstruction expects to reason about.
+      .sort((left, right) => (left.createdAt ?? "").localeCompare(right.createdAt ?? ""))
+      .slice(0, MAX_EDIT_DOCUMENT_JOBS);
+
+    res.json({ jobs });
+  } catch (error) {
+    res.status(httpStatusFromError(error, 400)).json({
+      error: error instanceof Error ? error.message : "Could not load this edit document.",
+    });
+  }
+});
 
 jobRouter.post("/api/still-image-edits/finalize", async (req, res) => {
   try {
