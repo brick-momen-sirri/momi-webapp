@@ -41,6 +41,8 @@ import {
   backupStagingDir,
   backupAzureSasUrl,
   backupAzurePrefix,
+  backupMirrorDir,
+  backupMirrorRetentionCount,
   azcopyPath,
   mediaBackupEnabled,
   localProjectsRoot,
@@ -226,6 +228,8 @@ async function boot() {
                 })
             : undefined,
         mediaSourceDir: localProjectsRoot,
+        mirrorDir: backupMirrorDir || undefined,
+        mirrorRetention: backupMirrorRetentionCount,
         role: backendProcessRole,
         webhookUrl: alertWebhookUrl || undefined,
         webhookFormat: alertWebhookFormat,

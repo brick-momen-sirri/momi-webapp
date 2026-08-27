@@ -391,6 +391,19 @@ export const backupStagingDir = process.env.SQLITE_BACKUP_STAGING_DIR?.trim() ||
 // Never logged. Empty = local snapshots only (no offsite leg).
 export const backupAzureSasUrl = process.env.BACKUP_AZURE_SAS_URL?.trim() || "";
 export const backupAzurePrefix = process.env.BACKUP_AZURE_PREFIX?.trim() || "momi-backend";
+
+// A second offsite leg for the database snapshots: any filesystem path whose
+// failure is uncorrelated with the Azure account -- a network share, a second
+// physical disk. Empty disables it. Added 2026-08-27, after the momiai storage
+// account was disabled for a billing reason and took the only offsite copy with
+// it. See backupMirrorService.ts for why this covers databases and not media.
+export const backupMirrorDir = process.env.BACKUP_MIRROR_DIR?.trim() || "";
+// Defaults to the local retention count, so the mirror holds the same window as
+// staging unless a smaller/slower destination needs its own.
+export const backupMirrorRetentionCount = Math.max(
+  1,
+  Math.floor(positiveNumber(process.env.BACKUP_MIRROR_RETENTION_COUNT, backupRetentionCount)),
+);
 export const azcopyPath = process.env.AZCOPY_PATH?.trim() || "azcopy";
 // Generated media already lives locally; when SQLite DR has an offsite Azure
 // leg, include the application-managed project tree by default. Set explicitly

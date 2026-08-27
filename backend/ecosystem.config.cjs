@@ -35,6 +35,13 @@ const commonEnv = {
   BACKUP_AZURE_PREFIX: process.env.BACKUP_AZURE_PREFIX || "momi-backend",
   AZCOPY_PATH: process.env.AZCOPY_PATH || "azcopy",
   MEDIA_BACKUP_ENABLED: process.env.MEDIA_BACKUP_ENABLED || "true",
+  // Second offsite leg for the database snapshots: a filesystem/UNC path whose
+  // failure is uncorrelated with the Azure account. Empty disables it. Like its
+  // siblings above it is always defined here, so a value in .env would be
+  // discarded (src/env.ts only fills keys absent from process.env) -- set it at
+  // User scope. See backend/docs/sqlite-dr-runbook.md.
+  BACKUP_MIRROR_DIR: process.env.BACKUP_MIRROR_DIR || "",
+  BACKUP_MIRROR_RETENTION_COUNT: process.env.BACKUP_MIRROR_RETENTION_COUNT || "",
   // Still Images preset pods (dispatcher/monolith only; see runpodEndpoints.ts).
   // Each preset runs on its own RunPod endpoint, and a job whose endpoint is
   // unset is refused at dispatch rather than falling back to the Animation

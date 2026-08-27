@@ -595,3 +595,166 @@ test("runAzcopy includes Azure's error output but redacts SAS credentials", asyn
     return true;
   });
 });
+
+test("runBackupCycle mirrors snapshots to the second leg and records it separately from the Azure upload", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+  const mirrorDir = path.join(dir, "mirror");
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    uploader: async () => undefined,
+    mirrorDir,
+  });
+
+  assert.equal(cycle.ok, true);
+  assert.equal(cycle.uploaded, true);
+  assert.equal(cycle.mirrored, true);
+  assert.equal(cycle.mirror?.ok, true);
+  assert.ok((await fs.readdir(mirrorDir)).includes("a-2026-08-27T07-13-09-966Z.sqlite"));
+
+  const status = JSON.parse(await fs.readFile(cycle.statusPath, "utf8")) as {
+    uploaded: boolean;
+    mirrored: boolean;
+    mirror: { ok: boolean; destinationDir: string; files: Array<{ file: string; ok: boolean }> } | null;
+  };
+  assert.equal(status.mirrored, true);
+  assert.equal(status.mirror?.ok, true);
+  assert.equal(status.mirror?.files.length, 1);
+});
+
+test("runBackupCycle still mirrors when the Azure upload fails -- that is the whole point of the leg", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+  const mirrorDir = path.join(dir, "mirror");
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    // The August 2026 outage: the storage account was disabled.
+    uploader: async () => {
+      throw new Error("AccountIsDisabled");
+    },
+    mirrorDir,
+  });
+
+  assert.equal(cycle.uploaded, false, "Azure did not receive it");
+  assert.equal(cycle.mirrored, true, "the second leg did");
+  assert.equal(cycle.ok, false, "the cycle is still a failure -- one configured leg is down");
+  assert.ok((await fs.readdir(mirrorDir)).includes("a-2026-08-27T07-13-09-966Z.sqlite"));
+});
+
+test("runBackupCycle keeps `uploaded` meaning Azure, so a mirror success cannot stand in for it", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    uploader: async () => {
+      throw new Error("AccountIsDisabled");
+    },
+    mirrorDir: path.join(dir, "mirror"),
+  });
+
+  // The runbook, /api/backup-status and the ops dashboard all read `uploaded` as
+  // the Azure leg. Widening it would report an offsite copy Azure does not hold.
+  assert.equal(cycle.uploaded, false);
+  assert.equal(cycle.results[0].uploaded, undefined);
+});
+
+test("runBackupCycle reports ok=false when only the mirror leg fails", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+  // A file where the mirror directory should be, standing in for an unreachable
+  // share.
+  const blocker = path.join(dir, "blocker");
+  await fs.writeFile(blocker, "x");
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    uploader: async () => undefined,
+    mirrorDir: path.join(blocker, "mirror"),
+  });
+
+  assert.equal(cycle.uploaded, true);
+  assert.equal(cycle.mirrored, false);
+  assert.equal(cycle.ok, false);
+  assert.match(cycle.mirror?.error ?? "", /not reachable or writable/);
+  assert.equal(cycle.results[0].ok, true, "the local snapshot itself is unaffected");
+});
+
+test("runBackupCycle leaves ok and mirrored alone when no mirror is configured", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir: path.join(dir, "staging"),
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    uploader: async () => undefined,
+  });
+
+  assert.equal(cycle.ok, true, "an unconfigured leg must not make a healthy cycle fail");
+  assert.equal(cycle.mirrored, false);
+  assert.equal(cycle.mirror, undefined);
+});
+
+test("runBackupCycle refuses a mirror pointed at its own staging directory", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+  const stagingDir = path.join(dir, "staging");
+
+  const cycle = await runBackupCycle({
+    targets: [{ name: "a", sourcePath: dbPath }],
+    stagingDir,
+    retention: 5,
+    label: "2026-08-27T07-13-09-966Z",
+    mirrorDir: stagingDir,
+  });
+
+  assert.equal(cycle.mirrored, false);
+  assert.equal(cycle.ok, false);
+  assert.match(cycle.mirror?.error ?? "", /staging directory/);
+});
+
+test("runBackupCycle prunes the mirror to its own retention count, independent of staging", async () => {
+  const dir = await tempDir();
+  const dbPath = path.join(dir, "a.sqlite");
+  makeWalDatabase(dbPath).close();
+  const stagingDir = path.join(dir, "staging");
+  const mirrorDir = path.join(dir, "mirror");
+
+  for (const label of ["2026-08-27T01-00-00-000Z", "2026-08-27T02-00-00-000Z", "2026-08-27T03-00-00-000Z"]) {
+    await runBackupCycle({
+      targets: [{ name: "a", sourcePath: dbPath }],
+      stagingDir,
+      retention: 10,
+      label,
+      mirrorDir,
+      mirrorRetention: 2,
+    });
+  }
+
+  const mirrored = (await fs.readdir(mirrorDir)).filter((file) => file.endsWith(".sqlite")).sort();
+  assert.deepEqual(mirrored, ["a-2026-08-27T02-00-00-000Z.sqlite", "a-2026-08-27T03-00-00-000Z.sqlite"]);
+  const staged = (await fs.readdir(stagingDir)).filter((file) => file.endsWith(".sqlite"));
+  assert.equal(staged.length, 3, "staging keeps its own, larger window");
+});

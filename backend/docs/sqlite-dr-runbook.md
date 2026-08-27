@@ -289,6 +289,7 @@ ownership marker establishes; population is only a smell test.
   | `backup_upload_failed`    | A database snapshot or generated-media cycle did not reach Azure. Local-only is not DR on this host. |
   | `backup_staging_conflict` | A process tried to back up different databases into this staging directory. See §6.                  |
   | `backup_shrink_suspect`   | A snapshot collapsed in size against its predecessor. Verify the source before relying on it.        |
+  | `backup_mirror_failed`    | The second offsite leg (BACKUP_MIRROR_DIR) did not receive this cycle's snapshots. See §10.           |
 
 - `node scripts/auditBackupSnapshots.mjs` from `backend/` for a population
   check across the whole retention window (read-only unless `--apply`).
@@ -387,3 +388,70 @@ node scripts/verifyOffsiteBackup.mjs
 ```
 
 Then check `data/backups/backup-status.json` shows `uploaded: true`.
+
+
+## 10. The second offsite leg (`BACKUP_MIRROR_DIR`)
+
+Until 2026-08-27 Azure was the *only* offsite destination, so "offsite" meant one
+provider and one subscription. When the `momiai` account was disabled for a
+billing reason it took the whole offsite copy with it — writes first, then reads
+— and the local staging directory on a single C: drive became the only surviving
+copy of `jobs`, `app-state` and `archived-items`. Nothing was wrong with the
+backup code. The leg had no redundancy.
+
+So there is a second one: a plain filesystem path. No SAS, no credential, no
+provider, no subscription — deliberately the least similar thing to the Azure leg
+that still counts as offsite.
+
+```
+[Environment]::SetEnvironmentVariable("BACKUP_MIRROR_DIR", "Z:\momi-dr\AZWEU1AI002", "User")
+pm2 restart ecosystem.config.cjs --only momi-dispatcher --update-env
+pm2 save
+```
+
+Set it at **User scope** — like `BACKUP_AZURE_SAS_URL` and `ALERT_WEBHOOK_URL` it
+is always defined by `ecosystem.config.cjs`, so a value in `.env` is discarded
+(see the warning in §9). `BACKUP_MIRROR_RETENTION_COUNT` is optional and defaults
+to the local retention count.
+
+**Point it at something whose failure is uncorrelated with Azure** — a network
+share, a second physical disk. A path on C: is not a second copy of anything; it
+dies with the disk that already holds staging. A mirror pointed at the staging
+directory (or inside it) is refused outright rather than silently reporting two
+copies of one.
+
+**Scope: databases only, not generated media.** The databases are what recovery
+turns on — every job, project and media reference, ~40 MB total, unregenerable.
+Generated media is orders of magnitude larger and has its own cursor-based
+incremental mechanism built around azcopy, and a partial media mirror would be
+worse than an honest gap. Media therefore still has exactly one offsite leg.
+
+**The layout is identical to the staging directory** — `<name>-<label>.sqlite`,
+flat — so the restore procedure in §5 applies unchanged. Point the restore at the
+mirror instead of at staging; nothing else differs.
+
+### Reading the status
+
+`backup-status.json` and `/api/backup-status` gained two fields:
+
+| Field      | Means                                                                 |
+| ---------- | --------------------------------------------------------------------- |
+| `uploaded` | Reached **Azure**. Unchanged meaning — a mirror success cannot set it. |
+| `mirrored` | Reached the mirror directory.                                         |
+| `mirror`   | Per-file results, destination, prune count, error. `null` if disabled. |
+
+`ok` is false if *any* configured leg failed, so a working mirror does not mask a
+dead Azure leg and vice versa. The ops dashboard shows which legs hold the
+snapshot (`offsite: azure + mirror`) rather than the old binary "shipped
+offsite"/"local only".
+
+### One mirror directory per host
+
+The directory is claimed with a `mirror-owner.json` marker recording the host and
+the source database directories, and a mismatch on either refuses the leg. This
+is not paranoia: a share is reachable by more than one machine, and two hosts
+both writing `jobs-*.sqlite` into one directory would each prune to their own
+retention count and evict the other's history. Both sets pass `integrity_check`
+and nothing in the filenames would reveal it — the same class of failure as the
+2026-08-05 incident in §7, widened by the share. Give each host its own
+subdirectory.

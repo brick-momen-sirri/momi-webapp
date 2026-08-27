@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { emitAlert, type AlertRule, type WebhookFormat } from "./healthWatchdog.js";
+import { mirrorSnapshots, type BackupMirrorResult } from "./backupMirrorService.js";
 
 // How long a single azcopy invocation may run before it is treated as hung and
 // killed. azcopy writes periodic progress lines plus a job summary to stdout;
@@ -187,9 +188,16 @@ export type BackupResult = {
 export type BackupCycleResult = {
   at: string;
   ok: boolean;
+  // Reached Azure. Deliberately NOT widened to mean "reached any offsite
+  // destination": the runbook, /api/backup-status and the ops dashboard all read
+  // this field as the Azure leg specifically, and a mirror success quietly
+  // satisfying it would report an offsite copy that the offsite provider does
+  // not have. The mirror gets its own flag.
   uploaded: boolean;
+  mirrored: boolean;
   results: BackupResult[];
   media?: MediaBackupResult;
+  mirror?: BackupMirrorResult;
   statusPath: string;
 };
 
@@ -702,6 +710,11 @@ export async function runBackupCycle(opts: {
   uploader?: (files: string[]) => Promise<void>;
   mediaUploader?: () => Promise<MediaBackupResult>;
   mediaSourceDir?: string;
+  // Second offsite leg. Independent of `uploader` by design: the point of it is
+  // to survive whatever takes Azure out, so neither leg's outcome may gate the
+  // other's attempt.
+  mirrorDir?: string;
+  mirrorRetention?: number;
   now?: () => number;
   role?: string;
   webhookUrl?: string;
@@ -729,6 +742,7 @@ export async function runBackupCycle(opts: {
       at,
       ok: false,
       uploaded: false,
+      mirrored: false,
       results: opts.targets.map((target) => ({
         name: target?.name ?? "unknown",
         ok: false,
@@ -816,9 +830,44 @@ export async function runBackupCycle(opts: {
     }
   }
 
+  // Runs whatever happened above. A mirror that only ran when Azure was healthy
+  // would be redundant on exactly the days it is needed.
+  let mirror: BackupMirrorResult | undefined;
+  if (opts.mirrorDir && uploadable.length) {
+    try {
+      mirror = await mirrorSnapshots({
+        files: uploadable,
+        destinationDir: opts.mirrorDir,
+        sourceDirs: uniqueSourceDirs(opts.targets),
+        names: results.filter((result) => result.ok).map((result) => result.name),
+        retention: opts.mirrorRetention ?? opts.retention,
+        stagingDir: opts.stagingDir,
+        role: opts.role,
+        now: opts.now,
+      });
+    } catch (error) {
+      // mirrorSnapshots is written not to throw, so this is the belt-and-braces
+      // half: the second offsite leg must never be the thing that aborts a cycle
+      // and costs the first one its status file.
+      mirror = {
+        ok: false,
+        destinationDir: opts.mirrorDir,
+        files: [],
+        pruned: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (!mirror.ok) raiseAlert("backup_mirror_failed", `mirror to ${mirror.destinationDir}: ${mirror.error}`, opts);
+  }
+
   const snapshotsOk = results.length > 0 && results.every((result) => result.ok);
   const uploaded = databaseUploaded && (!opts.mediaUploader || media?.uploaded === true);
-  const ok = snapshotsOk && (!opts.uploader || databaseUploaded) && (!opts.mediaUploader || media?.ok === true);
+  const mirrored = mirror?.ok === true;
+  const ok =
+    snapshotsOk &&
+    (!opts.uploader || databaseUploaded) &&
+    (!opts.mediaUploader || media?.ok === true) &&
+    (!opts.mirrorDir || mirrored);
   const statusPath = path.join(opts.stagingDir, "backup-status.json");
   await fs.mkdir(opts.stagingDir, { recursive: true });
   await fs.writeFile(
@@ -828,6 +877,22 @@ export async function runBackupCycle(opts: {
         at,
         ok,
         uploaded,
+        mirrored,
+        mirror: mirror
+          ? {
+              ok: mirror.ok,
+              destinationDir: mirror.destinationDir,
+              files: mirror.files.map((entry) => ({
+                file: entry.file,
+                ok: entry.ok,
+                bytes: entry.bytes ?? null,
+                error: entry.error ?? null,
+              })),
+              pruned: mirror.pruned.length,
+              completedAt: mirror.completedAt ?? null,
+              error: mirror.error ?? null,
+            }
+          : null,
         media: media
           ? {
               ok: media.ok,
@@ -867,6 +932,7 @@ export async function runBackupCycle(opts: {
         [
           ...results.filter((r) => !r.ok).map((r) => `${r.name}: ${r.error}`),
           ...(media && !media.ok ? [`generated media: ${media.error ?? "upload did not complete"}`] : []),
+          ...(mirror && !mirror.ok ? [`mirror: ${mirror.error ?? "mirror did not complete"}`] : []),
         ].join("; ") || "upload did not complete"
       }`,
       opts,
@@ -877,10 +943,11 @@ export async function runBackupCycle(opts: {
       uploaded,
       dbs: results.map((r) => `${r.name}:${r.bytes ?? 0}b`).join(","),
       media: media ? `${media.files ?? 0} files/${media.bytes ?? 0}b/${media.baseline ? "baseline" : "delta"}` : "disabled",
+      mirror: mirror ? `${mirror.files.filter((f) => f.ok).length}/${mirror.files.length} -> ${mirror.destinationDir}` : "disabled",
     });
   }
 
-  return { at, ok, uploaded, results, media, statusPath };
+  return { at, ok, uploaded, mirrored, results, media, mirror, statusPath };
 }
 
 export function startScheduledBackups(opts: {
@@ -891,6 +958,8 @@ export function startScheduledBackups(opts: {
   uploader?: (files: string[]) => Promise<void>;
   mediaUploader?: () => Promise<MediaBackupResult>;
   mediaSourceDir?: string;
+  mirrorDir?: string;
+  mirrorRetention?: number;
   role?: string;
   webhookUrl?: string;
   webhookFormat?: WebhookFormat;

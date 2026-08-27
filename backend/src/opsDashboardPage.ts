@@ -413,9 +413,19 @@ export const OPS_DASHBOARD_HTML = `<!doctype html>
     if (state.backup) {
       var b = state.backup.status;
       if (b) {
+        // There are two offsite legs now (Azure, and the filesystem mirror), so
+        // "local only" is only true when neither has the snapshot. Saying it
+        // while the mirror holds a copy would understate DR; saying "shipped
+        // offsite" for Azure alone while the mirror is broken would overstate it.
+        var legs = [];
+        if (b.uploaded) legs.push("azure");
+        if (b.mirrored) legs.push("mirror");
+        var mirrorConfigured = Boolean(b.mirror);
+        if (mirrorConfigured && !b.mirrored) legs.push("mirror FAILED");
+        var offsite = legs.length ? " · offsite: " + legs.join(" + ") : " · local only";
         cards.push(statCard(
           "Last backup", b.ok ? "ok" : "failed", "",
-          fmtRelative(Date.parse(b.at) || null) + (b.uploaded ? " · shipped offsite" : " · local only"),
+          fmtRelative(Date.parse(b.at) || null) + offsite,
           b.ok ? "good" : "critical",
           null
         ));
