@@ -35,7 +35,10 @@ describe("MaskRegionField", () => {
 
     const dialog = await screen.findByRole("dialog", { name: /choose the region to edit on source\.png/i });
     expect(dialog.parentElement).toBe(document.body);
-    expect(document.body.style.overflow).toBe("hidden");
+    // The scroll lock is a passive effect, so finding the dialog does not mean it
+    // has run yet -- asserting it in the same tick is what made this flake under
+    // a loaded full-suite run while passing alone.
+    await waitFor(() => expect(document.body.style.overflow).toBe("hidden"));
     expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-mask-visualization", "highlight");
   });
 
@@ -504,6 +507,70 @@ describe("MaskRegionField", () => {
       />,
     );
     expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-zoom", "100");
+  });
+
+  it("resizes the layers rail by dragging its edge, within bounds, and remembers it", async () => {
+    const { unmount } = render(
+      <MaskRegionField
+        image={{ id: "uploaded-rail", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        openRequest={1}
+        leftPanel={<div>Layers</div>}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const rail = screen.getByTestId("mask-editor-layers-rail");
+    const handle = screen.getByTestId("mask-editor-rail-handle");
+    expect(rail).toHaveAttribute("data-width", "288");
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 90, clientX: 288 });
+    fireEvent.pointerMove(handle, { pointerId: 90, clientX: 420 });
+    expect(rail).toHaveAttribute("data-width", "420");
+
+    // Past either bound it stops rather than breaking the layout.
+    fireEvent.pointerMove(handle, { pointerId: 90, clientX: 4000 });
+    expect(rail).toHaveAttribute("data-width", "560");
+    fireEvent.pointerMove(handle, { pointerId: 90, clientX: 10 });
+    expect(rail).toHaveAttribute("data-width", "220");
+
+    fireEvent.pointerMove(handle, { pointerId: 90, clientX: 360 });
+    fireEvent.pointerUp(handle, { button: 0, pointerId: 90, clientX: 360 });
+    unmount();
+
+    // A width is a workspace preference, so the next document opens at it.
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded-rail-2", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        openRequest={1}
+        leftPanel={<div>Layers</div>}
+      />,
+    );
+    await screen.findByRole("dialog");
+    expect(screen.getByTestId("mask-editor-layers-rail")).toHaveAttribute("data-width", "360");
+  });
+
+  it("resizes the rail from the keyboard and reports its range", async () => {
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded-rail-keys", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        openRequest={1}
+        leftPanel={<div>Layers</div>}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const handle = screen.getByRole("separator", { name: "Resize the layers panel" });
+    expect(handle).toHaveAttribute("aria-valuemin", "220");
+    expect(handle).toHaveAttribute("aria-valuemax", "560");
+    const before = Number(screen.getByTestId("mask-editor-layers-rail").getAttribute("data-width"));
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(Number(screen.getByTestId("mask-editor-layers-rail").getAttribute("data-width"))).toBe(before + 10);
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(screen.getByTestId("mask-editor-layers-rail")).toHaveAttribute("data-width", "220");
   });
 
   it("keeps the canvas visibly busy and read-only for the real processing lifecycle", async () => {

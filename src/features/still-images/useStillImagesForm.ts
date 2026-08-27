@@ -139,6 +139,20 @@ export function useStillImagesForm() {
     updateSelectedState({ editMode });
   }
 
+  /** One General Enhancement control, as set from inside the editor. */
+  function setEditEnhanceSetting(settingId: string, value: StillImageSettingValue) {
+    setStateByCategory((current) => {
+      const state = current[selectedCategoryId];
+      return {
+        ...current,
+        [selectedCategoryId]: {
+          ...state,
+          editEnhanceSettings: { ...(state.editEnhanceSettings ?? {}), [settingId]: value },
+        },
+      };
+    });
+  }
+
   function setEditReferences(editReferences: UploadedImage[]) {
     updateSelectedState({ editReferences });
   }
@@ -477,6 +491,7 @@ export function useStillImagesForm() {
     setSeed,
     setSetting,
     setEditMode,
+    setEditEnhanceSetting,
     setEditReferences,
     setTargetFolderId,
     setSaveNumber,

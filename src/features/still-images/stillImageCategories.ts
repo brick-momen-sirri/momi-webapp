@@ -108,6 +108,16 @@ export type StillImageCategoryState = {
   /** One continuous editor session for this uploaded original. */
   editDocumentId?: string;
   editMode?: StillImageEditMode;
+  /**
+   * Enhance-mode settings, keyed by General Enhancement's own setting ids.
+   *
+   * Held apart from `settings` because they belong to a different preset: an
+   * enhance run is submitted as a general-enhancement job, and this is what the
+   * artist chose for it. Keeping them separate is what lets the panel read the
+   * ranges, defaults and gating straight off the shared preset table instead of
+   * restating them, and stops two presets' ids sharing one bag.
+   */
+  editEnhanceSettings?: Record<string, StillImageSettingValue>;
   editReferences?: UploadedImage[];
   /** Durable URL captured by the first submitted layer and reused at finalization. */
   editOriginalSourceUrl?: string;

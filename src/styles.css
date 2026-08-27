@@ -365,6 +365,22 @@ html[data-theme="dark"] :is(.bg-stone-300, .disabled\:bg-stone-300:disabled) {
   background-color: #4a4740 !important;
 }
 
+/*
+ * The surround the Still Images editor lays its canvas on.
+ *
+ * A shade darker than a panel rather than lighter, because it is the one surface
+ * in the app that exists to be looked past: an artist judging a masked edit needs
+ * the picture to be the brightest thing on screen, and a light grey mat around a
+ * dark render is exactly the halo that makes an edge impossible to read.
+ */
+html[data-theme="dark"] .bg-stone-200 {
+  background-color: #131311 !important;
+}
+
+html[data-theme="dark"] .bg-stone-50\/80 {
+  background-color: rgba(24, 24, 22, 0.8) !important;
+}
+
 html[data-theme="dark"] :is(.bg-amber-50) {
   background-color: rgba(146, 64, 14, 0.18) !important;
 }
@@ -379,6 +395,15 @@ html[data-theme="dark"] :is(.bg-red-50) {
 
 html[data-theme="dark"] :is(.border-line, .border-stone-100, .border-stone-200, .border-stone-300, .border-stone-400) {
   border-color: #3a3732 !important;
+}
+
+/* The translucent edges the editor's floating controls are drawn with. */
+html[data-theme="dark"] :is(.border-stone-200\/80, .border-white\/70) {
+  border-color: rgba(88, 83, 75, 0.8) !important;
+}
+
+html[data-theme="dark"] .hover\:border-stone-500:hover {
+  border-color: #6c665c !important;
 }
 
 html[data-theme="dark"] :is(.border-amber-200) {
@@ -403,6 +428,11 @@ html[data-theme="dark"] :is(.text-stone-900, .text-stone-800, .text-stone-700, .
 
 html[data-theme="dark"] :is(.text-stone-500, .text-stone-400) {
   color: #aaa196 !important;
+}
+
+/* Used for separators and unavailable actions, so it stays quieter than the rest. */
+html[data-theme="dark"] .text-stone-300 {
+  color: #6f6961 !important;
 }
 
 html[data-theme="dark"] :is(.text-amber-900, .text-amber-800) {

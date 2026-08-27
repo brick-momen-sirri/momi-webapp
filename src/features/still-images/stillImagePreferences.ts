@@ -38,6 +38,34 @@ import {
 
 const FORM_STORAGE_KEY = "momi_still_images_form_v1";
 const RESULT_VIEW_STORAGE_KEY = "momi_still_images_results_v1";
+const EDITOR_LAYOUT_STORAGE_KEY = "momi_still_images_editor_layout_v1";
+
+/**
+ * How wide the artist dragged the editor's layer rail, in CSS pixels.
+ *
+ * Its own key rather than a field on the form, because it is a property of the
+ * workspace rather than of anything being generated -- it should survive a
+ * change of preset, a new document, and a reload, and it should not be written
+ * on every keystroke the way the form is.
+ */
+export const MIN_LAYERS_PANEL_WIDTH = 220;
+export const MAX_LAYERS_PANEL_WIDTH = 560;
+export const DEFAULT_LAYERS_PANEL_WIDTH = 288;
+
+export function clampLayersPanelWidth(width: number) {
+  if (!Number.isFinite(width)) return DEFAULT_LAYERS_PANEL_WIDTH;
+  return Math.round(Math.min(MAX_LAYERS_PANEL_WIDTH, Math.max(MIN_LAYERS_PANEL_WIDTH, width)));
+}
+
+export function readPersistedLayersPanelWidth() {
+  const stored = readJson(EDITOR_LAYOUT_STORAGE_KEY);
+  const width = stored?.layersPanelWidth;
+  return typeof width === "number" ? clampLayersPanelWidth(width) : DEFAULT_LAYERS_PANEL_WIDTH;
+}
+
+export function writePersistedLayersPanelWidth(width: number) {
+  writeJson(EDITOR_LAYOUT_STORAGE_KEY, { layersPanelWidth: clampLayersPanelWidth(width) });
+}
 
 /** Everything the form holds across a reload, minus the images. */
 export type PersistableStillImagesForm = {

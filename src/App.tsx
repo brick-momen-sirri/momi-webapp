@@ -608,6 +608,7 @@ function App() {
                 onEditLayerMaskLinkedChange={stillImagesForm.setEditLayerMaskLinked}
                 onResetEditLayerOffset={stillImagesForm.resetEditLayerOffset}
                 onEditModeChange={stillImagesForm.setEditMode}
+                onEditEnhanceSettingChange={stillImagesForm.setEditEnhanceSetting}
                 onEditReferencesChange={stillImagesForm.setEditReferences}
                 onFinishEditing={handleFinishStillImageEdit}
                 finishingEdit={finishingStillImageEdit}

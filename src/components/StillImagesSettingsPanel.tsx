@@ -1,5 +1,5 @@
 import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Project, StillImageEditMode, UploadedImage } from "../types";
 import {
   clearMaskStrokes,
@@ -19,6 +19,8 @@ import {
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
+  createInitialStillImagesState,
+  getStillImageCategory,
   STILL_IMAGE_CATEGORIES,
   shouldShowStillImagePrompt,
   stillImageModeGuidance,
@@ -70,6 +72,7 @@ type StillImagesSettingsPanelProps = {
   onEditLayerMaskLinkedChange?: (layerId: string, linked: boolean) => void;
   onResetEditLayerOffset?: (layerId: string) => void;
   onEditModeChange?: (mode: StillImageEditMode) => void;
+  onEditEnhanceSettingChange?: (settingId: string, value: StillImageSettingValue) => void;
   onEditReferencesChange?: (references: UploadedImage[]) => void;
   onFinishEditing?: (drawing: MaskDrawing) => boolean | void | Promise<boolean | void>;
   finishingEdit?: boolean;
@@ -108,6 +111,7 @@ export function StillImagesSettingsPanel({
   onEditLayerMaskLinkedChange = () => undefined,
   onResetEditLayerOffset = () => undefined,
   onEditModeChange = () => undefined,
+  onEditEnhanceSettingChange = () => undefined,
   onEditReferencesChange = () => undefined,
   onFinishEditing,
   finishingEdit = false,
@@ -127,8 +131,38 @@ export function StillImagesSettingsPanel({
   const requiredImagesReady = Array.from({ length: uploadSlotCount }, (_, index) => state.images[index]).every(Boolean);
   const regionReady = !paintsItsOwnSlots || hasPaintedRegion(state.mask);
   const readyToGenerate = requiredImagesReady && regionReady && Boolean(selectedProject);
-  const editorPromptReady = Boolean(state.prompt.trim());
+  const editMode = state.editMode ?? "inpaint";
+  // Enhance is submitted as a General Enhancement job, whose prompt is optional
+  // guidance for the captioner rather than an instruction. Only Inpaint has
+  // nothing to do without one.
+  const editorPromptReady = editMode === "enhance" || Boolean(state.prompt.trim());
   const editorCanGenerate = readyToGenerate && editorPromptReady;
+  /**
+   * The General Enhancement controls, rendered from that preset's own table.
+   *
+   * Read straight off the shared definition, so the ranges, steps, defaults and
+   * the visibleWhen gating are the ones the server already validates against --
+   * an enhance run started here is the same job as one started from the preset.
+   */
+  const enhanceSettings = useMemo(() => {
+    const category = getStillImageCategory("general-enhancement");
+    const defaults = createInitialStillImagesState()["general-enhancement"];
+    const values = { ...defaults.settings, ...(state.editEnhanceSettings ?? {}) };
+    // Gating is evaluated against the values in force, so switching "Advanced
+    // details" on reveals its two children exactly as it does in the preset.
+    return { values, visible: visibleStillImageSettings(category, { ...defaults, settings: values }) };
+  }, [state.editEnhanceSettings]);
+  const enhanceControls =
+    paintsItsOwnSlots && editMode === "enhance"
+      ? enhanceSettings.visible.map((setting) => (
+          <StillImageSettingField
+            key={setting.id}
+            setting={setting}
+            value={enhanceSettings.values[setting.id] ?? setting.defaultValue}
+            onChange={(value) => onEditEnhanceSettingChange(setting.id, value)}
+          />
+        ))
+      : undefined;
   const compositeLayers = paintsItsOwnSlots ? visibleEditLayers(state) : [];
   const editorProcessing =
     submitting ||
@@ -334,7 +368,8 @@ export function StillImagesSettingsPanel({
           floatingPanel={
             hasPaintedRegion(state.mask) ? (
               <EditActionPanel
-                mode={state.editMode ?? "inpaint"}
+                mode={editMode}
+                enhanceControls={enhanceControls}
                 prompt={state.prompt}
                 references={state.editReferences ?? []}
                 variations={Math.max(1, Math.min(4, Number(state.settings.variations) || 1))}

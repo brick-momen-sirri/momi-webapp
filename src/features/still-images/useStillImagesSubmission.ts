@@ -32,6 +32,7 @@ import {
   shouldShowStillImagePrompt,
   stillImageSlotCount,
   visibleStillImageSettings,
+  type StillImageSettingValue,
   type StillImageCategoryId,
   type StillImageCategoryState,
 } from "./stillImageCategories";
@@ -163,8 +164,14 @@ export function useStillImagesSubmission(options: {
 
         // Only the settings the artist can currently see. The server drops hidden
         // ones anyway; sending them would just be noise.
+        // An enhance run is a general-enhancement job, so it is described by that
+        // preset's settings rather than Image Editing's. What the artist set in
+        // the editor is layered over that preset's defaults; anything they never
+        // touched stays at the default the preset declares.
         const effectiveState =
-          backendCategoryId === input.categoryId ? input.categoryState : createInitialStillImagesState()[backendCategoryId];
+          backendCategoryId === input.categoryId
+            ? input.categoryState
+            : withEnhanceOverrides(createInitialStillImagesState()[backendCategoryId], input.categoryState.editEnhanceSettings);
         const settings = Object.fromEntries(
           visibleStillImageSettings(backendCategory, effectiveState).map((setting) => [
             setting.id,
@@ -521,6 +528,12 @@ async function uploadPaintedSlots(options: {
       referenceSourceUrls: options.referenceSourceUrls,
     },
   };
+}
+
+/** The borrowed preset's state, with the editor's own choices written over it. */
+function withEnhanceOverrides(state: StillImageCategoryState, overrides: Record<string, StillImageSettingValue> | undefined) {
+  if (!overrides) return state;
+  return { ...state, settings: { ...state.settings, ...overrides } };
 }
 
 function imageSourceUrl(image: UploadedImage) {

@@ -86,6 +86,14 @@ import {
   type TransformHandle,
 } from "../features/still-images/maskDrawing";
 import { editCropHeight, editCropWidth } from "../features/still-images/imageEditLayers";
+import {
+  clampLayersPanelWidth,
+  DEFAULT_LAYERS_PANEL_WIDTH,
+  MAX_LAYERS_PANEL_WIDTH,
+  MIN_LAYERS_PANEL_WIDTH,
+  readPersistedLayersPanelWidth,
+  writePersistedLayersPanelWidth,
+} from "../features/still-images/stillImagePreferences";
 import type { StillImageEditTarget } from "../features/still-images/stillImageCategories";
 import type { StillImageEditCrop } from "../types";
 import {
@@ -271,6 +279,10 @@ export function MaskEditorDialog({
   // a matrix over that cached bitmap rather than by rebuilding it each frame.
   const [transformPreview, setTransformPreview] = useState<MaskTransform | undefined>(undefined);
   const [hoveredHandle, setHoveredHandle] = useState<TransformHandle | undefined>(undefined);
+  // Read once, on the way in. The rail is a workspace preference, so it comes
+  // back the width it was left at rather than resetting with the document.
+  const [panelWidth, setPanelWidth] = useState(readPersistedLayersPanelWidth);
+  const [resizingPanel, setResizingPanel] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -285,6 +297,7 @@ export function MaskEditorDialog({
   const selectionDrag = useRef<MarqueeDragState | undefined>(undefined);
   const moveDrag = useRef<MoveDragState | undefined>(undefined);
   const transformDrag = useRef<TransformDragState | undefined>(undefined);
+  const railDrag = useRef<number | undefined>(undefined);
   const pointerImage = useRef<MaskPoint | undefined>(undefined);
   const layerContextRef = useRef(layerContext);
   // Mirrors of the two pieces of state undo has to read and write together.
@@ -859,6 +872,62 @@ export function MaskEditorDialog({
     undo,
   ]);
 
+  /**
+   * Resize the layer rail.
+   *
+   * Width is held in state during the drag and written to storage only on
+   * release: a CSS width per pointer sample is cheap, a localStorage write per
+   * sample is not, and the value only becomes a preference once the artist has
+   * settled on it.
+   */
+  const commitPanelWidth = useCallback((width: number) => {
+    const clamped = clampLayersPanelWidth(width);
+    setPanelWidth(clamped);
+    writePersistedLayersPanelWidth(clamped);
+  }, []);
+
+  function handleRailPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    railDrag.current = event.pointerId;
+    setResizingPanel(true);
+  }
+
+  function handleRailPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (railDrag.current !== event.pointerId) return;
+    // Measured from the dialog's own left edge rather than by accumulating
+    // deltas, so a drag that runs past either bound and comes back tracks the
+    // pointer instead of arriving somewhere else.
+    const left = event.currentTarget.parentElement?.getBoundingClientRect().left ?? 0;
+    setPanelWidth(clampLayersPanelWidth(event.clientX - left));
+  }
+
+  function handleRailPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    if (railDrag.current !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    railDrag.current = undefined;
+    setResizingPanel(false);
+    writePersistedLayersPanelWidth(panelWidth);
+  }
+
+  function handleRailKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 40 : 10;
+    const width =
+      event.key === "ArrowLeft"
+        ? panelWidth - step
+        : event.key === "ArrowRight"
+          ? panelWidth + step
+          : event.key === "Home"
+            ? MIN_LAYERS_PANEL_WIDTH
+            : event.key === "End"
+              ? MAX_LAYERS_PANEL_WIDTH
+              : undefined;
+    if (width === undefined) return;
+    event.preventDefault();
+    commitPanelWidth(width);
+  }
+
   function viewportPoint(event: { clientX: number; clientY: number }): MaskPoint {
     const bounds = containerRef.current?.getBoundingClientRect();
     return { x: event.clientX - (bounds?.left ?? 0), y: event.clientY - (bounds?.top ?? 0) };
@@ -1354,7 +1423,45 @@ export function MaskEditorDialog({
 
       <div className="flex min-h-0 flex-1">
         {leftPanel ? (
-          <aside className="z-20 w-72 shrink-0 overflow-y-auto border-r border-stone-200 bg-stone-50 p-3">{leftPanel}</aside>
+          <>
+            <aside
+              className="z-20 shrink-0 overflow-y-auto border-r border-stone-200 bg-stone-50 p-3"
+              style={{ width: panelWidth }}
+              data-testid="mask-editor-layers-rail"
+              data-width={panelWidth}
+            >
+              {leftPanel}
+            </aside>
+            {/*
+              A separator that happens to be draggable, which is why it carries the
+              separator role and its own bounds: a keyboard user gets the same
+              range with the arrow keys that a pointer gets by dragging.
+            */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the layers panel"
+              aria-valuenow={panelWidth}
+              aria-valuemin={MIN_LAYERS_PANEL_WIDTH}
+              aria-valuemax={MAX_LAYERS_PANEL_WIDTH}
+              tabIndex={0}
+              data-testid="mask-editor-rail-handle"
+              onPointerDown={handleRailPointerDown}
+              onPointerMove={handleRailPointerMove}
+              onPointerUp={handleRailPointerUp}
+              onPointerCancel={handleRailPointerUp}
+              onDoubleClick={() => commitPanelWidth(DEFAULT_LAYERS_PANEL_WIDTH)}
+              onKeyDown={handleRailKeyDown}
+              className={cn(
+                "group relative z-20 w-1.5 shrink-0 cursor-col-resize touch-none bg-stone-200 transition-colors",
+                resizingPanel ? "bg-accent" : "hover:bg-accent/60",
+              )}
+            >
+              {/* A wider invisible target than the visible line, so the edge is
+                  grabbable without making the seam itself thick. */}
+              <span aria-hidden="true" className="absolute inset-y-0 -left-1.5 -right-1.5" />
+            </div>
+          </>
         ) : null}
         <div
           ref={containerRef}

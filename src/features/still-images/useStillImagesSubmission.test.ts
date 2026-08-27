@@ -552,6 +552,77 @@ describe("useStillImagesSubmission", () => {
     expect(uploadJobMediaUrl).toHaveBeenCalledTimes(1);
   });
 
+  it("sends the enhancement controls the editor set, over that preset's own defaults", async () => {
+    const { hook } = setup();
+
+    await act(async () => {
+      await hook.result.current.submit({
+        projectId: "prj_1",
+        categoryId: "image-editing",
+        categoryState: {
+          ...state["image-editing"],
+          images: [image("source")],
+          mask: {
+            width: 1200,
+            height: 800,
+            softness: 35,
+            strokes: [{ tool: "brush", radius: 40, points: [{ x: 300, y: 250 }] }],
+          },
+          editMode: "enhance",
+          editDocumentId: "editdoc_12345678",
+          editEnhanceSettings: { details: 1.6, advancedDetails: true, sharpen: 0.75 },
+        },
+        targetFolderId: "",
+        saveNumber: "0001",
+      });
+    });
+
+    const settings = createBackendJob.mock.calls[0][0].workflowOptions.stillImage.settings;
+    // What the artist set...
+    expect(settings.details).toBe(1.6);
+    expect(settings.advancedDetails).toBe(true);
+    expect(settings.sharpen).toBe(0.75);
+    // ...over General Enhancement's own defaults for everything untouched, and
+    // detailPass is present at all only because advancedDetails turned it on.
+    expect(settings.generalEnhance).toBe(true);
+    expect(settings.detailPass).toBe(0.35);
+    // Image Editing's own settings belong to a different preset and stay behind.
+    expect(settings.markRegion).toBeUndefined();
+    expect(settings.resolution).toBeUndefined();
+  });
+
+  it("leaves the enhancement at its defaults when the editor changed nothing", async () => {
+    const { hook } = setup();
+
+    await act(async () => {
+      await hook.result.current.submit({
+        projectId: "prj_1",
+        categoryId: "image-editing",
+        categoryState: {
+          ...state["image-editing"],
+          images: [image("source")],
+          mask: {
+            width: 1200,
+            height: 800,
+            softness: 35,
+            strokes: [{ tool: "brush", radius: 40, points: [{ x: 300, y: 250 }] }],
+          },
+          editMode: "enhance",
+          editDocumentId: "editdoc_12345678",
+        },
+        targetFolderId: "",
+        saveNumber: "0001",
+      });
+    });
+
+    const settings = createBackendJob.mock.calls[0][0].workflowOptions.stillImage.settings;
+    expect(settings.details).toBe(1);
+    expect(settings.generalDenoise).toBe(0.1);
+    // advancedDetails is off by default, so its two children are not sent at all.
+    expect(settings.sharpen).toBeUndefined();
+    expect(settings.detailPass).toBeUndefined();
+  });
+
   it("refuses to submit when a slot is empty", async () => {
     const { hook, onError } = setup();
 
