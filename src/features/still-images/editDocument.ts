@@ -21,6 +21,7 @@
 import { resolveMediaUrl } from "../../services/api/mediaAccess";
 import type { Job, StillImageEditBaseLayer, StillImageEditWorkflow } from "../../types";
 import { baseRevisionId } from "./imageEditLayers";
+import { measuredJobCredits, measuredJobUsd } from "./podRuntimeCost";
 import type { MaskDrawing } from "./maskDrawing";
 import type { StillImageEditLayer } from "./stillImageCategories";
 
@@ -65,6 +66,59 @@ export function editDocumentsFromJobs(jobs: Job[]) {
     byDocument.set(documentId, entry);
   }
   return [...byDocument.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export type EditSessionCost = {
+  /** Generations that were paid for, including takes that were replaced. */
+  generations: number;
+  /** Layers those generations produced, which is fewer once anything was redone. */
+  layers: number;
+  credits: number;
+  usd: number;
+  /** Generations whose spend could not be measured, so the total is a floor. */
+  unmeasured: number;
+};
+
+/**
+ * What one editing session has cost so far.
+ *
+ * Counts **every** generation the document has paid for, not the layers that
+ * survived: a regenerated layer was billed twice and a deleted one was still
+ * billed once. A total that quietly dropped the takes an artist discarded would
+ * be answering "what is on screen" when the question is "what has this cost".
+ *
+ * `unmeasured` is the honesty valve. A run whose worker time RunPod never
+ * reported cannot be priced, so it is counted separately rather than as zero,
+ * and a session containing one is a floor rather than a figure.
+ */
+export function editSessionCost(jobs: Job[], documentId: string | undefined): EditSessionCost {
+  const cost: EditSessionCost = { generations: 0, layers: 0, credits: 0, usd: 0, unmeasured: 0 };
+  if (!documentId) return cost;
+
+  const layers = new Set<string>();
+  for (const job of jobs) {
+    const edit = job.workflowOptions?.stillImage?.edit;
+    if (edit?.documentId !== documentId) continue;
+    // A job still queued or running has not been priced yet, and a failed one
+    // never produced anything -- neither belongs in a spend figure.
+    if (job.status !== "completed") continue;
+
+    cost.generations += 1;
+    if (edit.generatedCropUrl) layers.add(edit.layerId);
+
+    const credits = measuredJobCredits(job);
+    const usd = measuredJobUsd(job);
+    if (credits === undefined || usd === undefined) {
+      cost.unmeasured += 1;
+      continue;
+    }
+    cost.credits += credits;
+    cost.usd += usd;
+  }
+
+  cost.layers = layers.size;
+  cost.credits = Math.round(cost.credits * 100) / 100;
+  return cost;
 }
 
 /**

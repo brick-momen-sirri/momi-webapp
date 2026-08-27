@@ -16,6 +16,7 @@ import {
   layerOpacity,
   visibleEditLayers,
 } from "../features/still-images/imageEditLayers";
+import type { EditSessionCost } from "../features/still-images/editDocument";
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
@@ -76,6 +77,8 @@ type StillImagesSettingsPanelProps = {
   onEditReferencesChange?: (references: UploadedImage[]) => void;
   onFinishEditing?: (drawing: MaskDrawing) => boolean | void | Promise<boolean | void>;
   finishingEdit?: boolean;
+  /** What the open document has cost, for the editor's running total. */
+  editSessionCost?: EditSessionCost;
   /** Bumped by the caller to open the full editor -- reopening a document does. */
   openEditorRequest?: number;
   submitting?: boolean;
@@ -117,6 +120,7 @@ export function StillImagesSettingsPanel({
   onEditReferencesChange = () => undefined,
   onFinishEditing,
   finishingEdit = false,
+  editSessionCost,
   openEditorRequest = 0,
   submitting = false,
   submitError,
@@ -368,6 +372,7 @@ export function StillImagesSettingsPanel({
                     ? "Describe the edit first."
                     : "Choose a region first."
               }
+              sessionCost={editSessionCost}
               disabled={editorProcessing}
               processingLabel={editorProcessingLabel}
             />

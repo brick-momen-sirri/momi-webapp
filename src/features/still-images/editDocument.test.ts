@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { editDocumentIdOfJob, editDocumentsFromJobs, isFinalizedCompositeJob, restoreEditDocument } from "./editDocument";
+import {
+  editDocumentIdOfJob,
+  editDocumentsFromJobs,
+  editSessionCost,
+  isFinalizedCompositeJob,
+  restoreEditDocument,
+} from "./editDocument";
 import type { Job, StillImageEditBaseLayer } from "../../types";
 
 const ORIGINAL = "/api/media?path=original.png";
@@ -223,5 +229,77 @@ describe("rebuilding the stack", () => {
   it("has nothing to reopen when only the flattened composite survives", () => {
     expect(restoreEditDocument([finalizedJob()], "editdoc_1")).toBeUndefined();
     expect(restoreEditDocument([layerJob({ layerId: "a", at: "2026-08-27T10:00:00.000Z" })], "editdoc_other")).toBeUndefined();
+  });
+});
+
+describe("what a session has cost", () => {
+  /** A completed run, priced the way production prices one. */
+  function priced(layerId: string, at: string, extra: Partial<Job> = {}): Job {
+    const job = layerJob({ layerId, at });
+    return {
+      ...job,
+      creditsActual: 1,
+      creditsActualSource: "pod_runtime",
+      runpodTiming: { executionMs: 30000, gpuTypeId: "NVIDIA RTX PRO 6000", usdPerSecond: 0.0001844 },
+      creditUsage: { total_estimated_credits: 17.32, total_estimated_usd: 0.0821, source: "credit_tracker:runtime_price" },
+      ...extra,
+    } as Job;
+  }
+
+  it("adds up every generation, including the takes that were replaced", () => {
+    // Two layers, one of them regenerated: three runs were paid for, two survive.
+    const cost = editSessionCost(
+      [
+        priced("edit_a", "2026-08-27T10:00:00.000Z"),
+        priced("edit_b", "2026-08-27T10:30:00.000Z"),
+        priced("edit_a", "2026-08-27T11:00:00.000Z"),
+      ],
+      "editdoc_1",
+    );
+
+    expect(cost.generations).toBe(3);
+    expect(cost.layers).toBe(2);
+    expect(cost.credits).toBeCloseTo(54.96, 2);
+    expect(cost.usd).toBeCloseTo(0.262896, 5);
+    expect(cost.unmeasured).toBe(0);
+  });
+
+  it("counts nothing from another document, or from a run still going", () => {
+    const cost = editSessionCost(
+      [
+        priced("edit_a", "2026-08-27T10:00:00.000Z"),
+        priced("edit_x", "2026-08-27T10:10:00.000Z", {
+          workflowOptions: layerJob({ layerId: "edit_x", at: "x", documentId: "editdoc_other" }).workflowOptions,
+        }),
+        priced("edit_b", "2026-08-27T10:20:00.000Z", { status: "running" }),
+        priced("edit_c", "2026-08-27T10:30:00.000Z", { status: "failed" }),
+      ],
+      "editdoc_1",
+    );
+    expect(cost.generations).toBe(1);
+  });
+
+  it("reports an unpriceable run separately rather than as free", () => {
+    // No worker time reported, so there is no price -- counting it as zero would
+    // make the session total look complete when it is a floor.
+    const cost = editSessionCost(
+      [
+        priced("edit_a", "2026-08-27T10:00:00.000Z"),
+        priced("edit_b", "2026-08-27T10:30:00.000Z", {
+          runpodTiming: undefined,
+          creditsActual: undefined,
+          creditsActualSource: undefined,
+        }),
+      ],
+      "editdoc_1",
+    );
+    expect(cost.generations).toBe(2);
+    expect(cost.unmeasured).toBe(1);
+    expect(cost.credits).toBeCloseTo(18.32, 2);
+  });
+
+  it("is empty for a document that has not generated anything, or none at all", () => {
+    expect(editSessionCost([], "editdoc_1")).toMatchObject({ generations: 0, layers: 0, credits: 0, usd: 0 });
+    expect(editSessionCost([priced("edit_a", "2026-08-27T10:00:00.000Z")], undefined)).toMatchObject({ generations: 0 });
   });
 });

@@ -79,6 +79,30 @@ export function measuredJobUsd(job: Pick<Job, "creditsActual" | "creditsActualSo
   return pod + (partnerApiUsd(job) ?? 0);
 }
 
+/**
+ * What the whole run was charged, in credits.
+ *
+ * The same two terms as measuredJobUsd, in the unit the dashboards and the
+ * balance are denominated in. Derived from the job rather than read off
+ * `creditsUsed`, because that field holds whatever the accounting said when the
+ * job completed -- for anything finished before the partner-node fix it is the
+ * pod figure alone.
+ */
+export function measuredJobCredits(job: Pick<Job, "creditsActual" | "creditsActualSource" | "creditUsage">) {
+  const pod = measuredPodCredits(job);
+  if (pod === undefined) return undefined;
+  const partner = partnerApiCreditsFor(job);
+  return Math.round((pod + partner) * 100) / 100;
+}
+
+function partnerApiCreditsFor(job: Pick<Job, "creditsActualSource" | "creditUsage">) {
+  if (job.creditsActualSource !== POD_RUNTIME_SOURCE) return 0;
+  const usage = job.creditUsage;
+  if (!usage || isUnpricedUsage(usage) || isLocalEstimate(usage.source)) return 0;
+  const credits = usage.total_estimated_credits;
+  return typeof credits === "number" && Number.isFinite(credits) && credits > 0 ? credits : 0;
+}
+
 /** A zero-filled tracker block means "not priced", never "free". */
 function isUnpricedUsage(usage: NonNullable<Job["creditUsage"]>) {
   const positive = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value > 0;

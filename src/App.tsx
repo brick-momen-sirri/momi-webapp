@@ -54,7 +54,7 @@ import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
 import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
 import { chainableResultImage } from "./features/still-images/chainResult";
 import { finalizeImageEdit } from "./features/still-images/finalizeImageEdit";
-import { editDocumentIdOfJob, restoreEditDocument } from "./features/still-images/editDocument";
+import { editDocumentIdOfJob, editSessionCost, restoreEditDocument } from "./features/still-images/editDocument";
 import { fetchBackendEditDocumentJobs } from "./services/backendApi";
 import { layersWithJobs } from "./features/still-images/imageEditLayers";
 import type { MaskDrawing } from "./features/still-images/maskDrawing";
@@ -417,6 +417,17 @@ function App() {
    * the button is pressed, so a composite finished months ago reopens exactly
    * like one finished a minute ago.
    */
+  /**
+   * What the open editing document has cost so far.
+   *
+   * Recomputed as jobs change so the figure moves the moment a generation lands,
+   * which is the only way it can inform the next one.
+   */
+  const openEditSessionCost = useMemo(
+    () => editSessionCost(jobs, selectedStillImageState.editDocumentId),
+    [jobs, selectedStillImageState.editDocumentId],
+  );
+
   function canContinueEditingComposite(job: Job) {
     return Boolean(editDocumentIdOfJob(job));
   }
@@ -656,6 +667,7 @@ function App() {
                 onEditReferencesChange={stillImagesForm.setEditReferences}
                 onFinishEditing={handleFinishStillImageEdit}
                 finishingEdit={finishingStillImageEdit}
+                editSessionCost={openEditSessionCost}
                 openEditorRequest={stillImageEditorOpenRequest}
                 submitting={stillImagesSubmission.submitting}
                 submitError={stillImagesSubmission.error}

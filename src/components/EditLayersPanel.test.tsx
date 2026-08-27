@@ -182,6 +182,29 @@ describe("EditLayersPanel", () => {
     expect(handlers.onMove).toHaveBeenCalledWith("a", 1);
   });
 
+  it("shows what the session has cost, and names the redone work", () => {
+    // Three runs produced two surviving layers: the gap is the regeneration, and
+    // it is the only part of the bill that is not visible as a layer on screen.
+    renderPanel({ sessionCost: { generations: 3, layers: 2, credits: 54.96, usd: 0.262896, unmeasured: 0 } });
+
+    const total = screen.getByTestId("edit-session-cost");
+    expect(total).toHaveTextContent("$0.263");
+    expect(total).toHaveTextContent("3 runs · 1 redone");
+    expect(within(total).getByTitle(/54.96 credits across 3 generations/)).toBeInTheDocument();
+  });
+
+  it("marks a session containing an unpriceable run as a floor", () => {
+    renderPanel({ sessionCost: { generations: 2, layers: 2, credits: 18.32, usd: 0.0876, unmeasured: 1 } });
+    const total = screen.getByTestId("edit-session-cost");
+    expect(total).toHaveTextContent("≥ $0.088");
+    expect(within(total).getByTitle(/could not be priced, so this is a floor/)).toBeInTheDocument();
+  });
+
+  it("says nothing about cost before anything has been generated", () => {
+    renderPanel({ sessionCost: { generations: 0, layers: 0, credits: 0, usd: 0, unmeasured: 0 } });
+    expect(screen.queryByTestId("edit-session-cost")).not.toBeInTheDocument();
+  });
+
   it("keeps the original image in the stack as a locked row", () => {
     renderPanel();
     const original = screen.getByRole("listitem", { name: "Original image, locked" });

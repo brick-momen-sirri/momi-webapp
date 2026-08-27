@@ -51,6 +51,8 @@ import {
   transformReadout,
   type MaskDrawing,
 } from "../features/still-images/maskDrawing";
+import type { EditSessionCost } from "../features/still-images/editDocument";
+import { formatUsd } from "../features/still-images/podRuntimeCost";
 import { renderMaskThumbnailCanvas } from "../features/still-images/maskRaster";
 import type { StillImageEditLayer, StillImageEditTarget } from "../features/still-images/stillImageCategories";
 import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
@@ -81,6 +83,8 @@ type EditLayersPanelProps = {
   onRegenerate?: () => void;
   canRegenerate?: boolean;
   regenerateHint?: string;
+  /** What this document has cost so far, counting takes that were replaced. */
+  sessionCost?: EditSessionCost;
   disabled?: boolean;
   processingLabel?: string;
 };
@@ -108,6 +112,7 @@ export function EditLayersPanel({
   onRegenerate,
   canRegenerate = false,
   regenerateHint,
+  sessionCost,
   disabled = false,
   processingLabel = "Processing selected region",
 }: EditLayersPanelProps) {
@@ -199,6 +204,8 @@ export function EditLayersPanel({
         </div>
       </div>
 
+      {sessionCost && sessionCost.generations > 0 ? <SessionCost cost={sessionCost} /> : null}
+
       <p className="mt-2 text-xs leading-5 text-stone-500">
         {activeLayerId
           ? activeTarget === "mask"
@@ -207,6 +214,41 @@ export function EditLayersPanel({
           : "New edits are painted on the visible composite and land above every existing layer."}
       </p>
     </section>
+  );
+}
+
+/**
+ * What the session has cost, where the next generation is decided.
+ *
+ * On the panel rather than a status bar because this is the surface an artist is
+ * looking at when they choose to regenerate, and a regeneration is the thing
+ * that quietly doubles a layer's cost. The generation count is shown next to the
+ * layer count precisely when they differ -- that gap is the redone work, and it
+ * is the only part of the bill that is not visible as a layer on screen.
+ */
+function SessionCost({ cost }: { cost: EditSessionCost }) {
+  const redone = cost.generations - cost.layers;
+  const amount = formatUsd(cost.usd);
+  return (
+    <div
+      className="mt-3 flex items-baseline gap-2 rounded-md border border-line bg-mist/60 px-2.5 py-2"
+      data-testid="edit-session-cost"
+      data-generations={cost.generations}
+    >
+      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">This session</span>
+      <span
+        className="ml-auto text-sm font-bold tabular-nums text-ink"
+        title={`${cost.credits} credits across ${cost.generations} generation${cost.generations === 1 ? "" : "s"}${
+          cost.unmeasured ? `. ${cost.unmeasured} could not be priced, so this is a floor.` : "."
+        }`}
+      >
+        {cost.unmeasured && !cost.usd ? "--" : `${cost.unmeasured ? "≥ " : ""}${amount ?? "--"}`}
+      </span>
+      <span className="text-[10px] tabular-nums text-stone-500">
+        {cost.generations} run{cost.generations === 1 ? "" : "s"}
+        {redone > 0 ? ` · ${redone} redone` : ""}
+      </span>
+    </div>
   );
 }
 
