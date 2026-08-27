@@ -27,7 +27,7 @@ import {
   formatResultBytes,
   formatUsd,
   gpuDisplayName,
-  measuredPodUsd,
+  measuredJobUsd,
   podCostExplanation,
 } from "../features/still-images/podRuntimeCost";
 import {
@@ -448,7 +448,9 @@ function StillImageJobCard({
   const saveNumber = job.workflowOptions?.save?.cameraNumber ?? "0000";
   const qwenMode = job.workflowOptions?.stillImage?.settings?.mode;
   const seed = job.workflowOptions?.stillImage?.seed;
-  const podUsd = measuredPodUsd(job);
+  // The whole run: the pod it rented plus the partner node it called. Showing the
+  // pod alone reported an eight-cent edit as half a cent.
+  const podUsd = measuredJobUsd(job);
   const podCost = podUsd === undefined ? undefined : formatUsd(podUsd);
   const podRuntime = formatPodRuntime(job);
   const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);

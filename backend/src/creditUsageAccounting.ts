@@ -53,7 +53,7 @@ export function creditsSpentForAccounting(
   if (isCreditExemptJob(job)) return 0;
 
   const actualCredits = positiveNumber(job.creditsActual);
-  if (actualCredits != null) return roundCredits(actualCredits);
+  if (actualCredits != null) return roundCredits(actualCredits + partnerApiCredits(job));
 
   if (isCountedCreditUsage(job.creditUsage)) {
     const trackedCredits = positiveNumber(job.creditsUsed) ?? positiveNumber(job.creditUsage?.total_estimated_credits);
@@ -70,7 +70,11 @@ export function creditsSpentForAccounting(
 
 export function creditAccountingSource(job: Pick<Job, "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage">) {
   if (positiveNumber(job.creditsActual) != null) {
-    return job.creditsActualSource || COMPANY_BALANCE_DELTA_SOURCE;
+    const measured = job.creditsActualSource || COMPANY_BALANCE_DELTA_SOURCE;
+    // Two terms means two sources, and a row that reports only one of them sends
+    // whoever is auditing it to the wrong place.
+    if (!partnerApiCredits(job)) return measured;
+    return `${measured}+${job.creditUsage?.source || "credit_usage"}`;
   }
 
   if (isCountedCreditUsage(job.creditUsage)) {
@@ -86,6 +90,30 @@ export function creditAccountingSource(job: Pick<Job, "creditsActual" | "credits
   }
 
   return "";
+}
+
+/**
+ * The partner-node API spend that a pod-time price does not include.
+ *
+ * A Still Images run can cost money in two places at once. The pod is rented from
+ * RunPod by the second; a partner node inside the graph -- GeminiNanoBanana2 for
+ * Image Editing -- is billed by Comfy against the org account, and the tracker
+ * prices it. Those are two accounts, so the two figures add: a 30-second edit is
+ * about half a cent of pod time and about eight cents of Nano Banana, and
+ * counting only the pod reported roughly six percent of what the run actually
+ * cost.
+ *
+ * Added only next to a pod-runtime figure. The other measured source, the company
+ * balance delta, reads the very account the partner nodes bill -- its figure
+ * already contains this spend, and adding the tracker on top would count it
+ * twice. Anything the tracker could not price is excluded by
+ * isCountedCreditUsage, so the zero-filled block that made gpt-image read as free
+ * still cannot become a measurement here.
+ */
+function partnerApiCredits(job: Pick<Job, "creditsActualSource" | "creditUsage">) {
+  if (job.creditsActualSource !== POD_RUNTIME_SOURCE) return 0;
+  if (!isCountedCreditUsage(job.creditUsage)) return 0;
+  return positiveNumber(job.creditUsage?.total_estimated_credits) ?? 0;
 }
 
 export function isCountedCreditUsage(creditUsage?: CreditUsageSummary) {

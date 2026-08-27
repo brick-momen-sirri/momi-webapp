@@ -9,6 +9,8 @@ import {
   measuredPodUsd,
   POD_RUNTIME_SOURCE,
   podCostExplanation,
+  measuredJobUsd,
+  partnerApiUsd,
 } from "./podRuntimeCost";
 
 // The source string is a contract with the server: it is what separates a measured
@@ -141,5 +143,52 @@ describe("formatResultBytes", () => {
     // so far -- and "0 MB" would be a claim about a file that certainly has bytes.
     expect(formatResultBytes(undefined)).toBeUndefined();
     expect(formatResultBytes(0)).toBeUndefined();
+  });
+});
+
+describe("the whole cost of a run", () => {
+  /** A completed Image Editing job, in the shape production stores. */
+  const editJob = (creditUsage?: Record<string, unknown>) =>
+    ({
+      creditsActual: 1,
+      creditsActualSource: POD_RUNTIME_SOURCE,
+      runpodTiming: { executionMs: 30097, gpuTypeId: "NVIDIA RTX PRO 6000", usdPerSecond: 0.0001844 },
+      ...(creditUsage === undefined ? {} : { creditUsage }),
+    }) as Parameters<typeof measuredJobUsd>[0];
+
+  const priced = { total_estimated_credits: 17.32, total_estimated_usd: 0.0821, source: "credit_tracker:runtime_price" };
+
+  it("adds the partner node's price to the pod time", () => {
+    // 30.097s x $0.0001844 = $0.00555 of pod, plus $0.0821 of Nano Banana.
+    expect(partnerApiUsd(editJob(priced))).toBeCloseTo(0.0821, 6);
+    expect(measuredJobUsd(editJob(priced))).toBeCloseTo(0.08765, 5);
+    // Showing the pod alone was reporting about six percent of the run.
+    expect(measuredPodUsd(editJob(priced))).toBeCloseTo(0.00555, 5);
+  });
+
+  it("falls back to the tracker's credits when it reports no dollars", () => {
+    expect(partnerApiUsd(editJob({ total_estimated_credits: 211, source: "credit_tracker:runtime_price" }))).toBeCloseTo(1, 6);
+  });
+
+  it("ignores a tracker block with no price in it, and a local estimate", () => {
+    const unpriced = { total_estimated_credits: 0, total_estimated_usd: 0, source: "credit_tracker:unknown", rows: [{}] };
+    expect(partnerApiUsd(editJob(unpriced))).toBeUndefined();
+    expect(measuredJobUsd(editJob(unpriced))).toBeCloseTo(0.00555, 5);
+    expect(partnerApiUsd(editJob({ total_estimated_credits: 25, source: "local_kling_estimate" }))).toBeUndefined();
+  });
+
+  it("adds nothing to a figure that already covers the same account", () => {
+    // The balance delta reads the account the partner nodes bill.
+    const delta = { ...editJob(priced), creditsActualSource: "company_balance_delta" };
+    expect(partnerApiUsd(delta)).toBeUndefined();
+  });
+
+  it("itemises both halves in the explanation, so a costly run is not a mystery", () => {
+    const text = podCostExplanation(editJob(priced));
+    expect(text).toContain("Pod:");
+    expect(text).toContain("Model call: $0.082");
+    expect(text).toContain("18.32 credits in total");
+    // A run with no partner node keeps the original single-line wording.
+    expect(podCostExplanation(editJob())).toContain("Charged as 1 credit.");
   });
 });

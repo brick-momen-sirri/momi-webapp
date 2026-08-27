@@ -49,6 +49,49 @@ export function measuredPodUsd(job: Pick<Job, "creditsActual" | "creditsActualSo
 }
 
 /**
+ * The partner-node spend that the pod price does not include.
+ *
+ * Kept in step with partnerApiCredits in backend/src/creditUsageAccounting.ts,
+ * which is the figure the dashboards and the balance are derived from. Same
+ * arrangement as POD_RUNTIME_SOURCE above: the server decides, this side only
+ * recognises, and a drift shows a smaller number rather than a wrong one.
+ */
+export function partnerApiUsd(job: Pick<Job, "creditsActualSource" | "creditUsage">) {
+  if (job.creditsActualSource !== POD_RUNTIME_SOURCE) return undefined;
+  const usage = job.creditUsage;
+  if (!usage || isUnpricedUsage(usage) || isLocalEstimate(usage.source)) return undefined;
+  const usd = usage.total_estimated_usd;
+  if (typeof usd === "number" && Number.isFinite(usd) && usd > 0) return usd;
+  const credits = usage.total_estimated_credits;
+  return typeof credits === "number" && Number.isFinite(credits) && credits > 0 ? credits / CREDITS_PER_USD : undefined;
+}
+
+/**
+ * What the whole run cost: the pod it rented and the partner node it called.
+ *
+ * A 30-second Image Editing run is about half a cent of pod time and about eight
+ * cents of Nano Banana, so showing only the first read as though the edit were
+ * almost free.
+ */
+export function measuredJobUsd(job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming" | "creditUsage">) {
+  const pod = measuredPodUsd(job);
+  if (pod === undefined) return undefined;
+  return pod + (partnerApiUsd(job) ?? 0);
+}
+
+/** A zero-filled tracker block means "not priced", never "free". */
+function isUnpricedUsage(usage: NonNullable<Job["creditUsage"]>) {
+  const positive = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value > 0;
+  if (positive(usage.total_estimated_credits) || positive(usage.total_estimated_usd)) return false;
+  return (usage.rows ?? []).every((row) => !positive(row.total_estimated_credits) && !positive(row.total_estimated_usd));
+}
+
+function isLocalEstimate(source: string | undefined) {
+  const value = (source ?? "").trim().toLowerCase();
+  return value === "local_kling_estimate" || (value.startsWith("local_") && value.includes("estimate"));
+}
+
+/**
  * A cost in dollars, at a precision that does not round a real run to nothing.
  *
  * These runs are cents: a 33s Pro Upscaler on a PRO 6000 is $0.030. Two decimals
@@ -89,7 +132,7 @@ export function formatResultBytes(bytes: number | undefined) {
  * takes the job decides which one -- 2.2x apart at the extremes -- so "18 credits
  * here, 8 there" is the system working, not a bug to go hunting.
  */
-export function podCostExplanation(job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming">) {
+export function podCostExplanation(job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming" | "creditUsage">) {
   const credits = measuredPodCredits(job);
   if (credits === undefined) {
     return "Not measured: no worker time was reported, the worker was gone before its GPU could be identified, or that GPU has no rate.";
@@ -99,10 +142,19 @@ export function podCostExplanation(job: Pick<Job, "creditsActual" | "creditsActu
   const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
   const rate = job.runpodTiming?.usdPerSecond;
   const parts = [runtime && `${runtime} of worker time`, gpu && `on ${gpu}`, rate && `at $${rate}/s`].filter(Boolean);
-  // Credits stay in the tooltip: the dashboards and the balance are denominated in
-  // them, so the figure has to remain findable even though the card shows dollars.
-  const priced = parts.length ? `Priced from ${parts.join(" ")}.` : "Priced from the worker time RunPod reported for this run.";
-  return `${priced} Charged as ${credits} credit${credits === 1 ? "" : "s"}.`;
+  const podPriced = parts.length ? `Pod: ${parts.join(" ")}` : "Pod: the worker time RunPod reported for this run";
+
+  // The two halves are itemised because they come from two accounts, and a run
+  // whose cost is mostly the model call reads as a mystery when only the pod is
+  // shown. Credits stay in the tooltip: the dashboards and the balance are
+  // denominated in them even though the card shows dollars.
+  const partnerUsd = partnerApiUsd(job);
+  if (partnerUsd === undefined) {
+    return `${podPriced}. Charged as ${credits} credit${credits === 1 ? "" : "s"}.`;
+  }
+  const partnerCredits = job.creditUsage?.total_estimated_credits;
+  const total = Math.round((credits + (partnerCredits ?? 0)) * 100) / 100;
+  return `${podPriced} — ${formatUsd(measuredPodUsd(job) ?? 0)}. Model call: ${formatUsd(partnerUsd)}, priced by the credit tracker. Charged as ${total} credits in total.`;
 }
 
 /** RunPod's gpuTypeId without the vendor prefix, which is the same on all of them. */

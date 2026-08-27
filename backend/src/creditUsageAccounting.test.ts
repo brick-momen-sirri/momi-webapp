@@ -235,3 +235,86 @@ test("a measured figure survives an unpriced tracker block", () => {
   assert.equal(creditsSpentForAccounting(job), 9.5);
   assert.equal(creditAccountingSource(job), POD_RUNTIME_SOURCE);
 });
+
+/**
+ * A completed Image Editing run, in the shape production actually stores.
+ *
+ * The two figures are the two accounts it spent from: ~30s of RunPod pod time
+ * priced at one credit, and the GeminiNanoBanana2 partner node priced by the
+ * tracker at 17.32.
+ */
+function imageEditJob(creditUsage?: Record<string, unknown>) {
+  return {
+    workflowOptions: { stillImage: { categoryId: "image-editing", settings: {}, edit: { documentId: "editdoc_1" } } },
+    creditsActual: 1,
+    creditsActualSource: POD_RUNTIME_SOURCE,
+    creditsUsed: 1,
+    runpodTiming: { executionMs: 30097, gpuTypeId: "NVIDIA RTX PRO 6000", usdPerSecond: 0.0001844 },
+    ...(creditUsage === undefined ? {} : { creditUsage }),
+  } as Parameters<typeof creditsSpentForAccounting>[0];
+}
+
+test("a still image run is charged for its pod time and its partner node together", () => {
+  // Two accounts, two figures, and they add: RunPod rents the pod by the second
+  // while Comfy bills the partner node against the org account. Counting only the
+  // pod reported one credit for a run that cost about eighteen.
+  const job = imageEditJob({
+    total_estimated_credits: 17.32,
+    total_estimated_usd: 0.0821,
+    source: "credit_tracker:runtime_price",
+  });
+
+  assert.equal(creditsSpentForAccounting(job), 18.32);
+  assert.equal(creditAccountingSource(job), `${POD_RUNTIME_SOURCE}+credit_tracker:runtime_price`);
+});
+
+test("the balance delta already contains the partner node, so nothing is added to it", () => {
+  // It reads the very account the partner nodes bill. Adding the tracker on top
+  // would charge that spend twice.
+  const job = {
+    ...imageEditJob({ total_estimated_credits: 17.32, source: "credit_tracker:runtime_price" }),
+    creditsActual: 40,
+    creditsActualSource: COMPANY_BALANCE_DELTA_SOURCE,
+  };
+
+  assert.equal(creditsSpentForAccounting(job), 40);
+  assert.equal(creditAccountingSource(job), COMPANY_BALANCE_DELTA_SOURCE);
+});
+
+test("a tracker block with no price in it still cannot become a charge", () => {
+  // The gpt-image failure mode: the node executed and came back with every figure
+  // zeroed because the tracker had no rule for it. Zero there means "not priced",
+  // so the run is charged for its pod time alone rather than for a made-up total.
+  const unpriced = imageEditJob({
+    total_estimated_credits: 0,
+    total_estimated_usd: 0,
+    source: "credit_tracker:unknown",
+    rows: [{ total_estimated_credits: 0, total_estimated_usd: 0 }],
+  });
+
+  assert.equal(isUnpricedCreditUsage(unpriced.creditUsage), true);
+  assert.equal(creditsSpentForAccounting(unpriced), 1);
+  assert.equal(creditAccountingSource(unpriced), POD_RUNTIME_SOURCE);
+});
+
+test("a local estimate is not a measurement and is not added either", () => {
+  const estimated = imageEditJob({ total_estimated_credits: 25, source: "local_kling_estimate" });
+  assert.equal(creditsSpentForAccounting(estimated), 1);
+});
+
+test("a still image run with no tracker block at all is just its pod time", () => {
+  assert.equal(creditsSpentForAccounting(imageEditJob()), 1);
+  assert.equal(creditAccountingSource(imageEditJob()), POD_RUNTIME_SOURCE);
+});
+
+test("only pod-priced jobs gain the partner term, so animation accounting is untouched", () => {
+  // pod_runtime is only ever stamped on a Still Images job, but the rule is the
+  // source rather than the preset, so an animation job cannot pick this up.
+  const animation = {
+    creditsActual: 12,
+    creditsActualSource: COMPANY_BALANCE_DELTA_SOURCE,
+    creditsUsed: 12,
+    creditUsage: { total_estimated_credits: 99, source: "credit_tracker:runtime_price" },
+  };
+  assert.equal(creditsSpentForAccounting(animation), 12);
+});
