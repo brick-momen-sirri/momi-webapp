@@ -148,7 +148,7 @@ describe("useStillImagesForm", () => {
     expect(renderHook(() => useStillImagesForm()).result.current.selectedCategoryId).toBe("reference-generator");
   });
 
-  it("keeps a completed layer but resets the editor for the next mask", () => {
+  it("keeps a completed layer, and the prompt, ready for the next mask", () => {
     const form = renderHook(() => useStillImagesForm());
     const mask = appendMaskStroke(createMaskDrawing(1200, 800), {
       tool: "brush",
@@ -168,7 +168,10 @@ describe("useStillImagesForm", () => {
     expect(form.result.current.selectedState).toMatchObject({
       activeEditLayerId: undefined,
       mask: undefined,
-      prompt: "",
+      // The region and the references are per-edit and go; the prompt describes
+      // the kind of edit being made and stays, so the next region can be painted
+      // and generated without retyping it.
+      prompt: "replace the chair",
       editReferences: [],
     });
     expect(form.result.current.selectedState.editLayers).toHaveLength(1);
@@ -195,7 +198,7 @@ describe("useStillImagesForm", () => {
     expect(form.result.current.selectedState).toMatchObject({
       activeEditLayerId: undefined,
       mask: undefined,
-      prompt: "",
+      prompt: "replace the chair",
       editReferences: [],
     });
   });
@@ -215,12 +218,13 @@ describe("useStillImagesForm", () => {
     expect(form.result.current.selectedState.editTarget).toBe("content");
   });
 
-  it("keeps opacity and the mask switch across a regeneration", () => {
+  it("keeps opacity, feather and the mask switch across a regeneration", () => {
     const form = renderHook(() => useStillImagesForm());
     act(() => form.result.current.setSelectedCategoryId("image-editing"));
     act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
     act(() => {
       form.result.current.setEditLayerOpacity("edit_layer_1", 35);
+      form.result.current.setEditLayerMaskFeather("edit_layer_1", 22);
       form.result.current.setEditLayerMaskEnabled("edit_layer_1", false);
     });
     act(() => form.result.current.selectEditLayer("edit_layer_1"));
@@ -231,6 +235,7 @@ describe("useStillImagesForm", () => {
     expect(form.result.current.selectedState.editLayers?.[0]).toMatchObject({
       generatedCropSourceUrl: "/api/media?path=generated-v2.png",
       opacity: 35,
+      maskFeather: 22,
       maskEnabled: false,
     });
   });
@@ -260,6 +265,25 @@ describe("useStillImagesForm", () => {
     const layer = form.result.current.selectedState.editLayers?.[0];
     expect(layer?.offset).toEqual({ x: 12, y: 8 });
     expect(layer?.mask.strokes[0].points).toEqual([{ x: 300, y: 250 }]);
+  });
+
+  it("carries the prompt across a deselect, and takes the layer's own when one is picked", () => {
+    const form = renderHook(() => useStillImagesForm());
+    act(() => form.result.current.setSelectedCategoryId("image-editing"));
+    act(() => form.result.current.commitEditLayer(completedEditJob("/api/media?path=generated-v1.png")));
+    act(() => form.result.current.setPrompt("remove the cable"));
+
+    // Selecting a layer swaps in that layer's prompt...
+    act(() => form.result.current.selectEditLayer("edit_layer_1"));
+    expect(form.result.current.selectedState.prompt).toBe("replace the chair");
+
+    // ...and leaving it again keeps whatever is in the box rather than blanking it.
+    act(() => form.result.current.startNewEditLayer());
+    expect(form.result.current.selectedState).toMatchObject({
+      activeEditLayerId: undefined,
+      mask: undefined,
+      prompt: "replace the chair",
+    });
   });
 
   it("duplicates a layer above its source without touching the selection", () => {

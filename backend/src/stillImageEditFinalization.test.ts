@@ -55,24 +55,30 @@ test("final composite requests reject crops outside the source", () => {
   );
 });
 
-test("final composite requests carry layer opacity and displacement, and drop the defaults", () => {
+test("final composite requests carry layer opacity, feather and displacement, and drop the defaults", () => {
   const parsed = parseFinalizeStillImageEditRequest({
     ...valid,
-    layers: [{ ...valid.layers[0], opacity: 40, offset: { x: -25, y: 12 } }],
+    layers: [{ ...valid.layers[0], opacity: 40, maskFeather: 16, offset: { x: -25, y: 12 } }],
   });
   assert.equal(parsed.layers[0].opacity, 40);
+  assert.equal(parsed.layers[0].maskFeather, 16);
   assert.deepEqual(parsed.layers[0].offset, { x: -25, y: 12 });
 
   // A layer at its generated position and full strength adds nothing to the wire.
   const plain = parseFinalizeStillImageEditRequest({
     ...valid,
-    layers: [{ ...valid.layers[0], opacity: 100, offset: { x: 0, y: 0 } }],
+    layers: [{ ...valid.layers[0], opacity: 100, maskFeather: 0, offset: { x: 0, y: 0 } }],
   });
   assert.equal(plain.layers[0].opacity, undefined);
+  assert.equal(plain.layers[0].maskFeather, undefined);
   assert.equal(plain.layers[0].offset, undefined);
 });
 
 test("final composite requests reject an out-of-range opacity or displacement", () => {
+  assert.throws(
+    () => parseFinalizeStillImageEditRequest({ ...valid, layers: [{ ...valid.layers[0], maskFeather: 1_001 }] }),
+    /mask feather is invalid/i,
+  );
   assert.throws(
     () => parseFinalizeStillImageEditRequest({ ...valid, layers: [{ ...valid.layers[0], opacity: 140 }] }),
     /opacity is invalid/i,

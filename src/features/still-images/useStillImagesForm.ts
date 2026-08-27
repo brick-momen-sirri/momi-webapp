@@ -9,6 +9,7 @@ import {
   renameEditLayer as renameLayerInList,
   reorderEditLayer,
   setEditLayerMaskEnabled as setLayerMaskEnabledInList,
+  setEditLayerMaskFeather as setLayerMaskFeatherInList,
   setEditLayerMaskLinked as setLayerMaskLinkedInList,
   setEditLayerOpacity as setLayerOpacityInList,
   resetEditLayerOffset as resetLayerOffsetInList,
@@ -195,7 +196,11 @@ export function useStillImagesForm() {
           ...current["image-editing"],
           activeEditLayerId: undefined,
           mask: undefined,
-          prompt: "",
+          // The prompt is deliberately kept. It describes the kind of edit the
+          // artist is making, not the layer they just left, and retyping "remove
+          // the cable" for the fourth cable is the single most repeated piece of
+          // work in a long editing session. Selecting a layer still replaces it
+          // with that layer's own prompt.
           editReferences: [],
           editTarget: undefined,
         },
@@ -304,6 +309,10 @@ export function useStillImagesForm() {
     updateEditLayers((layers) => setLayerMaskEnabledInList(layers, layerId, enabled));
   }
 
+  function setEditLayerMaskFeather(layerId: string, feather: number) {
+    updateEditLayers((layers) => setLayerMaskFeatherInList(layers, layerId, feather));
+  }
+
   function setEditLayerMaskLinked(layerId: string, linked: boolean) {
     updateEditLayers((layers) => setLayerMaskLinkedInList(layers, layerId, linked));
   }
@@ -378,6 +387,7 @@ export function useStillImagesForm() {
         // leaves all three exactly as they were set.
         opacity: existing?.opacity ?? 100,
         maskEnabled: existing?.maskEnabled ?? true,
+        maskFeather: existing?.maskFeather ?? 0,
         maskLinked: existing?.maskLinked ?? true,
         offset: existing?.offset ?? { x: 0, y: 0 },
         order,
@@ -416,7 +426,9 @@ export function useStillImagesForm() {
           activeEditLayerId: undefined,
           editTarget: undefined,
           mask: undefined,
-          prompt: "",
+          // Kept for the next region, as above. The references are not: they are
+          // object URLs this update revokes, and they are chosen per edit rather
+          // than reused across one.
           editDocumentId: edit.documentId,
           editMode: edit.mode,
           editOriginalSourceUrl: edit.originalSourceUrl,
@@ -482,6 +494,7 @@ export function useStillImagesForm() {
     resetEditLayerOffset,
     setEditLayerOpacity,
     setEditLayerMaskEnabled,
+    setEditLayerMaskFeather,
     setEditLayerMaskLinked,
     commitEditLayer,
   };

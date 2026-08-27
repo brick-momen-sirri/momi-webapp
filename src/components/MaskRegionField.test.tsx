@@ -36,6 +36,7 @@ describe("MaskRegionField", () => {
     const dialog = await screen.findByRole("dialog", { name: /choose the region to edit on source\.png/i });
     expect(dialog.parentElement).toBe(document.body);
     expect(document.body.style.overflow).toBe("hidden");
+    expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-mask-visualization", "highlight");
   });
 
   it("does not reopen merely because the field renders with an existing image", async () => {
@@ -59,7 +60,7 @@ describe("MaskRegionField", () => {
     fireEvent.click(screen.getByRole("button", { name: "Brush" }));
     const viewport = screen.getByTestId("mask-editor-viewport");
     const size = screen.getByRole("slider", { name: "Brush size" }) as HTMLInputElement;
-    const softness = screen.getByRole("slider", { name: "Mask softness" }) as HTMLInputElement;
+    const softness = screen.getByRole("slider", { name: "Brush softness" }) as HTMLInputElement;
     const originalSize = Number(size.value);
 
     fireEvent.pointerDown(viewport, { button: 2, buttons: 2, altKey: true, pointerId: 7, clientX: 100, clientY: 100 });
@@ -129,7 +130,7 @@ describe("MaskRegionField", () => {
     expect(screen.getByRole("button", { name: "Rectangle selection" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/alt draws from the centre, space repositions it/i)).toBeInTheDocument();
     expect(screen.queryByRole("slider", { name: "Brush size" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("slider", { name: "Mask softness" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Brush softness" })).not.toBeInTheDocument();
 
     const viewport = screen.getByTestId("mask-editor-viewport");
     fireEvent.pointerDown(viewport, { button: 0, buttons: 1, pointerId: 11, clientX: 100, clientY: 120 });
@@ -281,6 +282,7 @@ describe("MaskRegionField", () => {
     // Arming the pixels puts the Move tool up, because nothing else can act on them.
     expect(viewport).toHaveAttribute("data-tool", "move");
     expect(viewport).toHaveAttribute("data-edit-target", "content");
+    expect(viewport).toHaveAttribute("data-mask-visualization", "none");
 
     const context = screen.getByTestId("mask-editor-context");
     expect(context).toHaveTextContent("Edit Layer 03");
@@ -302,6 +304,41 @@ describe("MaskRegionField", () => {
     // than the stroke being silently refused.
     fireEvent.click(screen.getByRole("button", { name: "Brush" }));
     expect(onTargetChange).toHaveBeenCalledWith("mask");
+  });
+
+  it("shows the quiet mask edge only after an existing layer mask is explicitly targeted", async () => {
+    const selected = setMaskRectangleSelection(createMaskDrawing(1200, 800), {
+      x: 100,
+      y: 100,
+      width: 160,
+      height: 120,
+    });
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded-mask-target", name: "source.png", url: "blob:source" }}
+        drawing={selected}
+        onChange={() => undefined}
+        openRequest={1}
+        layerContext={{
+          layerId: "edit_mask",
+          name: "Edit Layer 04",
+          target: "mask",
+          crop: { x: 80, y: 80, size: 200, width: 200, height: 200, sourceWidth: 1200, sourceHeight: 800 },
+          opacity: 100,
+          visible: true,
+          maskEnabled: true,
+          maskLinked: true,
+          offset: { x: 0, y: 0 },
+          onTargetChange: () => undefined,
+          onMoveBy: () => undefined,
+        }}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const viewport = screen.getByTestId("mask-editor-viewport");
+    expect(viewport).toHaveAttribute("data-edit-target", "mask");
+    expect(viewport).toHaveAttribute("data-mask-visualization", "edge-only");
   });
 
   describe("free transform", () => {
@@ -399,6 +436,74 @@ describe("MaskRegionField", () => {
       fireEvent.click(screen.getByRole("button", { name: "Free transform" }));
       expect(screen.getByText(/nothing to transform yet/i)).toBeInTheDocument();
     });
+  });
+
+  it("keeps the zoom when the selected layer changes, and refits only for a new document", async () => {
+    const crop = { x: 40, y: 40, size: 100, width: 100, height: 100, sourceWidth: 1200, sourceHeight: 800 };
+    const context = (layerId: string, name: string) => ({
+      layerId,
+      name,
+      target: "mask" as const,
+      crop,
+      opacity: 100,
+      visible: true,
+      maskEnabled: true,
+      maskLinked: true,
+      offset: { x: 0, y: 0 },
+      onTargetChange: () => undefined,
+      onMoveBy: () => undefined,
+    });
+    const maskA = setMaskRectangleSelection(createMaskDrawing(1200, 800), { x: 10, y: 10, width: 50, height: 50 });
+    const maskB = setMaskRectangleSelection(createMaskDrawing(1200, 800), { x: 300, y: 300, width: 80, height: 80 });
+
+    const { rerender } = render(
+      <MaskRegionField
+        image={{ id: "uploaded-zoom", name: "source.png", url: "blob:source" }}
+        drawing={maskA}
+        onChange={() => undefined}
+        openRequest={1}
+        editorKey="editdoc_1"
+        layerContext={context("edit_a", "Edit Layer 01")}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const viewport = screen.getByTestId("mask-editor-viewport");
+    fireEvent.wheel(viewport, { deltaY: -100, clientX: 200, clientY: 200 });
+    const zoomed = viewport.getAttribute("data-zoom");
+    expect(Number(zoomed)).toBeGreaterThan(100);
+
+    // Selecting another layer swaps the drawing and the context but must not
+    // throw away the zoom the artist set to do the work they are selecting for.
+    rerender(
+      <MaskRegionField
+        image={{ id: "uploaded-zoom", name: "source.png", url: "blob:source" }}
+        drawing={maskB}
+        onChange={() => undefined}
+        openRequest={1}
+        editorKey="editdoc_1"
+        layerContext={context("edit_b", "Edit Layer 02")}
+      />,
+    );
+
+    expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-zoom", zoomed as string);
+    expect(screen.getByTestId("mask-editor-context")).toHaveTextContent("Edit Layer 02");
+    // The swap still landed: the editor adopted the new layer's mask on its own,
+    // which is why the remount was never needed for correctness.
+    expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-selection-x", "300");
+
+    // A different document is a different picture, so that one does refit.
+    rerender(
+      <MaskRegionField
+        image={{ id: "uploaded-zoom", name: "source.png", url: "blob:source" }}
+        drawing={maskB}
+        onChange={() => undefined}
+        openRequest={1}
+        editorKey="editdoc_2"
+        layerContext={context("edit_b", "Edit Layer 02")}
+      />,
+    );
+    expect(screen.getByTestId("mask-editor-viewport")).toHaveAttribute("data-zoom", "100");
   });
 
   it("keeps the canvas visibly busy and read-only for the real processing lifecycle", async () => {

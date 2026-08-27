@@ -125,6 +125,8 @@ export type StillImageEditLayer = {
   opacity?: number;
   /** A disabled mask reveals the layer's whole crop without discarding the mask. */
   maskEnabled?: boolean;
+  /** Non-destructive feather applied to the completed layer mask, in source pixels. */
+  maskFeather?: number;
   /** Move the content and the mask together, as Photoshop's chain icon does. */
   maskLinked?: boolean;
   /** Non-destructive content displacement, in original-image pixels. */

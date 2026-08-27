@@ -60,6 +60,7 @@ describe("layered PSD structure", () => {
     moved.layer.opacity = 40;
     moved.layer.offset = { x: 25, y: -10 };
     moved.layer.maskEnabled = false;
+    moved.layer.maskFeather = 18;
     const psd = buildLayeredPsdDocument({
       width: 400,
       height: 300,
@@ -72,7 +73,7 @@ describe("layered PSD structure", () => {
     expect(psd.children?.[0]).toMatchObject({ opacity: 0.4, top: -10, left: 25, bottom: 35, right: 105 });
     // A chained mask travels with its layer, and "off" is a flag rather than a
     // deleted mask, so the artist still has it when they reopen the file.
-    expect(psd.children?.[0].mask).toMatchObject({ top: -10, left: 25, disabled: true });
+    expect(psd.children?.[0].mask).toMatchObject({ top: -10, left: 25, disabled: true, userMaskFeather: 18 });
     expect(psd.children?.[0].mask?.canvas).toBe(moved.mask);
   });
 

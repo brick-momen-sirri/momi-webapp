@@ -166,6 +166,51 @@ test("only the masked part of a layer reaches the composite", async (context) =>
   assert.deepEqual(await pixel(target, 27, 20), [0, 0, 255, 255]);
 });
 
+test("mask feather softens the composite edge without changing the saved mask", async (context) => {
+  await fs.mkdir(uploadedMediaRoot, { recursive: true });
+  const directory = await fs.mkdtemp(path.join(uploadedMediaRoot, "edit-feather-test-"));
+  context.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  const original = path.join(directory, "original.png");
+  const cropImage = path.join(directory, "crop.png");
+  const mask = path.join(directory, "mask.png");
+  const target = path.join(directory, "final.png");
+  await solid(original, 100, 80, { r: 0, g: 0, b: 255 });
+  await solid(cropImage, 20, 20, { r: 255, g: 0, b: 0 });
+  await sharp({ create: { width: 20, height: 20, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+    .composite([
+      {
+        input: await sharp({ create: { width: 10, height: 20, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+          .png()
+          .toBuffer(),
+        left: 0,
+        top: 0,
+      },
+    ])
+    .png()
+    .toFile(mask);
+
+  await renderStillImageEditComposite(
+    mediaUrl(original),
+    [
+      {
+        layerId: "feathered",
+        crop: { x: 10, y: 15, size: 20, sourceWidth: 100, sourceHeight: 80 },
+        generatedCropUrl: mediaUrl(cropImage),
+        maskSourceUrl: mediaUrl(mask),
+        maskFeather: 3,
+      },
+    ],
+    target,
+  );
+
+  const [red, green, blue] = await pixel(target, 19, 24);
+  assert.ok(red > 0 && red < 255, `expected a feathered red channel, got ${red}`);
+  assert.ok(blue > 0 && blue < 255, `expected a feathered blue channel, got ${blue}`);
+  assert.equal(green, 0);
+  assert.deepEqual(await pixel(mask, 9, 10), [255, 255, 255, 255]);
+});
+
 test("a moved layer lands at its displaced position and leaves the original spot alone", async (context) => {
   await fs.mkdir(uploadedMediaRoot, { recursive: true });
   const directory = await fs.mkdtemp(path.join(uploadedMediaRoot, "edit-move-test-"));

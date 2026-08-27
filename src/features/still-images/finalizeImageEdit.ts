@@ -63,6 +63,7 @@ export async function finalizeImageEdit(input: {
         generatedCropUrl: layer.generatedCropSourceUrl,
         maskSourceUrl,
         opacity: layer.opacity,
+        maskFeather: layer.maskFeather,
         offset: layer.offset,
       };
     }),

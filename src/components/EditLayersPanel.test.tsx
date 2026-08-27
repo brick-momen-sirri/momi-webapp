@@ -35,6 +35,7 @@ function layer(id: string, order: number, overrides: Partial<StillImageEditLayer
 function renderPanel(props: Partial<React.ComponentProps<typeof EditLayersPanel>> = {}) {
   const handlers = {
     onNew: vi.fn(),
+    onDeselect: vi.fn(),
     onSelect: vi.fn(),
     onToggle: vi.fn(),
     onDelete: vi.fn(),
@@ -42,6 +43,7 @@ function renderPanel(props: Partial<React.ComponentProps<typeof EditLayersPanel>
     onMove: vi.fn(),
     onRename: vi.fn(),
     onOpacityChange: vi.fn(),
+    onMaskFeatherChange: vi.fn(),
     onMaskEnabledChange: vi.fn(),
     onMaskLinkedChange: vi.fn(),
     onResetOffset: vi.fn(),
@@ -73,6 +75,19 @@ describe("EditLayersPanel", () => {
     expect(handlers.onSelect).toHaveBeenCalledWith("a", "content");
   });
 
+  it("deselects from empty panel space without treating rows or controls as empty", () => {
+    const handlers = renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Edit Layer 01 content" }));
+    expect(handlers.onDeselect).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("list", { name: "Image edit layers" }));
+    expect(handlers.onDeselect).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("edit-layers-panel"));
+    expect(handlers.onDeselect).toHaveBeenCalledTimes(2);
+  });
+
   it("shows the mask controls and opacity for the selected layer only", () => {
     const handlers = renderPanel();
 
@@ -82,19 +97,45 @@ describe("EditLayersPanel", () => {
     fireEvent.change(opacity, { target: { value: "55" } });
     expect(handlers.onOpacityChange).toHaveBeenCalledWith("b", 55);
 
+    const feather = screen.getByRole("slider", { name: "Edit Layer 02 mask feather" });
+    fireEvent.change(feather, { target: { value: "12" } });
+    expect(handlers.onMaskFeatherChange).toHaveBeenCalledWith("b", 12);
+
     fireEvent.click(screen.getByRole("button", { name: /disable mask/i }));
     expect(handlers.onMaskEnabledChange).toHaveBeenCalledWith("b", false);
 
-    fireEvent.click(screen.getByRole("button", { name: /linked/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Mask linked — unlink Edit Layer 02" }));
     expect(handlers.onMaskLinkedChange).toHaveBeenCalledWith("b", false);
   });
 
-  it("summarises what has been done to a layer without opening it", () => {
+  it("identifies a layer by its prompt rather than by its settings", () => {
+    renderPanel({
+      layers: [layer("a", 0, { prompt: "replace the sky with dusk" }), layer("b", 1, { prompt: "remove the cable" })],
+    });
+
+    expect(screen.getByText("replace the sky with dusk")).toBeInTheDocument();
+    expect(screen.getByText("remove the cable")).toBeInTheDocument();
+  });
+
+  it("marks an adjusted layer without spending the row on the numbers", () => {
     renderPanel({
       layers: [layer("a", 0, { opacity: 50, maskEnabled: false, offset: { x: 4, y: 0 } }), layer("b", 1)],
     });
 
-    expect(screen.getByText("50% · mask off · moved")).toBeInTheDocument();
+    // One dot for the adjusted layer, none for the untouched one, and the detail
+    // available to a hover and to a screen reader rather than printed on the row.
+    expect(document.querySelectorAll("[data-adjusted-marker]")).toHaveLength(1);
+    const adjusted = document.querySelector('[data-layer-id="a"]') as HTMLElement;
+    expect(within(adjusted).getByText("50% opacity · mask off · moved")).toHaveClass("sr-only");
+    expect(within(adjusted).getByRole("button", { name: /^Edit Layer 01/ })).toHaveAttribute(
+      "title",
+      expect.stringContaining("50% opacity · mask off · moved"),
+    );
+  });
+
+  it("says a layer is completed when it was generated without a prompt", () => {
+    renderPanel({ layers: [layer("a", 0, { prompt: "  " })] });
+    expect(screen.getByText("Completed edit")).toBeInTheDocument();
   });
 
   it("offers a reset only for a mask that has actually been transformed", () => {
@@ -128,10 +169,10 @@ describe("EditLayersPanel", () => {
   it("duplicates, reorders and deletes from the row", () => {
     const handlers = renderPanel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Duplicate Edit Layer 01" }));
-    expect(handlers.onDuplicate).toHaveBeenCalledWith("a");
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+    expect(handlers.onDuplicate).toHaveBeenCalledWith("b");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete Edit Layer 02" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(handlers.onDelete).toHaveBeenCalledWith("b");
 
     // Top of the stack cannot go up, bottom cannot go down.

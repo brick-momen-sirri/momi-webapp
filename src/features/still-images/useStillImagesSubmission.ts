@@ -448,6 +448,7 @@ async function uploadPaintedSlots(options: {
         offset: layer.offset,
         maskOffset: layer.maskOffset,
         maskEnabled: layer.maskEnabled,
+        maskFeather: layer.maskFeather,
       };
       if (layer.mask) return { image, ...placement, drawing: layer.mask };
       if (layer.maskSourceUrl) {
@@ -498,6 +499,7 @@ async function uploadPaintedSlots(options: {
         generatedCropUrl: layer.generatedCropSourceUrl,
         maskSourceUrl,
         opacity: layer.opacity,
+        maskFeather: layer.maskFeather,
         offset: layer.offset,
       };
     }),

@@ -157,6 +157,8 @@ export type StillImageEditBaseLayer = {
    * 50%, or the delivered result stops matching the editor preview.
    */
   opacity?: number;
+  /** Non-destructive user-mask feather in source-image pixels. */
+  maskFeather?: number;
   /**
    * Non-destructive content displacement, in original-image pixels.
    *

@@ -354,6 +354,8 @@ function normalizedMaskTransform(value: unknown) {
  */
 function normalizedLayerPlacement(layer: Record<string, unknown>, label: string, crop: ReturnType<typeof normalizedCrop>) {
   const opacity = layer.opacity === undefined ? undefined : boundedWholeNumber(layer.opacity, `${label}.opacity`, 0, 100);
+  const maskFeather =
+    layer.maskFeather === undefined ? undefined : boundedWholeNumber(layer.maskFeather, `${label}.maskFeather`, 0, 1_000);
   let offset: { x: number; y: number } | undefined;
   if (layer.offset !== undefined) {
     const point = plainRecord(layer.offset, `${label}.offset`);
@@ -364,6 +366,7 @@ function normalizedLayerPlacement(layer: Record<string, unknown>, label: string,
   }
   return {
     ...(opacity === undefined || opacity === 100 ? {} : { opacity }),
+    ...(maskFeather === undefined || maskFeather === 0 ? {} : { maskFeather }),
     ...(offset === undefined || (offset.x === 0 && offset.y === 0) ? {} : { offset }),
   };
 }

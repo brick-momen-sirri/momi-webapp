@@ -452,6 +452,7 @@ test("layer opacity, displacement and mask inversion survive normalization", () 
         generatedCropUrl: "/api/media?path=lower.png",
         maskSourceUrl: "/api/media?path=lower-mask.png",
         opacity: 55,
+        maskFeather: 18,
         offset: { x: -30, y: 12 },
       },
       // Defaults are dropped rather than written out, so an untouched layer
@@ -470,8 +471,10 @@ test("layer opacity, displacement and mask inversion survive normalization", () 
   const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
   assert.equal(options.edit?.mask.inverted, true);
   assert.equal(options.edit?.baseLayers[0].opacity, 55);
+  assert.equal(options.edit?.baseLayers[0].maskFeather, 18);
   assert.deepEqual(options.edit?.baseLayers[0].offset, { x: -30, y: 12 });
   assert.equal(options.edit?.baseLayers[1].opacity, undefined);
+  assert.equal(options.edit?.baseLayers[1].maskFeather, undefined);
   assert.equal(options.edit?.baseLayers[1].offset, undefined);
 });
 
@@ -501,6 +504,14 @@ test("out-of-range layer opacity and displacement are refused", () => {
         edit: { ...edit, baseLayers: [{ ...baseLayer, opacity: 250 }] },
       }),
     /baseLayers\[0\]\.opacity/,
+  );
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, baseLayers: [{ ...baseLayer, maskFeather: 1_001 }] },
+      }),
+    /baseLayers\[0\]\.maskFeather/,
   );
   assert.throws(
     () =>

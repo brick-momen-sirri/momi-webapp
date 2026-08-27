@@ -21,6 +21,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Feather,
   Layers3,
   Link2,
   Link2Off,
@@ -34,7 +35,15 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { layerMaskEnabled, layerMaskLinked, layerOffset, layerOpacity } from "../features/still-images/imageEditLayers";
+import {
+  editCropHeight,
+  editCropWidth,
+  layerMaskEnabled,
+  layerMaskFeather,
+  layerMaskLinked,
+  layerOffset,
+  layerOpacity,
+} from "../features/still-images/imageEditLayers";
 import {
   isIdentityTransform,
   maskInverted,
@@ -53,6 +62,7 @@ type EditLayersPanelProps = {
   /** Which half of the selected layer the editor's tools are pointed at. */
   activeTarget: StillImageEditTarget;
   onNew: () => void;
+  onDeselect: () => void;
   onSelect: (layerId: string, target: StillImageEditTarget) => void;
   onToggle: (layerId: string) => void;
   onDelete: (layerId: string) => void;
@@ -60,6 +70,7 @@ type EditLayersPanelProps = {
   onMove: (layerId: string, direction: -1 | 1) => void;
   onRename: (layerId: string, name: string) => void;
   onOpacityChange: (layerId: string, opacity: number) => void;
+  onMaskFeatherChange: (layerId: string, feather: number) => void;
   onMaskEnabledChange: (layerId: string, enabled: boolean) => void;
   onMaskLinkedChange: (layerId: string, linked: boolean) => void;
   onResetOffset: (layerId: string) => void;
@@ -79,6 +90,7 @@ export function EditLayersPanel({
   activeLayerId,
   activeTarget,
   onNew,
+  onDeselect,
   onSelect,
   onToggle,
   onDelete,
@@ -86,6 +98,7 @@ export function EditLayersPanel({
   onMove,
   onRename,
   onOpacityChange,
+  onMaskFeatherChange,
   onMaskEnabledChange,
   onMaskLinkedChange,
   onResetOffset,
@@ -101,8 +114,21 @@ export function EditLayersPanel({
   // Displayed top-down the way every layer stack is, while order counts upwards.
   const ordered = [...layers].sort((a, b) => b.order - a.order);
 
+  function handleEmptyPanelClick(event: React.MouseEvent<HTMLElement>) {
+    if (disabled || !activeLayerId) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.dataset.layerPanelEmptySurface === undefined) return;
+    onDeselect();
+  }
+
   return (
-    <section className="rounded-lg border border-line bg-white p-3 shadow-panel" aria-disabled={disabled}>
+    <section
+      className="rounded-lg border border-line bg-white p-3 shadow-panel"
+      aria-disabled={disabled}
+      data-testid="edit-layers-panel"
+      data-layer-panel-empty-surface=""
+      onClick={handleEmptyPanelClick}
+    >
       <div className="flex items-center gap-2">
         <Layers3 className="h-4 w-4 text-stone-500" />
         <h2 className="text-sm font-semibold">Layers</h2>
@@ -127,7 +153,7 @@ export function EditLayersPanel({
         </p>
       ) : null}
 
-      <div className="mt-3 space-y-1.5" role="list" aria-label="Image edit layers">
+      <div className="mt-3 space-y-1.5" role="list" aria-label="Image edit layers" data-layer-panel-empty-surface="">
         {ordered.map((layer, displayedIndex) => (
           <LayerRow
             key={layer.id}
@@ -145,6 +171,7 @@ export function EditLayersPanel({
             onMove={onMove}
             onRename={onRename}
             onOpacityChange={onOpacityChange}
+            onMaskFeatherChange={onMaskFeatherChange}
             onMaskEnabledChange={onMaskEnabledChange}
             onMaskLinkedChange={onMaskLinkedChange}
             onResetOffset={onResetOffset}
@@ -200,6 +227,7 @@ type LayerRowProps = {
   | "onMove"
   | "onRename"
   | "onOpacityChange"
+  | "onMaskFeatherChange"
   | "onMaskEnabledChange"
   | "onMaskLinkedChange"
   | "onResetOffset"
@@ -226,6 +254,7 @@ function LayerRow({
   onMove,
   onRename,
   onOpacityChange,
+  onMaskFeatherChange,
   onMaskEnabledChange,
   onMaskLinkedChange,
   onResetOffset,
@@ -239,6 +268,11 @@ function LayerRow({
   const [renaming, setRenaming] = useState(false);
   const previewUrl = thumbnailMediaUrl(layer.generatedCropUrl ?? layer.resultUrl, THUMBNAIL_WIDTH.chip);
   const opacity = layerOpacity(layer);
+  const feather = layerMaskFeather(layer);
+  const maximumFeather = Math.max(
+    feather,
+    Math.min(500, Math.max(1, Math.round(Math.min(editCropWidth(layer.crop), editCropHeight(layer.crop)) / 2))),
+  );
   const maskOn = layerMaskEnabled(layer);
   const linked = layerMaskLinked(layer);
   const offset = layerOffset(layer);
@@ -246,6 +280,7 @@ function LayerRow({
   const inverted = maskInverted(layer.mask);
   const transform = maskTransform(layer.mask);
   const transformed = !isIdentityTransform(transform);
+  const adjustments = adjustmentSummary(opacity, feather, maskOn, inverted, moved, transformed);
 
   return (
     <div
@@ -258,14 +293,14 @@ function LayerRow({
         active ? "border-accent bg-cyan-50 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]" : "border-line bg-white",
       )}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-1.5">
         <button
           type="button"
           onClick={() => onToggle(layer.id)}
           disabled={disabled}
           aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
           aria-pressed={layer.visible}
-          className="flex h-8 w-7 shrink-0 items-center justify-center rounded text-stone-500 hover:bg-stone-100 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-8 w-7 shrink-0 items-center justify-center rounded text-stone-500 hover:bg-stone-100 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
         >
           {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
         </button>
@@ -286,13 +321,20 @@ function LayerRow({
           )}
         </ThumbnailButton>
 
-        <span
-          className="flex h-4 w-3 shrink-0 items-center justify-center text-stone-400"
+        <button
+          type="button"
+          onClick={() => onMaskLinkedChange(layer.id, !linked)}
+          disabled={disabled}
+          className={cn(
+            "flex h-8 w-6 shrink-0 items-center justify-center rounded transition disabled:cursor-not-allowed disabled:opacity-45",
+            linked ? "text-stone-400 hover:bg-stone-100 hover:text-ink" : "bg-amber-50 text-amber-700",
+          )}
           title={linked ? "Mask moves with the layer" : "Mask moves independently"}
-          aria-hidden="true"
+          aria-label={`Mask ${linked ? "linked" : "unlinked"} — ${linked ? "unlink" : "link"} ${layer.name}`}
+          aria-pressed={linked}
         >
-          {linked ? <Link2 className="h-3 w-3" /> : <Link2Off className="h-3 w-3 text-amber-600" />}
-        </span>
+          {linked ? <Link2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
+        </button>
 
         <ThumbnailButton
           label={`Edit ${layer.name} mask`}
@@ -301,7 +343,7 @@ function LayerRow({
           disabled={disabled}
           onClick={() => onSelect(layer.id, "mask")}
         >
-          <MaskThumbnail drawing={layer.mask} dimmed={!maskOn} />
+          <MaskThumbnail drawing={layer.mask} feather={feather} dimmed={!maskOn} />
         </ThumbnailButton>
 
         <div className="ml-1 min-w-0 flex-1">
@@ -327,144 +369,173 @@ function LayerRow({
               onClick={() => onSelect(layer.id, active ? activeTarget : "content")}
               onDoubleClick={() => !disabled && setRenaming(true)}
               disabled={disabled}
-              title="Double-click to rename"
+              title={`${layer.name}${adjustments ? ` — ${adjustments}` : ""}\nDouble-click to rename`}
               className="block w-full min-w-0 text-left disabled:cursor-not-allowed disabled:opacity-55"
             >
-              <span className="block truncate text-xs font-bold text-ink">{layer.name}</span>
-              <span className="block truncate text-[10px] text-stone-500">
-                {layer.status === "completed" ? statusLine(opacity, maskOn, inverted, moved, transformed) : layer.status}
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="min-w-0 truncate text-xs font-bold text-ink">{layer.name}</span>
+                {adjustments ? (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" data-adjusted-marker />
+                ) : null}
               </span>
+              {/*
+                The prompt, not the adjustment summary. Twelve rows all reading
+                "100%" answer no question anybody has; the thing an artist scans
+                for is which layer was the sky. What has been adjusted is a dot,
+                the hover title, and the whole expanded panel once selected.
+              */}
+              <span className="block truncate text-[10px] text-stone-500">
+                {layer.status === "completed" ? layer.prompt.trim() || "Completed edit" : layer.status}
+              </span>
+              {adjustments ? <span className="sr-only">{adjustments}</span> : null}
             </button>
           )}
         </div>
 
-        <RowButton
-          onClick={() => onMove(layer.id, 1)}
-          disabled={disabled || atTop}
-          label={`Move ${layer.name} up`}
-          title="Move up"
-        >
-          <ChevronUp className="h-3.5 w-3.5" />
-        </RowButton>
-        <RowButton
-          onClick={() => onMove(layer.id, -1)}
-          disabled={disabled || atBottom}
-          label={`Move ${layer.name} down`}
-          title="Move down"
-        >
-          <ChevronDown className="h-3.5 w-3.5" />
-        </RowButton>
-        <RowButton
-          onClick={() => onDuplicate(layer.id)}
-          disabled={disabled}
-          label={`Duplicate ${layer.name}`}
-          title="Duplicate layer"
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </RowButton>
-        <RowButton
-          onClick={() => onDelete(layer.id)}
-          disabled={disabled}
-          label={`Delete ${layer.name}`}
-          title="Delete layer"
-          destructive
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </RowButton>
+        <div className="flex shrink-0 flex-col rounded border border-stone-200 bg-white" aria-label={`${layer.name} order`}>
+          <RowButton
+            onClick={() => onMove(layer.id, 1)}
+            disabled={disabled || atTop}
+            label={`Move ${layer.name} up`}
+            title="Move up"
+            compact
+          >
+            <ChevronUp className="h-3 w-3" />
+          </RowButton>
+          <RowButton
+            onClick={() => onMove(layer.id, -1)}
+            disabled={disabled || atBottom}
+            label={`Move ${layer.name} down`}
+            title="Move down"
+            compact
+          >
+            <ChevronDown className="h-3 w-3" />
+          </RowButton>
+        </div>
         <span className="sr-only">Layer {displayedIndex + 1}</span>
       </div>
 
       {active ? (
-        <div className="mt-2 space-y-2 border-t border-cyan-200/70 pt-2">
-          <label className="flex items-center gap-2 text-[11px] font-semibold text-stone-600">
-            Opacity
-            <input
-              type="range"
-              min={0}
-              max={100}
+        <div className="mt-2 space-y-2.5 border-t border-cyan-200/70 pt-2.5">
+          <div className="space-y-2 rounded-md border border-stone-200 bg-stone-50/80 p-2">
+            <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-stone-400">Adjustments</p>
+            <LayerSlider
+              label="Opacity"
               value={opacity}
+              maximum={100}
+              suffix="%"
               disabled={disabled}
-              onChange={(event) => onOpacityChange(layer.id, Number(event.target.value))}
-              className="min-w-0 flex-1 accent-accent disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={`${layer.name} opacity`}
+              ariaLabel={`${layer.name} opacity`}
+              onChange={(value) => onOpacityChange(layer.id, value)}
             />
-            <span className="w-9 text-right tabular-nums text-stone-800">{opacity}%</span>
-          </label>
-
-          <div className="flex flex-wrap items-center gap-1">
-            <ChipButton
-              onClick={() => onMaskEnabledChange(layer.id, !maskOn)}
+            <LayerSlider
+              label="Feather"
+              icon={<Feather className="h-3 w-3" />}
+              value={feather}
+              maximum={maximumFeather}
+              suffix="px"
               disabled={disabled}
-              pressed={!maskOn}
-              title={maskOn ? "Turn the mask off — the whole layer shows" : "Turn the mask back on"}
-            >
-              <CircleOff className="h-3 w-3" />
-              {maskOn ? "Disable mask" : "Mask off"}
-            </ChipButton>
-            <ChipButton
-              onClick={() => onMaskLinkedChange(layer.id, !linked)}
-              disabled={disabled}
-              pressed={!linked}
-              title={linked ? "Unlink the mask so it moves on its own" : "Link the mask back to the layer"}
-            >
-              {linked ? <Link2 className="h-3 w-3" /> : <Link2Off className="h-3 w-3" />}
-              {linked ? "Linked" : "Unlinked"}
-            </ChipButton>
-            {onInvertMask ? (
-              <ChipButton onClick={onInvertMask} disabled={disabled} pressed={inverted} title="Invert the mask">
-                <Contrast className="h-3 w-3" />
-                Invert
-              </ChipButton>
-            ) : null}
-            {onClearMask ? (
-              <ChipButton onClick={onClearMask} disabled={disabled} title="Clear the mask">
-                <Trash2 className="h-3 w-3" />
-                Clear
-              </ChipButton>
-            ) : null}
-            {moved ? (
-              <ChipButton
-                onClick={() => onResetOffset(layer.id)}
-                disabled={disabled}
-                title={`Put the layer back at its generated position (${offset.x >= 0 ? "+" : ""}${Math.round(offset.x)}, ${offset.y >= 0 ? "+" : ""}${Math.round(offset.y)} px)`}
-              >
-                <RotateCcw className="h-3 w-3" />
-                Reset move
-              </ChipButton>
-            ) : null}
-            {transformed && onResetMaskTransform ? (
-              <ChipButton
-                onClick={onResetMaskTransform}
-                disabled={disabled}
-                title={`Put the mask back to the shape it was painted (${transformSummary(transform)})`}
-              >
-                <Scaling className="h-3 w-3" />
-                Reset transform
-              </ChipButton>
-            ) : null}
+              ariaLabel={`${layer.name} mask feather`}
+              onChange={(value) => onMaskFeatherChange(layer.id, value)}
+            />
           </div>
 
-          {onRegenerate ? (
-            <button
-              type="button"
-              onClick={onRegenerate}
-              disabled={disabled || !canRegenerate}
-              title={canRegenerate ? "Run this layer's edit again against its frozen base" : regenerateHint}
-              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-accent/60 bg-white px-2 text-[11px] font-bold text-accent transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:border-line disabled:text-stone-400"
-            >
-              <WandSparkles className="h-3.5 w-3.5" />
-              Regenerate this layer
-            </button>
-          ) : null}
+          <div>
+            <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-stone-400">Mask</p>
+            <div className="flex flex-wrap items-center gap-1">
+              <ChipButton
+                onClick={() => onMaskEnabledChange(layer.id, !maskOn)}
+                disabled={disabled}
+                pressed={!maskOn}
+                title={maskOn ? "Turn the mask off — the whole layer shows" : "Turn the mask back on"}
+              >
+                <CircleOff className="h-3 w-3 shrink-0" />
+                {maskOn ? "Disable mask" : "Mask off"}
+              </ChipButton>
+              {onInvertMask ? (
+                <ChipButton onClick={onInvertMask} disabled={disabled} pressed={inverted} title="Invert the mask">
+                  <Contrast className="h-3 w-3 shrink-0" />
+                  Invert
+                </ChipButton>
+              ) : null}
+              {onClearMask ? (
+                <ChipButton onClick={onClearMask} disabled={disabled} title="Clear the mask">
+                  <Trash2 className="h-3 w-3 shrink-0" />
+                  Clear
+                </ChipButton>
+              ) : null}
+              {moved ? (
+                <ChipButton
+                  onClick={() => onResetOffset(layer.id)}
+                  disabled={disabled}
+                  title={`Put the layer back at its generated position (${offset.x >= 0 ? "+" : ""}${Math.round(offset.x)}, ${offset.y >= 0 ? "+" : ""}${Math.round(offset.y)} px)`}
+                >
+                  <RotateCcw className="h-3 w-3 shrink-0" />
+                  Reset move
+                </ChipButton>
+              ) : null}
+              {transformed && onResetMaskTransform ? (
+                <ChipButton
+                  onClick={onResetMaskTransform}
+                  disabled={disabled}
+                  title={`Put the mask back to the shape it was painted (${transformSummary(transform)})`}
+                >
+                  <Scaling className="h-3 w-3 shrink-0" />
+                  Reset transform
+                </ChipButton>
+              ) : null}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-stone-400">Layer actions</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {onRegenerate ? (
+                <button
+                  type="button"
+                  onClick={onRegenerate}
+                  disabled={disabled || !canRegenerate}
+                  title={canRegenerate ? "Run this layer's edit again against its frozen base" : regenerateHint}
+                  className="col-span-2 flex h-8 items-center justify-center gap-1.5 rounded-md border border-accent/60 bg-white px-2 text-[11px] font-bold text-accent transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:border-line disabled:text-stone-400"
+                >
+                  <WandSparkles className="h-3.5 w-3.5 shrink-0" />
+                  Regenerate this layer
+                </button>
+              ) : null}
+              <LayerActionButton onClick={() => onDuplicate(layer.id)} disabled={disabled}>
+                <Copy className="h-3.5 w-3.5 shrink-0" />
+                Duplicate
+              </LayerActionButton>
+              <LayerActionButton onClick={() => onDelete(layer.id)} disabled={disabled} destructive>
+                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                Delete
+              </LayerActionButton>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-/** The one-line "what is different about this layer" summary under its name. */
-function statusLine(opacity: number, maskEnabled: boolean, inverted: boolean, moved: boolean, transformed: boolean) {
-  const notes = [`${opacity}%`];
+/**
+ * What has been changed about this layer, or nothing at all.
+ *
+ * Empty for a layer sitting exactly as it was generated, which is most of them --
+ * that is what lets the row show a marker only when there is something to mark,
+ * instead of a summary that reads the same on every untouched layer.
+ */
+function adjustmentSummary(
+  opacity: number,
+  feather: number,
+  maskEnabled: boolean,
+  inverted: boolean,
+  moved: boolean,
+  transformed: boolean,
+) {
+  const notes: string[] = [];
+  if (opacity !== 100) notes.push(`${opacity}% opacity`);
+  if (feather) notes.push(`${feather}px feather`);
   if (!maskEnabled) notes.push("mask off");
   else if (inverted) notes.push("mask inverted");
   if (moved) notes.push("moved");
@@ -516,20 +587,20 @@ function ThumbnailButton({
   );
 }
 
-function MaskThumbnail({ drawing, dimmed }: { drawing: MaskDrawing; dimmed: boolean }) {
+function MaskThumbnail({ drawing, feather, dimmed }: { drawing: MaskDrawing; feather: number; dimmed: boolean }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const rendered = renderMaskThumbnailCanvas(drawing, 128);
+    const rendered = renderMaskThumbnailCanvas(drawing, 128, feather);
     canvas.width = rendered.width;
     canvas.height = rendered.height;
     const context = canvas.getContext("2d");
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.drawImage(rendered, 0, 0);
-  }, [drawing]);
+  }, [drawing, feather]);
 
   return (
     <canvas
@@ -547,6 +618,7 @@ function RowButton({
   label,
   title,
   destructive,
+  compact,
   children,
 }: {
   onClick: () => void;
@@ -554,6 +626,7 @@ function RowButton({
   label: string;
   title: string;
   destructive?: boolean;
+  compact?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -564,8 +637,81 @@ function RowButton({
       aria-label={label}
       title={title}
       className={cn(
-        "flex h-7 w-6 shrink-0 items-center justify-center rounded text-stone-400 transition disabled:cursor-not-allowed disabled:opacity-25",
+        "flex shrink-0 items-center justify-center rounded text-stone-500 transition disabled:cursor-not-allowed disabled:opacity-45",
+        compact ? "h-[17px] w-6" : "h-7 w-7",
         destructive ? "hover:bg-red-50 hover:text-red-600" : "hover:bg-stone-100 hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function LayerSlider({
+  label,
+  icon,
+  value,
+  maximum,
+  suffix,
+  disabled,
+  ariaLabel,
+  onChange,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  value: number;
+  maximum: number;
+  suffix: string;
+  disabled?: boolean;
+  ariaLabel: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[4.25rem_minmax(0,1fr)_3.25rem] items-center gap-2 text-[11px] font-semibold text-stone-600">
+      <span className="flex items-center gap-1">
+        {icon}
+        {label}
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={maximum}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="min-w-0 accent-accent disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label={ariaLabel}
+      />
+      <span className="text-right tabular-nums text-stone-800">
+        {value}
+        {suffix}
+      </span>
+    </label>
+  );
+}
+
+function LayerActionButton({
+  onClick,
+  disabled,
+  destructive,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex h-8 items-center justify-center gap-1.5 rounded-md border bg-white px-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-40",
+        destructive
+          ? "border-red-200 text-red-600 hover:bg-red-50"
+          : "border-stone-300 text-stone-600 hover:bg-stone-100 hover:text-ink",
       )}
     >
       {children}

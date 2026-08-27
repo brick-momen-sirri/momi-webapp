@@ -65,6 +65,7 @@ type StillImagesSettingsPanelProps = {
   onMoveEditLayerBy?: (layerId: string, target: StillImageEditTarget, delta: MaskPoint) => void;
   onRenameEditLayer?: (layerId: string, name: string) => void;
   onEditLayerOpacityChange?: (layerId: string, opacity: number) => void;
+  onEditLayerMaskFeatherChange?: (layerId: string, feather: number) => void;
   onEditLayerMaskEnabledChange?: (layerId: string, enabled: boolean) => void;
   onEditLayerMaskLinkedChange?: (layerId: string, linked: boolean) => void;
   onResetEditLayerOffset?: (layerId: string) => void;
@@ -102,6 +103,7 @@ export function StillImagesSettingsPanel({
   onMoveEditLayerBy = () => undefined,
   onRenameEditLayer = () => undefined,
   onEditLayerOpacityChange = () => undefined,
+  onEditLayerMaskFeatherChange = () => undefined,
   onEditLayerMaskEnabledChange = () => undefined,
   onEditLayerMaskLinkedChange = () => undefined,
   onResetEditLayerOffset = () => undefined,
@@ -282,7 +284,11 @@ export function StillImagesSettingsPanel({
           onChange={onMaskChange}
           onEditorDraftChange={onMaskChange}
           openRequest={regionOpenRequest}
-          editorKey={`${state.editDocumentId ?? "edit"}:${state.activeEditLayerId ?? `new-${regionOpenRequest}`}`}
+          // Keyed by the document, not the selected layer. A layer selection swaps
+          // the drawing the editor is holding -- which it already adopts through
+          // its own effect -- so remounting for one would only throw away the zoom
+          // and pan the artist set to do the very work they are selecting it for.
+          editorKey={state.editDocumentId ?? "edit"}
           finishing={finishingEdit}
           processing={editorProcessing}
           processingLabel={editorProcessingLabel}
@@ -297,6 +303,7 @@ export function StillImagesSettingsPanel({
                 onNewEditLayer();
                 setRegionOpenRequest((request) => request + 1);
               }}
+              onDeselect={onNewEditLayer}
               onSelect={onSelectEditLayer}
               onToggle={onToggleEditLayer}
               onDelete={onDeleteEditLayer}
@@ -304,6 +311,7 @@ export function StillImagesSettingsPanel({
               onMove={onMoveEditLayer}
               onRename={onRenameEditLayer}
               onOpacityChange={onEditLayerOpacityChange}
+              onMaskFeatherChange={onEditLayerMaskFeatherChange}
               onMaskEnabledChange={onEditLayerMaskEnabledChange}
               onMaskLinkedChange={onEditLayerMaskLinkedChange}
               onResetOffset={onResetEditLayerOffset}

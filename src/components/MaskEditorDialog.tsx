@@ -94,6 +94,7 @@ import {
   MASK_DRAFT_EDGE,
   MASK_DRAFT_FEATHER_COLOUR,
   renderOverlayCanvas,
+  renderMaskEditOverlayCanvas,
 } from "../features/still-images/maskRaster";
 import { cn } from "../utils/classNames";
 
@@ -314,6 +315,7 @@ export function MaskEditorDialog({
   // the next edit, which behaves exactly like a mask and is labelled as itself.
   const target: StillImageEditTarget = layerContext?.target ?? "mask";
   const editingRegion = !layerContext;
+  const maskVisualization = editingRegion ? "highlight" : target === "mask" ? "edge-only" : "none";
 
   /**
    * Record a change to the drawing, with a step on the undo stack.
@@ -442,7 +444,11 @@ export function MaskEditorDialog({
 
   // Committed strokes only. The one being drawn is painted straight onto the
   // viewport, so a drag never rebuilds this -- at 4K that is the whole frame budget.
-  const overlay = useMemo(() => renderOverlayCanvas(draft.selection ? { ...draft, selection: undefined } : draft), [draft]);
+  const overlay = useMemo(() => {
+    const visibleDraft = draft.selection ? { ...draft, selection: undefined } : draft;
+    if (editingRegion) return renderOverlayCanvas(visibleDraft);
+    return target === "mask" ? renderMaskEditOverlayCanvas(visibleDraft) : undefined;
+  }, [draft, editingRegion, target]);
   // Include the stroke still under the pointer so both the red wash and the edit
   // box react during the drag, not one frame after release.
   const liveDrawing = useMemo(() => {
@@ -608,7 +614,7 @@ export function MaskEditorDialog({
     const ghostY = maskFollowsMove ? (moveDelta?.y ?? 0) * view.scale : 0;
     if (selectionPreview) {
       // The marquee being dragged replaces the mask, so the old wash is not drawn.
-    } else if (transformPreview) {
+    } else if (transformPreview && overlay) {
       // Same cached overlay, through the gesture's matrix. Rebuilding the ink at
       // image resolution on every pointer sample is the thing this avoids.
       context.save();
@@ -624,12 +630,12 @@ export function MaskEditorDialog({
       );
       context.drawImage(overlay, 0, 0, naturalWidth, naturalHeight);
       context.restore();
-    } else {
+    } else if (overlay) {
       context.drawImage(overlay, view.offsetX + ghostX, view.offsetY + ghostY, width, height);
     }
 
     if (stroke) {
-      paintDraftStroke(context, stroke, view, draft.softness);
+      paintDraftStroke(context, stroke, view, draft.softness, editingRegion);
       if (stroke.tool === "eraser") {
         // The eraser removes the red overlay and the already-composited source in
         // one operation. Put the source back behind that transparent path so the
@@ -641,8 +647,10 @@ export function MaskEditorDialog({
       }
     }
     const settled = !moveDelta && !transformPreview;
-    if (editRegion.crop && settled) paintEditRegion(context, editRegion.crop, view, naturalWidth, naturalHeight, processing);
-    if (liveDrawing.selection && settled) {
+    const showMaskGeometry = maskVisualization !== "none" || processing;
+    if (editRegion.crop && settled && showMaskGeometry)
+      paintEditRegion(context, editRegion.crop, view, naturalWidth, naturalHeight, processing);
+    if (liveDrawing.selection && settled && showMaskGeometry) {
       paintRectangleSelection(context, liveDrawing.selection, maskTransform(liveDrawing), view, processing);
     }
     if (moveDelta && layerCrop) paintMoveGhost(context, layerCrop, view, moveDelta, contentFollowsMove, target);
@@ -664,11 +672,13 @@ export function MaskEditorDialog({
     contentFollowsMove,
     cursor,
     draft.softness,
+    editingRegion,
     editRegion,
     hoveredHandle,
     image,
     layerCrop,
     liveDrawing,
+    maskVisualization,
     maskFollowsMove,
     moveDelta,
     naturalHeight,
@@ -704,7 +714,7 @@ export function MaskEditorDialog({
     context.clearRect(0, 0, viewport.width, viewport.height);
     if (!processing) return;
     context.globalAlpha = 0.78;
-    const processingOverlay = draft.selection ? renderOverlayCanvas(draft) : overlay;
+    const processingOverlay = draft.selection ? renderOverlayCanvas(draft) : (overlay ?? renderOverlayCanvas(draft));
     context.drawImage(processingOverlay, view.offsetX, view.offsetY, naturalWidth * view.scale, naturalHeight * view.scale);
   }, [draft, naturalHeight, naturalWidth, overlay, processing, view, viewport]);
 
@@ -1177,7 +1187,7 @@ export function MaskEditorDialog({
 
         {tool === "brush" || tool === "eraser" || tool === "lasso" ? (
           <label className="flex items-center gap-2 text-xs font-medium text-stone-600">
-            Soft
+            Brush soft
             <input
               type="range"
               min={0}
@@ -1186,7 +1196,7 @@ export function MaskEditorDialog({
               disabled={readOnly}
               onChange={(event) => setDraft((current) => setMaskSoftness(current, Number(event.target.value)))}
               className="w-28 accent-accent"
-              aria-label="Mask softness"
+              aria-label="Brush softness"
             />
             <span className="w-10 tabular-nums text-stone-800">{draft.softness}%</span>
           </label>
@@ -1358,6 +1368,8 @@ export function MaskEditorDialog({
           data-selection-width={liveDrawing.selection?.width}
           data-selection-height={liveDrawing.selection?.height}
           data-tool={tool}
+          data-zoom={Math.round(view.scale * 100)}
+          data-mask-visualization={maskVisualization}
           data-transform-handle={hoveredHandle}
           data-edit-target={layerContext ? target : "region"}
           data-move-x={moveDelta ? Math.round(moveDelta.x) : undefined}
@@ -1696,7 +1708,13 @@ function paintMoveGhost(
  * The eraser is an outline instead of a wash: it takes coverage away, and washing
  * red over what is about to be cleared reads as the opposite of what happens.
  */
-function paintDraftStroke(context: CanvasRenderingContext2D, stroke: MaskStroke, view: MaskView, softness: number) {
+function paintDraftStroke(
+  context: CanvasRenderingContext2D,
+  stroke: MaskStroke,
+  view: MaskView,
+  softness: number,
+  highlighted: boolean,
+) {
   const points = stroke.points.map((point) => ({
     x: point.x * view.scale + view.offsetX,
     y: point.y * view.scale + view.offsetY,
@@ -1708,8 +1726,8 @@ function paintDraftStroke(context: CanvasRenderingContext2D, stroke: MaskStroke,
   context.lineJoin = "round";
 
   if (stroke.tool === "lasso") {
-    context.fillStyle = MASK_DRAFT_COLOUR;
-    context.strokeStyle = MASK_DRAFT_EDGE;
+    context.fillStyle = highlighted ? MASK_DRAFT_COLOUR : "rgba(255, 255, 255, 0.08)";
+    context.strokeStyle = highlighted ? MASK_DRAFT_EDGE : "rgba(255, 255, 255, 0.96)";
     context.lineWidth = 1.5;
     context.setLineDash([6, 4]);
     tracePath(context, points, true);
@@ -1725,10 +1743,19 @@ function paintDraftStroke(context: CanvasRenderingContext2D, stroke: MaskStroke,
     context.lineWidth = width;
     context.globalCompositeOperation = "destination-out";
   } else {
-    paintBrushPass(context, points, width + 2, MASK_DRAFT_EDGE);
-    paintBrushPass(context, points, width, MASK_DRAFT_FEATHER_COLOUR);
-    const hardWidth = Math.max(1, width * (1 - (clamp(softness, 0, 100) / 100) * 0.55));
-    paintBrushPass(context, points, hardWidth, MASK_DRAFT_COLOUR);
+    const normalizedSoftness = clamp(softness, 0, 100) / 100;
+    const hardWidth = Math.max(1, width * (1 - normalizedSoftness));
+    const featherBlur = Math.max(0, (width - hardWidth) * 0.22);
+    paintBrushPass(context, points, width + 2, highlighted ? MASK_DRAFT_EDGE : "rgba(0, 0, 0, 0.82)");
+    context.filter = featherBlur > 0 ? `blur(${featherBlur}px)` : "none";
+    paintBrushPass(
+      context,
+      points,
+      Math.max(hardWidth, width * 0.2),
+      highlighted ? MASK_DRAFT_FEATHER_COLOUR : "rgba(255, 255, 255, 0.22)",
+    );
+    context.filter = "none";
+    paintBrushPass(context, points, hardWidth, highlighted ? MASK_DRAFT_COLOUR : "rgba(255, 255, 255, 0.10)");
     context.restore();
     return;
   }
@@ -2008,9 +2035,21 @@ function paintBrushCursor(
   adjusting: boolean,
 ) {
   const outerRadius = Math.max(1, radius);
-  const hardRadius = Math.max(1, outerRadius * (1 - (clamp(softness, 0, 100) / 100) * 0.82));
+  const normalizedSoftness = clamp(softness, 0, 100) / 100;
+  const hardRadius = Math.max(0, outerRadius * (1 - normalizedSoftness));
 
   context.save();
+  if (softness > 0 && hardRadius < outerRadius - 1) {
+    const feather = context.createRadialGradient(at.x, at.y, hardRadius, at.x, at.y, outerRadius);
+    feather.addColorStop(0, tool === "eraser" ? "rgba(251, 191, 36, 0.18)" : "rgba(34, 211, 238, 0.18)");
+    feather.addColorStop(0.7, tool === "eraser" ? "rgba(251, 191, 36, 0.09)" : "rgba(34, 211, 238, 0.09)");
+    feather.addColorStop(1, "rgba(255, 255, 255, 0)");
+    context.fillStyle = feather;
+    context.beginPath();
+    context.arc(at.x, at.y, outerRadius, 0, Math.PI * 2);
+    context.fill();
+  }
+
   context.beginPath();
   context.arc(at.x, at.y, outerRadius, 0, Math.PI * 2);
   context.strokeStyle = "rgba(0, 0, 0, 0.78)";
@@ -2022,14 +2061,15 @@ function paintBrushCursor(
   context.arc(at.x, at.y, outerRadius, 0, Math.PI * 2);
   context.stroke();
 
-  if (softness > 0 && hardRadius < outerRadius - 2) {
+  if (hardRadius > 1 && hardRadius < outerRadius - 1) {
     context.beginPath();
     context.arc(at.x, at.y, hardRadius, 0, Math.PI * 2);
-    context.setLineDash([3, 3]);
-    context.strokeStyle = "rgba(255, 255, 255, 0.72)";
-    context.lineWidth = 1;
+    context.strokeStyle = "rgba(0, 0, 0, 0.72)";
+    context.lineWidth = 3;
     context.stroke();
-    context.setLineDash([]);
+    context.strokeStyle = tool === "eraser" ? "rgba(251, 191, 36, 0.98)" : "rgba(103, 232, 249, 0.98)";
+    context.lineWidth = 1.25;
+    context.stroke();
   }
 
   context.strokeStyle = tool === "eraser" ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.82)";
@@ -2041,9 +2081,10 @@ function paintBrushCursor(
   context.lineTo(at.x, at.y + 4);
   context.stroke();
 
-  if (adjusting) {
-    paintCanvasLabel(context, at.x + 18, at.y + 18, `SIZE  ${radiusLabel}px   ·   SOFT  ${softness}%`);
-  }
+  const label = adjusting
+    ? `SIZE  ${radiusLabel}px   ·   SOFT  ${softness}%`
+    : `SOFT  ${softness}%   ·   HARD  ${100 - softness}%`;
+  paintCanvasLabel(context, at.x + Math.min(outerRadius + 10, 32), at.y + 14, label);
   context.restore();
 }
 

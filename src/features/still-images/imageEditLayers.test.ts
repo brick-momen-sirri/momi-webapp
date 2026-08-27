@@ -308,9 +308,9 @@ describe("visibleEditLayers placement", () => {
     };
   }
 
-  it("carries opacity, the move and the mask switch onto every descriptor", () => {
+  it("carries opacity, feather, the move and the mask switch onto every descriptor", () => {
     const layers = [
-      placedLayer("edit_a", 0, { opacity: 45, offset: { x: 8, y: -3 }, maskEnabled: false }),
+      placedLayer("edit_a", 0, { opacity: 45, maskFeather: 18, offset: { x: 8, y: -3 }, maskEnabled: false }),
       placedLayer("edit_b", 1, { maskLinked: false, offset: { x: 5, y: 5 } }),
     ];
     const [first, second] = visibleEditLayers({
@@ -321,7 +321,13 @@ describe("visibleEditLayers placement", () => {
       editLayers: layers,
     } as StillImageCategoryState);
 
-    expect(first).toMatchObject({ opacity: 45, offset: { x: 8, y: -3 }, maskOffset: { x: 8, y: -3 }, maskEnabled: false });
+    expect(first).toMatchObject({
+      opacity: 45,
+      maskFeather: 18,
+      offset: { x: 8, y: -3 },
+      maskOffset: { x: 8, y: -3 },
+      maskEnabled: false,
+    });
     // An unchained mask stays where it was painted while the content moves.
     expect(second).toMatchObject({ opacity: 100, offset: { x: 5, y: 5 }, maskOffset: { x: 0, y: 0 }, maskEnabled: true });
   });

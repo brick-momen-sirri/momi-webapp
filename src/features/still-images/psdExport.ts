@@ -6,11 +6,12 @@ import {
   editCropHeight,
   editCropWidth,
   layerMaskEnabled,
+  layerMaskFeather,
   layerMaskLinked,
   layerOffset,
   layerOpacity,
 } from "./imageEditLayers";
-import { loadImageElement, maskImageToAlphaCanvas, renderMaskCanvas } from "./maskRaster";
+import { featherMaskAlphaCanvas, loadImageElement, maskImageToAlphaCanvas, renderMaskCanvas } from "./maskRaster";
 import type { StillImageEditLayer } from "./stillImageCategories";
 
 export type PreparedPsdLayer = {
@@ -87,6 +88,7 @@ export function buildLayeredPsdDocument(input: {
           right: layer.crop.x + maskOffset.x + width,
           defaultColor: 0,
           disabled: !layerMaskEnabled(layer),
+          userMaskFeather: layerMaskFeather(layer),
           positionRelativeToLayer: false,
           fromVectorData: false,
         },
@@ -152,11 +154,11 @@ function compositeCanvas(original: HTMLCanvasElement, layers: PreparedPsdLayer[]
     const isolatedContext = requiredContext(isolated);
     if (layerMaskEnabled(layer)) {
       isolatedContext.globalCompositeOperation = "destination-in";
-      isolatedContext.drawImage(
+      const alphaMask = featherMaskAlphaCanvas(
         maskImageToAlphaCanvas(mask, isolated.width, isolated.height),
-        maskOffset.x - offset.x,
-        maskOffset.y - offset.y,
+        layerMaskFeather(layer),
       );
+      isolatedContext.drawImage(alphaMask, maskOffset.x - offset.x, maskOffset.y - offset.y);
       isolatedContext.globalCompositeOperation = "source-over";
     }
     context.globalAlpha = opacity;

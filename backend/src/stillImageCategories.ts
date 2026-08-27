@@ -119,6 +119,8 @@ export type StillImageEditBaseLayer = {
   maskSourceUrl: string;
   /** Photoshop layer opacity, 0-100. Absent means fully opaque. */
   opacity?: number;
+  /** Non-destructive user-mask feather in source-image pixels. */
+  maskFeather?: number;
   /** Where the layer's pixels now sit relative to the crop they were generated in. */
   offset?: { x: number; y: number };
 };

@@ -132,7 +132,13 @@ export function MaskRegionField({
     if (drawing.width !== width || drawing.height !== height) onChange(undefined);
   }, [drawing, element, onChange]);
 
-  const overlay = useMemo(() => (hasPaintedRegion(drawing) ? renderOverlayCanvas(drawing as MaskDrawing) : undefined), [drawing]);
+  // The rail highlight belongs to a new edit only. Once a generated layer is
+  // selected, the composite itself shows the mask result and the full editor uses
+  // its quieter edge-only mask view.
+  const overlay = useMemo(
+    () => (!layerContext && hasPaintedRegion(drawing) ? renderOverlayCanvas(drawing as MaskDrawing) : undefined),
+    [drawing, layerContext],
+  );
 
   useEffect(() => {
     const canvas = previewRef.current;
@@ -347,6 +353,7 @@ async function loadCompositeLayer(layer: EditLayerCompositeDescriptor) {
     offset: layer.offset,
     maskOffset: layer.maskOffset,
     maskEnabled: layer.maskEnabled,
+    maskFeather: layer.maskFeather,
   };
   if (layer.mask) return { image, ...placement, drawing: layer.mask };
   if (layer.maskSourceUrl) {
@@ -379,6 +386,7 @@ function compositeDescriptorKey(layers: EditLayerCompositeDescriptor[]) {
         `${layer.offset?.x ?? 0},${layer.offset?.y ?? 0}`,
         `${layer.maskOffset?.x ?? 0},${layer.maskOffset?.y ?? 0}`,
         layer.maskEnabled === false ? "nomask" : "mask",
+        layer.maskFeather ?? 0,
       ].join(":"),
     )
     .join("|");

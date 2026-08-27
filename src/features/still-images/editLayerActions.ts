@@ -11,7 +11,7 @@
 // layer; the actions here only touch a mask when the operation is about the mask
 // as a whole -- moving it, switching it off, unchaining it from the content.
 
-import { layerMaskLinked, layerOffset, layerOpacity } from "./imageEditLayers";
+import { layerMaskFeather, layerMaskLinked, layerOffset, layerOpacity } from "./imageEditLayers";
 import { translateMaskDrawing, type MaskPoint } from "./maskDrawing";
 import type { StillImageEditLayer, StillImageEditTarget } from "./stillImageCategories";
 
@@ -33,6 +33,13 @@ function withLayer(layers: EditLayerList, layerId: string, change: (layer: Still
 export function setEditLayerOpacity(layers: EditLayerList, layerId: string, opacity: number): EditLayerList {
   const clamped = Math.min(100, Math.max(0, Math.round(opacity)));
   return withLayer(layers, layerId, (layer) => (layerOpacity(layer) === clamped ? layer : { ...layer, opacity: clamped }));
+}
+
+export function setEditLayerMaskFeather(layers: EditLayerList, layerId: string, feather: number): EditLayerList {
+  const clamped = layerMaskFeather({ maskFeather: feather });
+  return withLayer(layers, layerId, (layer) =>
+    layerMaskFeather(layer) === clamped ? layer : { ...layer, maskFeather: clamped, revision: (layer.revision ?? 0) + 1 },
+  );
 }
 
 export function setEditLayerVisibility(layers: EditLayerList, layerId: string, visible: boolean): EditLayerList {

@@ -37,9 +37,12 @@ export type EditLayerCompositeDescriptor = {
   maskOffset?: MaskPoint;
   /** False keeps the mask but stops it hiding anything. */
   maskEnabled?: boolean;
+  /** Non-destructive mask feather in original-image pixels. */
+  maskFeather?: number;
 };
 
 export const NO_LAYER_OFFSET: MaskPoint = { x: 0, y: 0 };
+export const MAX_LAYER_MASK_FEATHER = 1_000;
 
 export function layerOpacity(layer: { opacity?: number }) {
   const opacity = layer.opacity === undefined ? 100 : layer.opacity;
@@ -52,6 +55,10 @@ export function layerOffset(layer: { offset?: MaskPoint }): MaskPoint {
 
 export function layerMaskEnabled(layer: { maskEnabled?: boolean }) {
   return layer.maskEnabled !== false;
+}
+
+export function layerMaskFeather(layer: { maskFeather?: number }) {
+  return Math.min(MAX_LAYER_MASK_FEATHER, Math.max(0, Math.round(layer.maskFeather ?? 0)));
 }
 
 export function layerMaskLinked(layer: { maskLinked?: boolean }) {
@@ -245,7 +252,12 @@ export function lowerVisibleEditLayers(state: StillImageCategoryState): StillIma
 
 export function baseRevisionId(layers: StillImageEditBaseLayer[]) {
   return layers.length
-    ? `base:${layers.map((layer) => `${layer.layerId}@${layer.generatedCropUrl}`).join("|")}`
+    ? `base:${layers
+        .map(
+          (layer) =>
+            `${layer.layerId}@${layer.generatedCropUrl}:${layer.opacity ?? 100}:${layer.maskFeather ?? 0}:${layer.offset?.x ?? 0},${layer.offset?.y ?? 0}`,
+        )
+        .join("|")}`
     : "base:original";
 }
 
@@ -263,6 +275,7 @@ function editLayerDescriptor(layer: StillImageEditLayer): EditLayerCompositeDesc
     offset,
     maskOffset: layerMaskLinked(layer) ? offset : NO_LAYER_OFFSET,
     maskEnabled: layerMaskEnabled(layer),
+    maskFeather: layerMaskFeather(layer),
   };
 }
 
@@ -274,6 +287,7 @@ function frozenLayerDescriptor(layer: StillImageEditBaseLayer): EditLayerComposi
     generatedCropUrl: resolveMediaUrl(layer.generatedCropUrl),
     maskSourceUrl: layer.maskSourceUrl,
     opacity: layerOpacity(layer),
+    maskFeather: layerMaskFeather(layer),
     offset: layer.offset,
   };
 }

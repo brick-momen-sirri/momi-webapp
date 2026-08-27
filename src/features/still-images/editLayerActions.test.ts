@@ -7,6 +7,7 @@ import {
   reorderEditLayer,
   resetEditLayerOffset,
   setEditLayerMaskEnabled,
+  setEditLayerMaskFeather,
   setEditLayerMaskLinked,
   setEditLayerOpacity,
 } from "./editLayerActions";
@@ -64,6 +65,15 @@ describe("layer properties", () => {
     expect(off[0].maskEnabled).toBe(false);
     expect(off[0].mask).toBe(layers[0].mask);
     expect(setEditLayerMaskLinked(off, "a", false)[0].maskLinked).toBe(false);
+  });
+
+  it("stores mask feather independently and invalidates the live composite", () => {
+    const layers = [layer("a", 0)];
+    const feathered = setEditLayerMaskFeather(layers, "a", 24.6);
+    expect(feathered[0].maskFeather).toBe(25);
+    expect(feathered[0].mask).toBe(layers[0].mask);
+    expect(feathered[0].revision).toBe(2);
+    expect(setEditLayerMaskFeather(feathered, "a", -50)[0].maskFeather).toBe(0);
   });
 });
 

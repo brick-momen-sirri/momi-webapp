@@ -43,6 +43,8 @@ function parseLayer(value: unknown, index: number): StillImageEditBaseLayer {
 /** Opacity and displacement, both optional, both defaulting to "as generated". */
 function parsePlacement(layer: Record<string, unknown>, index: number, crop: StillImageEditCrop) {
   const opacity = layer.opacity === undefined ? undefined : boundedInteger(layer.opacity, `Layer ${index + 1} opacity`, 0, 100);
+  const maskFeather =
+    layer.maskFeather === undefined ? undefined : boundedInteger(layer.maskFeather, `Layer ${index + 1} mask feather`, 0, 1_000);
   let offset: { x: number; y: number } | undefined;
   if (layer.offset !== undefined) {
     const point = record(layer.offset, `Layer ${index + 1} offset`);
@@ -53,6 +55,7 @@ function parsePlacement(layer: Record<string, unknown>, index: number, crop: Sti
   }
   return {
     ...(opacity === undefined || opacity === 100 ? {} : { opacity }),
+    ...(maskFeather === undefined || maskFeather === 0 ? {} : { maskFeather }),
     ...(offset === undefined || (offset.x === 0 && offset.y === 0) ? {} : { offset }),
   };
 }

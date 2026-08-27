@@ -138,17 +138,41 @@ function paintStroke(context: CanvasRenderingContext2D, stroke: MaskStroke) {
 
 /** White where the edit may go, black where the source must survive. */
 export function renderMaskCanvas(drawing: MaskDrawing): HTMLCanvasElement {
-  const ink = renderMaskAlphaCanvas(drawing);
+  const ink = renderCompositeMaskAlphaCanvas(drawing);
   const canvas = createCanvas(drawing.width, drawing.height);
   const context = canvas.getContext("2d");
   if (!context) return canvas;
 
   context.fillStyle = "#000000";
   context.fillRect(0, 0, drawing.width, drawing.height);
-  // Softness is applied here rather than per stroke so that overlapping strokes
-  // feather as one region: blurring each in turn would leave seams where they met.
-  context.filter = blurFilter(drawing);
   context.drawImage(ink, 0, 0);
+  return canvas;
+}
+
+/**
+ * The mask alpha used by every live composite.
+ *
+ * Brush softness belongs to the drawing; layer feather belongs to the layer.
+ * Applying them as two non-destructive passes preserves that distinction while
+ * still producing the exact alpha channel Canvas needs for destination-in.
+ */
+export function renderCompositeMaskAlphaCanvas(drawing: MaskDrawing, layerFeatherPixels = 0): HTMLCanvasElement {
+  const ink = renderMaskAlphaCanvas(drawing);
+  const brushSoftness = blurPixels(drawing);
+  const softened = brushSoftness > 0 ? featherMaskAlphaCanvas(ink, brushSoftness) : ink;
+  return layerFeatherPixels > 0 ? featherMaskAlphaCanvas(softened, layerFeatherPixels) : softened;
+}
+
+/** Blur an alpha mask without flattening or changing its source pixels. */
+export function featherMaskAlphaCanvas(mask: CanvasImageSource, featherPixels: number) {
+  const sourceWidth = "width" in mask ? Number(mask.width) : 0;
+  const sourceHeight = "height" in mask ? Number(mask.height) : 0;
+  const canvas = createCanvas(sourceWidth, sourceHeight);
+  const context = canvas.getContext("2d");
+  if (!context) return canvas;
+  const feather = Math.max(0, Number.isFinite(featherPixels) ? featherPixels : 0);
+  context.filter = feather > 0 ? `blur(${feather}px)` : "none";
+  context.drawImage(mask, 0, 0, canvas.width, canvas.height);
   context.filter = "none";
   return canvas;
 }
@@ -161,9 +185,17 @@ export function renderMaskCanvas(drawing: MaskDrawing): HTMLCanvasElement {
  * size and then shrunk by CSS: this is re-rendered on every stroke of the
  * selected layer, and a 6000px mask per keystroke is not a thumbnail budget.
  */
-export function renderMaskThumbnailCanvas(drawing: MaskDrawing, maximumSide = 128): HTMLCanvasElement {
+export function renderMaskThumbnailCanvas(drawing: MaskDrawing, maximumSide = 128, layerFeatherPixels = 0): HTMLCanvasElement {
   const scale = Math.min(1, maximumSide / Math.max(1, drawing.width, drawing.height));
-  return renderMaskCanvas(scaledDrawing(drawing, scale));
+  const scaled = scaledDrawing(drawing, scale);
+  const alpha = renderCompositeMaskAlphaCanvas(scaled, layerFeatherPixels * scale);
+  const canvas = createCanvas(alpha.width, alpha.height);
+  const context = canvas.getContext("2d");
+  if (!context) return canvas;
+  context.fillStyle = "#000000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(alpha, 0, 0);
+  return canvas;
 }
 
 /** Convert an opaque black/white saved mask into an alpha canvas for local compositing. */
@@ -228,6 +260,30 @@ export function renderOverlayCanvas(drawing: MaskDrawing): HTMLCanvasElement {
   context.drawImage(tintCanvas(feather, EDITOR_FEATHER), 0, 0);
   context.drawImage(tintCanvas(ink, EDITOR_CORE), 0, 0);
   context.drawImage(outlineCanvas(ink, EDITOR_EDGE), 0, 0);
+  return overlay;
+}
+
+/**
+ * A restrained Photoshop-style mask view for an existing generated layer.
+ *
+ * The composite itself already shows what the mask reveals, so painting another
+ * coloured sheet over it obscures the very edge the artist is trying to refine.
+ * A neutral keyline plus a whisper of the feather keeps the mask discoverable
+ * without changing the apparent colour of the result beneath it.
+ */
+export function renderMaskEditOverlayCanvas(drawing: MaskDrawing): HTMLCanvasElement {
+  const scale = Math.min(1, 2048 / Math.max(1, drawing.width, drawing.height));
+  const scaled = scaledDrawing(drawing, scale);
+  const alpha = renderCompositeMaskAlphaCanvas(scaled);
+  const overlay = createCanvas(alpha.width, alpha.height);
+  const context = overlay.getContext("2d");
+  if (!context) return overlay;
+
+  context.globalAlpha = 0.08;
+  context.drawImage(tintCanvas(alpha, "rgba(255, 255, 255, 0.72)"), 0, 0);
+  context.globalAlpha = 1;
+  context.drawImage(outlineCanvas(alpha, "rgba(0, 0, 0, 0.88)", 2), 0, 0);
+  context.drawImage(outlineCanvas(alpha, "rgba(255, 255, 255, 0.96)"), 0, 0);
   return overlay;
 }
 
@@ -325,6 +381,8 @@ export type EditCompositeLayerSource = {
   maskOffset?: MaskPoint;
   /** A disabled mask reveals the layer's whole crop, exactly as in Photoshop. */
   maskEnabled?: boolean;
+  /** Non-destructive layer-mask feather in original-image pixels. */
+  maskFeather?: number;
 };
 
 const NO_OFFSET: MaskPoint = { x: 0, y: 0 };
@@ -378,10 +436,15 @@ export function renderEditCropCanvas(
       if (layer.drawing) {
         // Already in this crop's coordinates, so only the mask's own displacement
         // is left to apply.
-        layerContext.drawImage(renderMaskAlphaCanvas(drawingForCrop(layer.drawing, crop)), maskOffset.x, maskOffset.y);
-      } else if (layer.mask) {
         layerContext.drawImage(
-          layer.mask,
+          renderCompositeMaskAlphaCanvas(drawingForCrop(layer.drawing, crop), layer.maskFeather),
+          maskOffset.x,
+          maskOffset.y,
+        );
+      } else if (layer.mask) {
+        const alphaMask = featherMaskAlphaCanvas(layer.mask, layer.maskFeather ?? 0);
+        layerContext.drawImage(
+          alphaMask,
           layer.crop.x + maskOffset.x - crop.x,
           layer.crop.y + maskOffset.y - crop.y,
           layerWidth,
@@ -433,9 +496,16 @@ export function renderEditCompositePreview(
       layerContext.globalCompositeOperation = "destination-in";
       if (layer.drawing) {
         const cropDrawing = scaledDrawing(drawingForCrop(layer.drawing, layer.crop), scale);
-        layerContext.drawImage(renderMaskAlphaCanvas(cropDrawing), maskLeft, maskTop, width, height);
+        layerContext.drawImage(
+          renderCompositeMaskAlphaCanvas(cropDrawing, (layer.maskFeather ?? 0) * scale),
+          maskLeft,
+          maskTop,
+          width,
+          height,
+        );
       } else if (layer.mask) {
-        layerContext.drawImage(layer.mask, maskLeft, maskTop, width, height);
+        const alphaMask = featherMaskAlphaCanvas(layer.mask, (layer.maskFeather ?? 0) * scale);
+        layerContext.drawImage(alphaMask, maskLeft, maskTop, width, height);
       } else {
         continue;
       }
@@ -501,23 +571,17 @@ function tintCanvas(ink: HTMLCanvasElement, colour: string) {
   return canvas;
 }
 
-function outlineCanvas(ink: HTMLCanvasElement, colour: string) {
+function outlineCanvas(ink: HTMLCanvasElement, colour: string, radius = 1) {
   const canvas = createCanvas(ink.width, ink.height);
   const context = canvas.getContext("2d");
   if (!context) return canvas;
   const tinted = tintCanvas(ink, colour);
 
-  for (const [x, y] of [
-    [-1, -1],
-    [0, -1],
-    [1, -1],
-    [-1, 0],
-    [1, 0],
-    [-1, 1],
-    [0, 1],
-    [1, 1],
-  ]) {
-    context.drawImage(tinted, x, y);
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      if (!x && !y) continue;
+      context.drawImage(tinted, x, y);
+    }
   }
   context.globalCompositeOperation = "destination-out";
   context.drawImage(ink, 0, 0);
@@ -525,11 +589,16 @@ function outlineCanvas(ink: HTMLCanvasElement, colour: string) {
   return canvas;
 }
 
-function blurFilter(drawing: MaskDrawing) {
+function blurPixels(drawing: MaskDrawing) {
   // Rectangle selection is an exact hard-edged edit boundary. Brush softness is
   // deliberately ignored so the returned result cannot bleed past that box.
-  if (drawing.selection) return "none";
+  if (drawing.selection) return 0;
   const blur = drawing.blurPixels ?? maskBlurPixels(drawing.softness, drawing.width, drawing.height);
+  return Math.max(0, blur);
+}
+
+function blurFilter(drawing: MaskDrawing) {
+  const blur = blurPixels(drawing);
   return blur > 0 ? `blur(${blur}px)` : "none";
 }
 

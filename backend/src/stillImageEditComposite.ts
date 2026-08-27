@@ -107,7 +107,7 @@ async function maskedOverlay(layer: StillImageEditBaseLayer, canvas: { width: nu
 
   const imagePath = await allowedMediaPath(layer.generatedCropUrl, `generated crop for ${layer.layerId}`);
   const maskPath = await allowedMediaPath(layer.maskSourceUrl, `mask for ${layer.layerId}`);
-  const input = await cropWithMask(imagePath, maskPath, layer.crop, opacity);
+  const input = await cropWithMask(imagePath, maskPath, layer.crop, opacity, layer.maskFeather ?? 0);
   if (visibleLeft === left && visibleTop === top && visibleRight === left + width && visibleBottom === top + height) {
     return { input, left, top, blend: "over" as const };
   }
@@ -124,14 +124,15 @@ async function maskedOverlay(layer: StillImageEditBaseLayer, canvas: { width: nu
   return { input: clipped, left: visibleLeft, top: visibleTop, blend: "over" as const };
 }
 
-async function cropWithMask(imagePath: string, maskPath: string, crop: StillImageEditCrop, opacity: number) {
+async function cropWithMask(imagePath: string, maskPath: string, crop: StillImageEditCrop, opacity: number, maskFeather: number) {
   const width = cropWidth(crop);
   const height = cropHeight(crop);
-  const alpha = await sharp(maskPath, { limitInputPixels: false })
-    .resize(width, height, { fit: "fill" })
-    .greyscale()
-    .raw()
-    .toBuffer();
+  const alphaPipeline = sharp(maskPath, { limitInputPixels: false }).resize(width, height, { fit: "fill" }).greyscale();
+  // Feather is a layer-mask property, not a rewrite of the uploaded mask. It is
+  // applied only while the alpha channel is prepared, so changing it remains
+  // reversible and never asks the image model to regenerate the pixels.
+  if (maskFeather > 0) alphaPipeline.blur(Math.min(1_000, Math.max(0.3, maskFeather)));
+  const alpha = await alphaPipeline.raw().toBuffer();
   // Scaled here rather than with sharp's linear(): this buffer is already the
   // layer's alpha channel, so one multiply over it is both the cheapest way to
   // apply opacity and the one whose result does not depend on where linear()

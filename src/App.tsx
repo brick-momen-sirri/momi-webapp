@@ -603,6 +603,7 @@ function App() {
                 onMoveEditLayerBy={stillImagesForm.moveEditLayerBy}
                 onRenameEditLayer={stillImagesForm.renameEditLayer}
                 onEditLayerOpacityChange={stillImagesForm.setEditLayerOpacity}
+                onEditLayerMaskFeatherChange={stillImagesForm.setEditLayerMaskFeather}
                 onEditLayerMaskEnabledChange={stillImagesForm.setEditLayerMaskEnabled}
                 onEditLayerMaskLinkedChange={stillImagesForm.setEditLayerMaskLinked}
                 onResetEditLayerOffset={stillImagesForm.resetEditLayerOffset}
