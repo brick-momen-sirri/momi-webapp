@@ -1,5 +1,6 @@
 import { Eye } from "lucide-react";
-import type { SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { seedanceDurationGated, seedanceVersion, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
 import { ArchVizGridControls } from "./ArchVizGridControls";
@@ -134,7 +135,12 @@ export function LeftSettingsPanel({
           onImageOutputCountChange={onImageOutputCountChange}
         />
       ) : null}
-      <DurationSelector selectedModel={selectedModel} value={selectedDurationSeconds} onChange={onDurationChange} />
+      <DurationSelector
+        selectedModel={selectedModel}
+        value={selectedDurationSeconds}
+        onChange={onDurationChange}
+        adminOnlyNote={seedanceDurationNote(selectedModel, selectedSeedanceVersion, allowSeedance4K)}
+      />
       {viewOnly ? (
         <p
           role="status"
@@ -198,6 +204,19 @@ export function LeftSettingsPanel({
       </fieldset>
     </div>
   );
+}
+
+/**
+ * The note under the duration slider when a role gate, not the model, ended it early.
+ *
+ * allowSeedance4K is the admin flag: the same role decides both gates, so it is
+ * reused rather than threading a second boolean through for the same fact.
+ */
+function seedanceDurationNote(model: ModelType, version: SeedanceVersionId, isAdmin: boolean) {
+  if (!isSeedanceWorkflowModel(model)) return undefined;
+  const picked = seedanceVersion(version);
+  if (!seedanceDurationGated(picked, isAdmin)) return undefined;
+  return `(over ${picked.nonAdminMaxDurationSeconds}s is admin only)`;
 }
 
 function isArchVizGridModel(model: ModelType) {

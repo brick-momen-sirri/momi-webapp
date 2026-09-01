@@ -80,8 +80,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
   // picker, the duration slider, the credit estimate and the reuse normalisers
   // correct without any of them knowing that Seedance has versions.
   const versionedModelBase = useMemo(
-    () => seedanceEffectiveModel(selectedModelBase, selectedSeedanceVersion),
-    [selectedModelBase, selectedSeedanceVersion],
+    () => seedanceEffectiveModel(selectedModelBase, selectedSeedanceVersion, allowSeedance4K),
+    [allowSeedance4K, selectedModelBase, selectedSeedanceVersion],
   );
   const selectedModel = useMemo(
     () => ({
@@ -171,7 +171,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     const chosen = models.find((model) => model.id === modelId);
     // Against the version's limits, not the workflow file's: switching to another
     // Seedance task while on 2.5 must not seed a 4K resolution the model cannot run.
-    const nextModel = chosen && seedanceEffectiveModel(chosen, selectedSeedanceVersion);
+    const nextModel = chosen && seedanceEffectiveModel(chosen, selectedSeedanceVersion, allowSeedance4K);
     setSelectedModelId(modelId);
     if (nextModel) {
       setSelectedResolution((resolution) => normalizeResolutionForModel(resolution, nextModel, allowSeedance4K));

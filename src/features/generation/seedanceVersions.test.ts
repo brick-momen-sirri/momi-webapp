@@ -3,6 +3,8 @@ import type { ModelType } from "../../types";
 import {
   DEFAULT_SEEDANCE_VERSION,
   defaultSeedanceVideoEditing,
+  seedanceDurationGated,
+  seedanceDurationsForRole,
   normalizeSeedanceVersion,
   seedanceDurations,
   seedanceEffectiveModel,
@@ -61,21 +63,41 @@ describe("seedance version table", () => {
 });
 
 describe("seedanceEffectiveModel", () => {
+  // Passing the admin flag explicitly: it defaults to false so a caller that forgets
+  // it gets the gated range rather than the ungated one.
   it("replaces the workflow file's limits with the version's", () => {
-    const on25 = seedanceEffectiveModel(model(), "2.5");
+    const on25 = seedanceEffectiveModel(model(), "2.5", true);
     expect(on25.supportedResolutions).toEqual(["480p", "720p", "1080p"]);
     expect(on25.supportedDurations?.at(-1)).toBe(30);
 
-    const on20 = seedanceEffectiveModel(model(), "2.0");
+    const on20 = seedanceEffectiveModel(model(), "2.0", true);
     expect(on20.supportedResolutions).toEqual(["480p", "720p", "1080p", "4K"]);
     expect(on20.supportedDurations?.at(-1)).toBe(15);
     expect(on20.defaultDurationSeconds).toBe(5);
   });
 
+  // Mirrors the backend assertions in backend/src/seedanceVersions.test.ts: the
+  // slider must not offer a duration the server would answer with a 403.
+  it("hides the admin-only end of the 2.5 range from everyone else", () => {
+    expect(seedanceDurationsForRole(seedanceVersion("2.5"), true).at(-1)).toBe(30);
+    expect(seedanceDurationsForRole(seedanceVersion("2.5"), false).at(-1)).toBe(15);
+    expect(seedanceDurationsForRole(seedanceVersion("2.0"), false).at(-1)).toBe(15);
+    expect(seedanceDurationGated(seedanceVersion("2.5"), false)).toBe(true);
+    expect(seedanceDurationGated(seedanceVersion("2.5"), true)).toBe(false);
+    expect(seedanceDurationGated(seedanceVersion("2.0"), false)).toBe(false);
+  });
+
+  it("caps the effective model's durations by role", () => {
+    expect(seedanceEffectiveModel(model(), "2.5", true).supportedDurations?.at(-1)).toBe(30);
+    expect(seedanceEffectiveModel(model(), "2.5", false).supportedDurations?.at(-1)).toBe(15);
+  });
+
   it("drops a default duration the picked version cannot produce", () => {
     const long = model({ defaultDurationSeconds: 20 });
-    expect(seedanceEffectiveModel(long, "2.5").defaultDurationSeconds).toBe(20);
-    expect(seedanceEffectiveModel(long, "2.0").defaultDurationSeconds).toBe(5);
+    expect(seedanceEffectiveModel(long, "2.5", true).defaultDurationSeconds).toBe(20);
+    expect(seedanceEffectiveModel(long, "2.0", true).defaultDurationSeconds).toBe(5);
+    // And a non-admin cannot reach 20s on 2.5 either, so it falls back there too.
+    expect(seedanceEffectiveModel(long, "2.5", false).defaultDurationSeconds).toBe(5);
   });
 
   it("leaves a non-Seedance model exactly as it was", () => {

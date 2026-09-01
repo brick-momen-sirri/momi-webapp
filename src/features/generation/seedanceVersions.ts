@@ -27,6 +27,8 @@ export type SeedanceVersion = {
   defaultRatio: string;
   minDurationSeconds: number;
   maxDurationSeconds: number;
+  /** The longest render a non-admin may ask for. A spend gate, not a node limit. */
+  nonAdminMaxDurationSeconds: number;
   defaultDurationSeconds: number;
   supportsRatioOnFirstLastFrame: boolean;
   outputFormat: string | null;
@@ -50,6 +52,24 @@ export function seedanceVersion(id: unknown): SeedanceVersion {
 export function seedanceDurations(version: SeedanceVersion) {
   const { minDurationSeconds: from, maxDurationSeconds: to } = version;
   return Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
+}
+
+/**
+ * The durations this user may pick, which is what the slider should offer.
+ *
+ * 2.5 bills ~1.5x 2.0 per second and runs to 30s, putting ~5,200 credits behind one
+ * drag of the slider, so the range only 2.5 has is admin-only -- the same treatment
+ * 4K already gets. The server refuses the rest with a 403, so offering it here would
+ * only be a control that fails on submit.
+ */
+export function seedanceDurationsForRole(version: SeedanceVersion, isAdmin: boolean) {
+  const ceiling = isAdmin ? version.maxDurationSeconds : version.nonAdminMaxDurationSeconds;
+  return seedanceDurations(version).filter((seconds) => seconds <= ceiling);
+}
+
+/** Whether the role gate is actually shortening what this version could do. */
+export function seedanceDurationGated(version: SeedanceVersion, isAdmin: boolean) {
+  return !isAdmin && version.nonAdminMaxDurationSeconds < version.maxDurationSeconds;
 }
 
 export type SeedanceTaskFields = Pick<ModelType, "id" | "backendCategory" | "workflowPath">;
@@ -117,10 +137,10 @@ export function defaultSeedanceVideoEditing(
  *
  * A non-Seedance model is returned untouched.
  */
-export function seedanceEffectiveModel(model: ModelType, versionId: unknown): ModelType {
+export function seedanceEffectiveModel(model: ModelType, versionId: unknown, isAdmin = false): ModelType {
   if (!isSeedanceWorkflowModel(model)) return model;
   const version = seedanceVersion(versionId);
-  const durations = seedanceDurations(version);
+  const durations = seedanceDurationsForRole(version, isAdmin);
   return {
     ...model,
     supportedResolutions: version.resolutions,

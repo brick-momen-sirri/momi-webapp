@@ -6,6 +6,7 @@ import {
   isSeedanceVersionId,
   seedanceEffectiveModel,
   seedanceSupportsRatio,
+  seedanceDurationRefusal,
   seedanceVersion,
   seedanceVersionIdFromOptions,
   SEEDANCE_VERSION_IDS,
@@ -53,6 +54,18 @@ export function createJobSubmissionHandler(deps: JobSubmissionDependencies): Req
       const request = validatedRequest(body, model, user.id);
       if (user.role !== "admin" && isSeedanceModel(model) && is4KResolution(request.resolution)) {
         return res.status(403).json({ error: "Seedance 4K generation is available to administrators only." });
+      }
+      // The same gate on the other expensive axis. 2.5 bills ~1.5x 2.0 per second and
+      // runs to 30s, which puts ~5,200 credits behind one slider drag; the range only
+      // 2.5 has is therefore admin-only. Keyed on the role rather than on an estimated
+      // cost because the estimate over-quotes jobs with a video input.
+      if (isSeedanceModel(model)) {
+        const refusal = seedanceDurationRefusal(
+          seedanceVersion(seedanceVersionIdFromOptions(request.workflowOptions)),
+          request.durationSeconds,
+          user.role === "admin",
+        );
+        if (refusal) return res.status(403).json({ error: refusal });
       }
       if (isKlingVideoModel(model) && (request.prompt?.length ?? 0) > KLING_PROMPT_CHARACTER_LIMIT) {
         throw new JobSubmissionError(

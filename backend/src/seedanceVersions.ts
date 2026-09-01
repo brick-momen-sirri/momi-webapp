@@ -32,6 +32,11 @@ export type SeedanceVersion = {
   defaultRatio: string;
   minDurationSeconds: number;
   maxDurationSeconds: number;
+  /**
+   * The longest render a non-admin may ask for. A spend gate, not a node limit --
+   * see the note in seedanceVersions.json.
+   */
+  nonAdminMaxDurationSeconds: number;
   defaultDurationSeconds: number;
   /** 2.5's first-last-frame option has no `ratio` input at all; 2.0's does. */
   supportsRatioOnFirstLastFrame: boolean;
@@ -77,6 +82,14 @@ function assertVersionTableShape(versions: SeedanceVersion[]) {
     const { minDurationSeconds: from, maxDurationSeconds: to, defaultDurationSeconds } = version;
     if (defaultDurationSeconds < from || defaultDurationSeconds > to) {
       throw new Error(`seedanceVersions.json gives ${version.id} a defaultDurationSeconds outside its range.`);
+    }
+    const nonAdminMax = version.nonAdminMaxDurationSeconds;
+    if (nonAdminMax < from || nonAdminMax > to) {
+      throw new Error(`seedanceVersions.json gives ${version.id} a nonAdminMaxDurationSeconds outside its range.`);
+    }
+    // A default nobody but an admin could pick would gate the version by default.
+    if (defaultDurationSeconds > nonAdminMax) {
+      throw new Error(`seedanceVersions.json gives ${version.id} a default duration above its non-admin ceiling.`);
     }
   }
   const missing = SEEDANCE_VERSION_IDS.filter((id) => !seen.has(id));
@@ -136,9 +149,32 @@ function hasVideoEditingInput(model: Pick<WorkflowModel, "category">, version: S
   return version.supportsVideoEditing && !isFirstLastFrameModel(model);
 }
 
+/**
+ * Every duration the node accepts, admin-only ones included.
+ *
+ * The graph builder needs the full set: by the time a request reaches it the
+ * submission route has already refused a duration this user may not ask for, so
+ * clamping again here would shorten a legitimate admin render.
+ */
 export function seedanceDurations(version: SeedanceVersion) {
   const { minDurationSeconds: from, maxDurationSeconds: to } = version;
   return Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
+}
+
+/** What this user may actually pick. The gate. */
+export function seedanceDurationsForRole(version: SeedanceVersion, isAdmin: boolean) {
+  const ceiling = isAdmin ? version.maxDurationSeconds : version.nonAdminMaxDurationSeconds;
+  return seedanceDurations(version).filter((seconds) => seconds <= ceiling);
+}
+
+/** Undefined when the duration is allowed; otherwise why it is not. */
+export function seedanceDurationRefusal(version: SeedanceVersion, durationSeconds: number | undefined, isAdmin: boolean) {
+  if (isAdmin || typeof durationSeconds !== "number") return undefined;
+  if (durationSeconds <= version.nonAdminMaxDurationSeconds) return undefined;
+  return (
+    `Seedance ${version.id} renders longer than ${version.nonAdminMaxDurationSeconds}s are available to administrators only. ` +
+    `This one is ${durationSeconds}s.`
+  );
 }
 
 /**

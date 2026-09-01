@@ -533,7 +533,11 @@ function App() {
       setSelectedSeedanceVersion(seedanceVersionId);
       restored.add("model version");
     }
-    const versionedTargetModel = seedanceEffectiveModel(targetModel, seedanceVersionId ?? selectedSeedanceVersion);
+    const versionedTargetModel = seedanceEffectiveModel(
+      targetModel,
+      seedanceVersionId ?? selectedSeedanceVersion,
+      allowSeedance4K,
+    );
 
     if (hasKnownResolution(job)) {
       setSelectedResolution(normalizeResolutionForModel(job.resolution, versionedTargetModel, allowSeedance4K));

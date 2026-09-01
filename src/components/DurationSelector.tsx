@@ -7,9 +7,15 @@ type DurationSelectorProps = {
   selectedModel: ModelType;
   value: number;
   onChange: (seconds: number) => void;
+  /**
+   * Why the range stops where it does, when a role gate rather than the model is
+   * what shortened it. Without this the slider silently ends early and reads as
+   * the model's own limit.
+   */
+  adminOnlyNote?: string;
 };
 
-export function DurationSelector({ selectedModel, value, onChange }: DurationSelectorProps) {
+export function DurationSelector({ selectedModel, value, onChange, adminOnlyNote }: DurationSelectorProps) {
   const isVideoModel = selectedModel.category === "video";
   const options = isVideoModel ? (selectedModel.supportedDurations ?? [5, 8, 10]) : [];
   const fallbackValue =
@@ -104,6 +110,7 @@ export function DurationSelector({ selectedModel, value, onChange }: DurationSel
           <p className="mt-2 text-[11px] font-medium text-stone-500">
             Valid:{" "}
             {isContiguous ? `${options[0]}-${options[options.length - 1]}s` : options.map((option) => `${option}s`).join(" / ")}
+            {adminOnlyNote ? <span className="text-amber-700"> {adminOnlyNote}</span> : null}
           </p>
         </div>
       )}

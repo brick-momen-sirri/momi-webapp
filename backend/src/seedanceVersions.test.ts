@@ -5,7 +5,9 @@ import type { ComfyNode } from "./comfyGraph.js";
 import {
   applySeedanceModelInputs,
   DEFAULT_SEEDANCE_VERSION,
+  seedanceDurationRefusal,
   seedanceDurations,
+  seedanceDurationsForRole,
   seedanceEffectiveModel,
   seedanceSupportsRatio,
   seedanceVersion,
@@ -64,6 +66,31 @@ test("2.5 raises the duration ceiling and gives up 4K", () => {
   assert.equal(twoFive.outputFormat, "mp4");
   assert.equal(twoZero.supportsVideoEditing, false);
   assert.equal(twoFive.supportsVideoEditing, true);
+});
+
+test("the long-render range only 2.5 has is admin-only", () => {
+  const twoFive = seedanceVersion("2.5");
+  const twoZero = seedanceVersion("2.0");
+
+  // The node still accepts 30s; the gate is about who may ask for it.
+  assert.equal(seedanceDurations(twoFive).at(-1), 30);
+  assert.equal(seedanceDurationsForRole(twoFive, true).at(-1), 30);
+  assert.equal(seedanceDurationsForRole(twoFive, false).at(-1), 15);
+  // 2.0 never had the range, so the gate is a no-op there.
+  assert.equal(seedanceDurationsForRole(twoZero, false).at(-1), 15);
+  assert.equal(seedanceDurationsForRole(twoZero, true).at(-1), 15);
+});
+
+test("the refusal names the ceiling and the duration, and never fires for an admin", () => {
+  const twoFive = seedanceVersion("2.5");
+
+  assert.equal(seedanceDurationRefusal(twoFive, 15, false), undefined);
+  assert.equal(seedanceDurationRefusal(twoFive, 30, true), undefined);
+  assert.equal(seedanceDurationRefusal(twoFive, undefined, false), undefined);
+
+  const refusal = seedanceDurationRefusal(twoFive, 24, false);
+  assert.match(String(refusal), /longer than 15s are available to administrators only/i);
+  assert.match(String(refusal), /24s/);
 });
 
 test("an unknown or missing version reads as the default rather than throwing", () => {

@@ -19,6 +19,8 @@ const users = {
   viewer: user("usr_viewer", "viewer@example.com"),
   outsider: user("usr_outsider", "outsider@example.com"),
   demo: user("usr_demo", "demo@brickvisual.com"),
+  // The role gates -- 4K, and long 2.5 renders -- need someone who passes them.
+  admin: { ...user("usr_admin", "admin@example.com"), role: "admin" as const },
 };
 
 const project: Project = {
@@ -326,6 +328,9 @@ test("accepts every ratio the Seedance nodes offer", async () => {
 });
 
 test("Seedance limits follow the picked version, not the workflow file", async () => {
+  // As an admin, so the only thing under test is the version's own range -- the role
+  // gate on the same range is covered separately below.
+  currentUser = users.admin;
   // 24s is 2.5-only. The workflow file was inferred as 4-15s, so accepting this is
   // what proves the version, not the file, is what the route validates against.
   const long = await call({
@@ -362,6 +367,33 @@ test("Seedance accepts 480p on both versions, with or without a label", async ()
       workflowOptions: { seedance: { version } },
     });
     assert.equal(unlabelled.status, 201, `${version} unlabelled: ${JSON.stringify(unlabelled.body)}`);
+  }
+});
+
+test("a long 2.5 render is refused for a non-admin and allowed for an admin", async () => {
+  // 24s only exists on 2.5, and at ~1.5x 2.0's per-second rate it is the expensive
+  // end of the new range -- so it is gated the same way 4K is.
+  const body = { ...seedanceBody(), durationSeconds: 24, workflowOptions: { seedance: { version: "2.5" } } };
+
+  const editor = await call(body);
+  assert.equal(editor.status, 403);
+  assert.match(String(editor.body.error), /administrators only/i);
+  assert.equal(createRequests.length, 0);
+
+  currentUser = users.admin;
+  const admin = await call(body);
+  assert.equal(admin.status, 201, JSON.stringify(admin.body));
+  assert.equal(createRequests.at(-1)?.durationSeconds, 24);
+});
+
+test("the duration gate leaves the range both versions share alone", async () => {
+  for (const version of ["2.0", "2.5"]) {
+    const response = await call({
+      ...seedanceBody(),
+      durationSeconds: 15,
+      workflowOptions: { seedance: { version } },
+    });
+    assert.equal(response.status, 201, `${version}: ${JSON.stringify(response.body)}`);
   }
 });
 
