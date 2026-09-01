@@ -27,7 +27,7 @@ import {
   formatResultBytes,
   formatUsd,
   gpuDisplayName,
-  measuredJobUsd,
+  measuredJobSpend,
   podCostExplanation,
 } from "../features/still-images/podRuntimeCost";
 import {
@@ -50,6 +50,7 @@ import { JobActions } from "./JobActions";
 import { JobProgress } from "./JobProgress";
 import { ResultOverlayActions, ResultOverlayButton, ResultOverlayLink } from "./ResultOverlayActions";
 import { ResultTile } from "./ResultTile";
+import { finalizedSessionSpend } from "../features/still-images/editDocument";
 import { cn } from "../utils/classNames";
 import { resultCardElementId } from "../utils/resultCard";
 import { ArchiveViewToggle, JobStatusBadge, ResultLayoutToggle } from "./ResultViewControls";
@@ -450,8 +451,9 @@ function StillImageJobCard({
   const seed = job.workflowOptions?.stillImage?.seed;
   // The whole run: the pod it rented plus the partner node it called. Showing the
   // pod alone reported an eight-cent edit as half a cent.
-  const podUsd = measuredJobUsd(job);
-  const podCost = podUsd === undefined ? undefined : formatUsd(podUsd);
+  const sessionSpend = finalizedSessionSpend(job);
+  const spend = measuredJobSpend(job);
+  const podCost = spend === undefined ? undefined : formatUsd(spend.usd);
   const podRuntime = formatPodRuntime(job);
   const gpu = gpuDisplayName(job.runpodTiming?.gpuTypeId);
   const resultBytes = formatResultBytes(job.outputBytes);
@@ -631,6 +633,37 @@ function StillImageJobCard({
             artist can weigh a re-render against. The credit figure the balance and
             the dashboards use is in the tooltip. */}
         <MetadataItem label="Cost" value={podCost ?? "--"} hint={podCostExplanation(job)} />
+        {/* The two accounts, apart. They answer different questions: pod time
+            falls on a faster GPU, Comfy credits only fall by calling the model
+            fewer times, and a single total says which lever to reach for. */}
+        {spend?.comfyCredits ? (
+          <>
+            <MetadataItem
+              label="Pod"
+              value={formatUsd(spend.podUsd) ?? "--"}
+              hint={`RunPod worker time, rented by the second. ${spend.podCredits} credit${spend.podCredits === 1 ? "" : "s"}.`}
+            />
+            <MetadataItem
+              label="Comfy"
+              value={formatUsd(spend.comfyUsd) ?? "--"}
+              hint={`Comfy credits for the partner API nodes this graph called. ${spend.comfyCredits} credits.`}
+            />
+          </>
+        ) : null}
+        {/* A composite cost nothing to flatten -- the spend is the session of
+            generations behind it, which is the figure worth showing on the one
+            card that represents the whole document. */}
+        {sessionSpend ? (
+          <MetadataItem
+            label="Session"
+            value={formatUsd(sessionSpend.usd) ?? "--"}
+            hint={`${formatUsd(sessionSpend.podUsd)} of pod time and ${formatUsd(sessionSpend.comfyUsd)} of Comfy credits (${
+              sessionSpend.credits
+            } credits) across ${sessionSpend.generations} generation${
+              sessionSpend.generations === 1 ? "" : "s"
+            } in this editing session, including takes that were replaced.`}
+          />
+        ) : null}
         {/* Worker time, not the wall clock on the card: a job also waits in RunPod's
             queue, and that wait is not billed. */}
         <MetadataItem label="Pod time" value={podRuntime ?? "--"} hint="Time a worker spent on this job." />

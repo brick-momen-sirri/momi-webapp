@@ -38,7 +38,7 @@ describe("stillImageResultFileName", () => {
       ["Pro Upscaler", "pro-upscaler"],
       ["General Enhancement", "general-enhancement"],
       ["Reference Generator", "reference-generator"],
-      ["Qwen Edit", "qwen-edit"],
+      ["Flux 2 Klein Edit", "flux-2-klein-edit"],
     ];
     for (const [modelName, expected] of names) {
       expect(stillImageResultFileName({ project: project(), modelName, saveNumber: "0001", today: august13 })).toBe(
@@ -62,11 +62,11 @@ describe("stillImageResultFileName", () => {
     expect(
       stillImageResultFileName({
         project: project({ folderName: undefined, folderPath: "C:\\renders\\8127_AJYAD_ARRIVAL" }),
-        modelName: "Qwen Edit",
+        modelName: "Flux 2 Klein Edit",
         saveNumber: "12",
         today: august13,
       }),
-    ).toBe("20260813_qwen-edit_8127_cam-12_v###.png");
+    ).toBe("20260813_flux-2-klein-edit_8127_cam-12_v###.png");
   });
 
   it("pads the camera number to two digits and strips non-digits", () => {

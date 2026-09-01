@@ -68,6 +68,112 @@ export function creditsSpentForAccounting(
   return 0;
 }
 
+export type JobSpendSplit = {
+  /** RunPod worker seconds, rented from RunPod. */
+  podCredits: number;
+  podUsd: number;
+  /** Comfy credits: partner API nodes billed against the org account. */
+  comfyCredits: number;
+  comfyUsd: number;
+  credits: number;
+  usd: number;
+};
+
+/**
+ * One job's spend, split by the account it came out of.
+ *
+ * Two vendors, and knowing which is which is what makes a total actionable: a
+ * run that is mostly pod time gets cheaper on a faster GPU, and one that is
+ * mostly Comfy credits does not -- the only lever there is running the model
+ * fewer times. A single figure hides which of those two conversations to have.
+ *
+ * The Comfy side is derived by subtraction rather than summed independently, so
+ * the two parts can never disagree with `creditsSpentForAccounting`. That
+ * function stays the authority on the total; this one only says where it came
+ * from. It also means every non-pod source -- a tracker-priced animation run, a
+ * balance delta, a stored figure -- lands on the Comfy side, which is correct:
+ * all of them are that account's money.
+ */
+export function jobSpendSplit(
+  job: Pick<
+    Job,
+    "source" | "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage" | "workflowOptions" | "runpodTiming"
+  >,
+): JobSpendSplit {
+  const credits = creditsSpentForAccounting(job);
+  const podCredits = job.creditsActualSource === POD_RUNTIME_SOURCE ? (positiveNumber(job.creditsActual) ?? 0) : 0;
+  const podUsd = podRuntimeUsd(job);
+  const comfyUsd = comfyTrackedUsd(job);
+  return {
+    podCredits: roundCredits(Math.min(podCredits, credits)),
+    podUsd,
+    comfyCredits: roundCredits(Math.max(0, credits - podCredits)),
+    comfyUsd,
+    credits,
+    usd: podUsd + comfyUsd,
+  };
+}
+
+function podRuntimeUsd(job: Pick<Job, "creditsActualSource" | "runpodTiming">) {
+  if (job.creditsActualSource !== POD_RUNTIME_SOURCE) return 0;
+  const executionMs = job.runpodTiming?.executionMs;
+  const usdPerSecond = job.runpodTiming?.usdPerSecond;
+  return executionMs && usdPerSecond ? (executionMs / 1000) * usdPerSecond : 0;
+}
+
+function comfyTrackedUsd(job: Pick<Job, "creditUsage">) {
+  return isCountedCreditUsage(job.creditUsage) ? (positiveNumber(job.creditUsage?.total_estimated_usd) ?? 0) : 0;
+}
+
+export type EditSessionSpend = {
+  generations: number;
+  podCredits: number;
+  podUsd: number;
+  comfyCredits: number;
+  comfyUsd: number;
+};
+
+/**
+ * What one editing session spent, summed over the jobs that made it.
+ *
+ * Every generation the document paid for, not the layers that survived: a
+ * regenerated layer was billed twice and a deleted one was still billed once.
+ * Computed here, at finalize, because this is the only side that can see all of
+ * a document's jobs -- the browser only holds the page it happens to have
+ * loaded, so a figure it summed could quietly omit half the session.
+ *
+ * Dollars alongside credits because they are not interchangeable at this scale:
+ * credits are whole-ish numbers and converting a rounded total back would report
+ * a fraction of a cent as nothing.
+ */
+export function editSessionSpend(jobs: Job[], documentId: string): EditSessionSpend {
+  const spend: EditSessionSpend = { generations: 0, podCredits: 0, podUsd: 0, comfyCredits: 0, comfyUsd: 0 };
+  for (const job of jobs) {
+    if (job.workflowOptions?.stillImage?.edit?.documentId !== documentId) continue;
+    if (job.status !== "completed") continue;
+    const split = jobSpendSplit(job);
+    spend.generations += 1;
+    spend.podCredits += split.podCredits;
+    spend.podUsd += split.podUsd;
+    spend.comfyCredits += split.comfyCredits;
+    spend.comfyUsd += split.comfyUsd;
+  }
+  spend.podCredits = roundCredits(spend.podCredits);
+  spend.comfyCredits = roundCredits(spend.comfyCredits);
+  return spend;
+}
+
+/**
+ * The same spend in dollars, from the two terms rather than from the credits.
+ *
+ * Credits round to whole numbers at this scale, so converting them back would
+ * turn a half-cent pod run into zero. Mirrors creditsSpentForAccounting: the pod
+ * price plus the partner node's, and nothing when neither was measured.
+ */
+export function usdSpentForAccounting(job: Pick<Job, "creditsActualSource" | "runpodTiming" | "creditUsage">) {
+  return podRuntimeUsd(job) + comfyTrackedUsd(job);
+}
+
 export function creditAccountingSource(job: Pick<Job, "creditsActual" | "creditsActualSource" | "creditsUsed" | "creditUsage">) {
   if (positiveNumber(job.creditsActual) != null) {
     const measured = job.creditsActualSource || COMPANY_BALANCE_DELTA_SOURCE;
@@ -144,11 +250,47 @@ export function isCountedCreditUsage(creditUsage?: CreditUsageSummary) {
  */
 export function isUnpricedCreditUsage(creditUsage?: CreditUsageSummary) {
   if (!creditUsage) return false;
+
+  // The tracker now says this outright rather than leaving us to infer it from a
+  // block of zeroes: every row carries a pricing_status of priced, known_zero or
+  // unknown (see pricing_rules.py in comfyui_credit_tracker). Where that is
+  // present it is the answer -- it is the only thing that can distinguish a node
+  // that genuinely costs nothing from one nobody has a rate for, which the
+  // figures alone never could.
+  const declared = declaredPricingStatus(creditUsage);
+  if (declared === "unknown") return true;
+  if (declared === "priced" || declared === "known_zero") return false;
+
+  // Older workers send no status. Fall back to reading the figures, which is what
+  // caught the gpt-image gap in the first place.
   if (positiveNumber(creditUsage.total_estimated_credits) != null) return false;
   if (positiveNumber(creditUsage.total_estimated_usd) != null) return false;
   return (creditUsage.rows ?? []).every(
     (row) => positiveNumber(row.total_estimated_credits) == null && positiveNumber(row.total_estimated_usd) == null,
   );
+}
+
+/**
+ * The pricing_status the tracker attached, when every row agrees on one.
+ *
+ * Rows disagreeing means the run was partly priced, which is not "unpriced" and
+ * not a clean "priced" either; returning undefined sends the caller back to the
+ * figures, where a partial price still shows up as a positive number.
+ */
+function declaredPricingStatus(creditUsage: CreditUsageSummary) {
+  const statuses = new Set<string>();
+  const summaryStatus = statusText(creditUsage.pricing_status);
+  if (summaryStatus) statuses.add(summaryStatus);
+  for (const row of creditUsage.rows ?? []) {
+    const rowStatus = statusText(row.pricing_status);
+    if (rowStatus) statuses.add(rowStatus);
+  }
+  return statuses.size === 1 ? [...statuses][0] : undefined;
+}
+
+function statusText(value: unknown) {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return text === "priced" || text === "known_zero" || text === "unknown" ? text : "";
 }
 
 export function isLocalFallbackCreditUsage(creditUsage?: CreditUsageSummary) {

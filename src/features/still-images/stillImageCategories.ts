@@ -244,7 +244,7 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
     },
   },
   "image-editing": {
-    label: "Image Editing",
+    label: "Image Editing Studio",
     shortDescription: "Paint over a region and describe what should be there.",
     instructions: "Upload an image, paint the area to change, then describe the result you want in it.",
     icon: Brush,
@@ -272,8 +272,8 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
     },
   },
   "qwen-edit": {
-    label: "Qwen Edit",
-    shortDescription: "Apply prompt-guided edits using up to three images.",
+    label: "Flux 2 Klein Edit",
+    shortDescription: "Edit, transfer, enhance, or add photorealism with Flux 2 Klein.",
     instructions: "Choose the number of input images, upload them, and describe the intended edit.",
     icon: ImageIcon,
     prompt: {
@@ -289,9 +289,14 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
           "reference-transfer": "Reference Transfer",
           consistency: "Consistency",
           "raw-enhancement": "Raw Enhancement",
+          realistic: "Realistic",
         },
       },
       imageCount: { label: "Image count", optionLabels: { "1": "1 image", "2": "2 images", "3": "3 images" } },
+      realisticStrength: {
+        label: "Realistic Mode",
+        hint: "Controls the strength of the realistic LoRA. Lower values preserve more of the original image.",
+      },
     },
   },
 };
@@ -392,6 +397,11 @@ const QWEN_MODE_GUIDANCE: Record<string, StillImageModeGuidance> = {
     title: "Raw Enhancement",
     description: "Uses one image to improve raw architectural renders with more realistic color, detail, and finish.",
   },
+  realistic: {
+    title: "Realistic",
+    description:
+      "Uses one image and the dedicated realistic workflow. Describe the target result, choose an optional lighting preset, and tune the realism strength.",
+  },
 };
 
 export function getStillImageCategory(categoryId: StillImageCategoryId) {
@@ -426,7 +436,7 @@ export function stillImageSlotCount(category: StillImageCategoryDefinition, stat
   if (category.id === "qwen-edit") {
     const mode = String(state.settings.mode || "edit");
     if (mode === "reference-transfer") return 2;
-    if (mode === "consistency" || mode === "raw-enhancement") return 1;
+    if (mode === "consistency" || mode === "raw-enhancement" || mode === "realistic") return 1;
     return Math.max(1, Math.min(3, Number(state.settings.imageCount) || 1));
   }
   return category.imageSlots;
@@ -441,6 +451,7 @@ export function stillImageSlotLabels(category: StillImageCategoryDefinition, sta
   if (mode === "reference-transfer") return ["Main image", "Reference image"];
   if (mode === "consistency") return ["Consistency image"];
   if (mode === "raw-enhancement") return ["Raw render"];
+  if (mode === "realistic") return ["Image to make realistic"];
   return Array.from({ length: stillImageSlotCount(category, state) }, (_, index) => `Image ${index + 1}`);
 }
 

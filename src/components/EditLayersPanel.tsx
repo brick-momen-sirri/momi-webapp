@@ -228,26 +228,36 @@ export function EditLayersPanel({
  */
 function SessionCost({ cost }: { cost: EditSessionCost }) {
   const redone = cost.generations - cost.layers;
-  const amount = formatUsd(cost.usd);
+  const floor = cost.unmeasured > 0;
   return (
     <div
-      className="mt-3 flex items-baseline gap-2 rounded-md border border-line bg-mist/60 px-2.5 py-2"
+      className="mt-3 space-y-1 rounded-md border border-line bg-mist/60 px-2.5 py-2"
       data-testid="edit-session-cost"
       data-generations={cost.generations}
     >
-      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">This session</span>
-      <span
-        className="ml-auto text-sm font-bold tabular-nums text-ink"
-        title={`${cost.credits} credits across ${cost.generations} generation${cost.generations === 1 ? "" : "s"}${
-          cost.unmeasured ? `. ${cost.unmeasured} could not be priced, so this is a floor.` : "."
-        }`}
-      >
-        {cost.unmeasured && !cost.usd ? "--" : `${cost.unmeasured ? "≥ " : ""}${amount ?? "--"}`}
-      </span>
-      <span className="text-[10px] tabular-nums text-stone-500">
-        {cost.generations} run{cost.generations === 1 ? "" : "s"}
-        {redone > 0 ? ` · ${redone} redone` : ""}
-      </span>
+      <div className="flex items-baseline gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">This session</span>
+        <span
+          className="ml-auto text-sm font-bold tabular-nums text-ink"
+          title={`${cost.credits} credits across ${cost.generations} generation${cost.generations === 1 ? "" : "s"}${
+            floor ? `. ${cost.unmeasured} could not be priced, so this is a floor.` : "."
+          }`}
+        >
+          {floor && !cost.usd ? "--" : `${floor ? "≥ " : ""}${formatUsd(cost.usd) ?? "--"}`}
+        </span>
+      </div>
+      {/* The two vendors, apart. Which half is growing is what tells an artist
+          whether a session is expensive because the pod is slow or because the
+          model has been called a lot -- and only the second is theirs to change. */}
+      <div className="flex items-baseline gap-2 text-[10px] tabular-nums text-stone-500">
+        <span data-testid="session-pod-cost">Pod {formatUsd(cost.podUsd) ?? "--"}</span>
+        <span className="text-stone-300">·</span>
+        <span data-testid="session-comfy-cost">Comfy {formatUsd(cost.comfyUsd) ?? "--"}</span>
+        <span className="ml-auto">
+          {cost.generations} run{cost.generations === 1 ? "" : "s"}
+          {redone > 0 ? ` · ${redone} redone` : ""}
+        </span>
+      </div>
     </div>
   );
 }

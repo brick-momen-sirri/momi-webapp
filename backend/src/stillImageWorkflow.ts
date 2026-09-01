@@ -75,6 +75,8 @@ export type StillImageInputBinding = {
 export type StillImagePreset = {
   categoryId: StillImageCategoryId;
   workflowFile: string;
+  /** A mode may select a genuinely different exported graph on the same endpoint. */
+  workflowFilesByMode?: Readonly<Record<string, string>>;
   inputTransport: StillImageInputTransport;
   /**
    * Where this preset's graph has to run.
@@ -123,8 +125,11 @@ export function stillImagePreset(categoryId: StillImageCategoryId): StillImagePr
   return preset;
 }
 
-export function stillImageWorkflowPath(categoryId: StillImageCategoryId) {
-  return path.join(stillImageWorkflowRoot, stillImagePreset(categoryId).workflowFile);
+export function stillImageWorkflowPath(categoryId: StillImageCategoryId, settings: Record<string, StillImageSettingValue> = {}) {
+  const preset = stillImagePreset(categoryId);
+  const mode = typeof settings.mode === "string" ? settings.mode : "";
+  const workflowFile = preset.workflowFilesByMode?.[mode] ?? preset.workflowFile;
+  return path.join(stillImageWorkflowRoot, workflowFile);
 }
 
 export function stillImageInputTransport(categoryId: StillImageCategoryId) {
@@ -199,7 +204,9 @@ export function assertStillImageBindings(graph: StillImageGraph, categoryId: Sti
  */
 export async function buildStillImageWorkflow(input: StillImageBuildInput): Promise<StillImageGraph> {
   const preset = stillImagePreset(input.options.categoryId);
-  const graph = JSON.parse(await fs.readFile(stillImageWorkflowPath(preset.categoryId), "utf8")) as StillImageGraph;
+  const graph = JSON.parse(
+    await fs.readFile(stillImageWorkflowPath(preset.categoryId, input.options.settings), "utf8"),
+  ) as StillImageGraph;
 
   const imageCount = stillImageRequestSlotCount(input.options);
   if (input.images.length !== imageCount) {
@@ -536,6 +543,12 @@ const QWEN = {
   vaeDecode: "140",
 } as const;
 
+const QWEN_REALISTIC = {
+  positiveText: "163",
+  noise: "176",
+  lora: "179",
+} as const;
+
 // Each non-Edit mode swaps the LoRA and repoints the guider at it; Edit runs the
 // base model with no LoRA.
 const QWEN_MODE_LORA: Record<string, string> = {
@@ -566,11 +579,25 @@ const REFERENCE_TRANSFER_SUFFIX =
 function applyQwenEdit(graph: StillImageGraph, input: ResolvedBuildInput) {
   const mode = choice(input.settings, "mode", "edit");
 
+  if (mode === "realistic") {
+    applyQwenRealistic(graph, input);
+    return;
+  }
+
   set(graph, QWEN.noise, "noise_seed", input.nextSeed());
 
   applyQwenConditioning(graph, input.imageCount);
   applyQwenMode(graph, mode, input.prompt);
   applyQwenPaddingCrop(graph, mode, input.imageCount);
+}
+
+/** Forge's Realistic mode is a separate one-image graph, not a LoRA branch in the edit export. */
+function applyQwenRealistic(graph: StillImageGraph, input: ResolvedBuildInput) {
+  const strength = optionalNumber(input.settings, "realisticStrength");
+  if (strength === undefined) throw new Error("Flux 2 Klein Realistic mode requires a realism strength.");
+  set(graph, QWEN_REALISTIC.positiveText, "text", input.prompt);
+  set(graph, QWEN_REALISTIC.noise, "noise_seed", input.nextSeed());
+  set(graph, QWEN_REALISTIC.lora, "strength_model", strength);
 }
 
 /**
@@ -612,7 +639,7 @@ function applyQwenMode(graph: StillImageGraph, mode: string, prompt: string) {
   }
 
   const lora = QWEN_MODE_LORA[mode];
-  if (!lora) throw new Error(`Unknown Qwen Edit mode: ${mode}.`);
+  if (!lora) throw new Error(`Unknown Flux 2 Klein Edit mode: ${mode}.`);
   set(graph, QWEN.lora, "lora_name", lora);
   connect(graph, QWEN.cfgGuider, "model", QWEN.lora);
 
@@ -870,20 +897,49 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
   },
 };
 
+const QWEN_REALISTIC_NODE_STATUS_LABELS: Readonly<Record<string, string>> = {
+  "76": "Loading the input image",
+  "182": "Scaling the input image",
+  "184": "Padding the input image",
+  "161": "Loading the text encoder",
+  "162": "Loading the VAE",
+  "175": "Loading the model",
+  "179": "Loading the realistic LoRA",
+  "163": "Reading the prompt",
+  "174": "Encoding the image",
+  "169": "Preparing the schedule",
+  "171": "Sampling",
+  "172": "Decoding the image",
+  "181": "Matching the source size",
+  "160": "Saving final image",
+};
+
+function stillImageNodeStatusLabels(categoryId: StillImageCategoryId, settings: Record<string, StillImageSettingValue> = {}) {
+  if (categoryId === "qwen-edit" && settings.mode === "realistic") return QWEN_REALISTIC_NODE_STATUS_LABELS;
+  return NODE_STATUS_LABELS[categoryId];
+}
+
 /**
  * The nodes a preset has labels for. Exported so a test can hold them against
  * the real graph: a re-export that renumbers a node would otherwise leave the
  * label silently unreachable, and the trail would quietly go blank for that step
  * with nothing failing.
  */
-export function stillImageLabelledNodeIds(categoryId: StillImageCategoryId) {
-  return Object.keys(NODE_STATUS_LABELS[categoryId] ?? {});
+export function stillImageLabelledNodeIds(
+  categoryId: StillImageCategoryId,
+  settings: Record<string, StillImageSettingValue> = {},
+) {
+  return Object.keys(stillImageNodeStatusLabels(categoryId, settings) ?? {});
 }
 
 /** The human label for a node a worker is reporting on, if it has one. */
-export function stillImageNodeStatusLabel(categoryId: string, nodeId: string | undefined) {
+export function stillImageNodeStatusLabel(
+  categoryId: string,
+  nodeId: string | undefined,
+  settings: Record<string, StillImageSettingValue> = {},
+) {
   if (!nodeId) return undefined;
-  const labels = NODE_STATUS_LABELS[categoryId as StillImageCategoryId];
+  const labels = stillImageNodeStatusLabels(categoryId as StillImageCategoryId, settings);
   // Subgraph nodes arrive as "80:29"; the outer id is the one that is labelled.
   return labels?.[nodeId] ?? labels?.[nodeId.split(":")[0]];
 }
@@ -926,6 +982,7 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "qwen-edit": {
     categoryId: "qwen-edit",
     workflowFile: "qwen-edit.json",
+    workflowFilesByMode: { realistic: "qwen-edit-realistic.json" },
     endpoint: "dedicated",
     inputTransport: "load_image_name",
     // Nodes 121 and 165 were exported holding the same value, "0001 (1).png".

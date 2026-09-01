@@ -3,6 +3,7 @@
 // concluding "my render isn't there" because a filter silently dropped it is a
 // support conversation, not a visible crash.
 
+import { useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -28,6 +29,24 @@ function job(overrides: Partial<Job> = {}): Job {
 
 const projects: Project[] = [{ id: "proj_1", name: "Tower", shortName: "TWR", members: [] } as unknown as Project];
 const users: User[] = [{ id: "usr_momen", name: "momen" } as User, { id: "usr_other", name: "someone else" } as User];
+
+// The specific-user filter is controlled by App -- it decides what the workspace
+// fetches, not just what this component draws -- so the harness has to hold that
+// state for it, the way App does. Everything else here is still JobFeed's own.
+function ControlledFeed(props: Record<string, unknown>) {
+  const [userFilter, setUserFilter] = useState((props.userFilter as string | undefined) ?? "all");
+  const notify = props.onUserFilterChange as ((userId: string) => void) | undefined;
+  return (
+    <JobFeed
+      {...(props as unknown as ComponentProps<typeof JobFeed>)}
+      userFilter={userFilter}
+      onUserFilterChange={(userId) => {
+        setUserFilter(userId);
+        notify?.(userId);
+      }}
+    />
+  );
+}
 
 function renderFeed(jobs: Job[], overrides: Record<string, unknown> = {}) {
   const props = {
@@ -55,7 +74,7 @@ function renderFeed(jobs: Job[], overrides: Record<string, unknown> = {}) {
     onToggleArchiveView: vi.fn(),
     ...overrides,
   };
-  return { ...render(<JobFeed {...props} />), props };
+  return { ...render(<ControlledFeed {...props} />), props };
 }
 
 // Prompts are the most reliable per-job text in the rendered card.
@@ -161,6 +180,30 @@ describe("specific-user filter", () => {
     await openFilterPanel(user);
     await user.selectOptions(screen.getByLabelText("Specific user"), "usr_other");
     expect(visiblePrompts(["solo render", "other render"])).toEqual(["other render"]);
+  });
+
+  // The narrowing above is only half the feature. The browser holds one page of
+  // jobs, so a user with no work in that page has to be fetched for, not filtered
+  // for -- and that only happens if the choice leaves the component.
+  it("reports the choice upward, so the workspace can re-fetch for that user", async () => {
+    const user = userEvent.setup();
+    const onUserFilterChange = vi.fn();
+    renderFeed([job({ id: "a", prompt: "solo render" })], { onUserFilterChange });
+
+    await openFilterPanel(user);
+    await user.selectOptions(screen.getByLabelText("Specific user"), "usr_other");
+    expect(onUserFilterChange).toHaveBeenCalledWith("usr_other");
+  });
+
+  it("reports the reset upward too, so clearing it restores the whole feed", async () => {
+    const user = userEvent.setup();
+    const onUserFilterChange = vi.fn();
+    renderFeed([job({ id: "a", prompt: "solo render" })], { onUserFilterChange });
+
+    await openFilterPanel(user);
+    await user.selectOptions(screen.getByLabelText("Specific user"), "usr_other");
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(onUserFilterChange).toHaveBeenLastCalledWith("all");
   });
 
   it("is not offered to a non-admin at all", async () => {

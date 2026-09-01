@@ -107,6 +107,9 @@ export type CreditDashboardRecentJob = {
   status: Job["status"];
   credits: number;
   usd: number;
+  /** The same spend, split by the account it left: RunPod, and Comfy credits. */
+  podCredits: number;
+  comfyCredits: number;
   expectedCredits: number;
   source: string;
   resolution: string;

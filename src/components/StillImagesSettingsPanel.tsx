@@ -17,6 +17,12 @@ import {
   visibleEditLayers,
 } from "../features/still-images/imageEditLayers";
 import type { EditSessionCost } from "../features/still-images/editDocument";
+import {
+  FLUX2_KLEIN_PROMPT_CATEGORIES,
+  FLUX2_KLEIN_PROMPT_PRESETS,
+  flux2KleinPromptPresetsForCategory,
+  getFlux2KleinPromptPreset,
+} from "../features/still-images/flux2KleinPromptLibrary";
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
@@ -126,12 +132,17 @@ export function StillImagesSettingsPanel({
   submitError,
 }: StillImagesSettingsPanelProps) {
   const [regionOpenRequest, setRegionOpenRequest] = useState(0);
+  const [realisticPromptCategory, setRealisticPromptCategory] = useState("all");
+  const [realisticPromptPreset, setRealisticPromptPreset] = useState(FLUX2_KLEIN_PROMPT_PRESETS[0]?.id ?? "");
   // The panel opens the editor for its own reasons (a fresh upload, "New edit")
   // and the caller has one of its own, so the request the field sees is the sum
   // rather than either alone.
   const editorOpenRequest = regionOpenRequest + openEditorRequest;
   const CategoryIcon = category.icon;
   const showPrompt = shouldShowStillImagePrompt(category, state);
+  const isFlux2KleinRealistic = category.id === "qwen-edit" && state.settings.mode === "realistic";
+  const realisticPromptPresets = flux2KleinPromptPresetsForCategory(realisticPromptCategory);
+  const selectedRealisticPromptPreset = getFlux2KleinPromptPreset(realisticPromptPreset);
   const modeGuidance = stillImageModeGuidance(category, state);
   // Image Editing's later slots are drawn from the painted region rather than
   // uploaded, so the uploader shows one slot and the mask card stands in for the
@@ -212,6 +223,19 @@ export function StillImagesSettingsPanel({
       setRegionOpenRequest((request) => request + 1);
     }
     onImagesChange(images);
+  }
+
+  function handleRealisticPromptCategoryChange(categoryId: string) {
+    const firstPreset = flux2KleinPromptPresetsForCategory(categoryId)[0];
+    setRealisticPromptCategory(categoryId);
+    setRealisticPromptPreset(firstPreset?.id ?? "");
+    onPromptChange(firstPreset?.prompt ?? "");
+  }
+
+  function handleRealisticPromptPresetChange(presetId: string) {
+    const preset = getFlux2KleinPromptPreset(presetId);
+    setRealisticPromptPreset(presetId);
+    onPromptChange(preset?.prompt ?? "");
   }
   const settingsCard = (
     <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
@@ -413,6 +437,50 @@ export function StillImagesSettingsPanel({
             <ImageIcon className="h-4 w-4 text-stone-500" />
             <h2 className="text-sm font-semibold">{category.prompt.label}</h2>
           </div>
+          {isFlux2KleinRealistic ? (
+            <div className="mb-3 rounded-md border border-cyan-100 bg-cyan-50/70 p-3">
+              <p className="text-xs font-bold text-cyan-900">Realistic prompt presets</p>
+              <p className="mt-1 text-[11px] leading-5 text-cyan-800">
+                Start from the same lighting and weather recipes available in Momi Forge, then edit the prompt below.
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-stone-600">Category</span>
+                  <select
+                    aria-label="Realistic prompt category"
+                    value={realisticPromptCategory}
+                    onChange={(event) => handleRealisticPromptCategoryChange(event.target.value)}
+                    className="mt-1 h-9 w-full rounded-md border border-line bg-white px-2 text-xs font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  >
+                    <option value="all">All Categories</option>
+                    {FLUX2_KLEIN_PROMPT_CATEGORIES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-stone-600">Preset</span>
+                  <select
+                    aria-label="Realistic prompt preset"
+                    value={realisticPromptPreset}
+                    onChange={(event) => handleRealisticPromptPresetChange(event.target.value)}
+                    className="mt-1 h-9 w-full rounded-md border border-line bg-white px-2 text-xs font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  >
+                    {realisticPromptPresets.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {selectedRealisticPromptPreset ? (
+                <p className="mt-2 text-[11px] leading-5 text-stone-600">{selectedRealisticPromptPreset.description}</p>
+              ) : null}
+            </div>
+          ) : null}
           <textarea
             aria-label={category.prompt.label}
             value={state.prompt}

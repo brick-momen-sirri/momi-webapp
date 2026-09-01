@@ -82,13 +82,13 @@ const MODEL_METADATA: Record<StillImageCategoryId, StillImageModelMetadata> = {
     estimatedTime: "1-3 min",
   },
   "qwen-edit": {
-    name: "Qwen Edit",
+    name: "Flux 2 Klein Edit",
     category: "image_editing",
     estimatedCredits: 8,
     estimatedTime: "1-3 min",
   },
   "image-editing": {
-    name: "Image Editing",
+    name: "Image Editing Studio",
     category: "image_editing",
     // The odd one out: not GPU-seconds on our own pod but a per-image Nano Banana
     // charge, so this figure is a provider price rather than a placeholder. It is

@@ -171,6 +171,15 @@ export type CreditUsageSummary = {
   total_estimated_usd?: number;
   source: string;
   rows?: CreditUsageRow[];
+  /**
+   * What the tracker knows about the price: "priced", "known_zero" or "unknown".
+   *
+   * Absent from workers running a tracker older than the 2026-08 pricing rework,
+   * which is why every reader falls back to inspecting the figures. A zero cannot
+   * express the difference between a free node and one with no rate, and reading
+   * it as "free" is what hid ~$17 of gpt-image spend through August.
+   */
+  pricing_status?: string;
 };
 
 export type CreditBalanceSnapshot = {

@@ -132,6 +132,32 @@ test("a still image job uses the deterministic per-slot names instead", async ()
   assert.equal(graph["154"]?.inputs?.text, "swap the cladding");
 });
 
+test("Flux 2 Klein Realistic dispatches the dedicated one-image workflow on the existing preset route", async () => {
+  const prepared = await prepareRunpodSubmission(
+    job({
+      inputImages: [await pngDataUrl(8)],
+      workflowOptions: {
+        stillImage: normalizeStillImageOptions({
+          categoryId: "qwen-edit",
+          settings: { mode: "realistic", realisticStrength: 0.65 },
+        }),
+      },
+      prompt: "warm natural afternoon light",
+    }),
+    animationModel,
+    "PROJECT",
+    tempRoot,
+  );
+
+  assert.deepEqual(prepared.runpodImages.imageNames, ["momi_still_01.png"]);
+  const graph = prepared.workflow as Record<string, { inputs?: Record<string, unknown> }>;
+  assert.equal(graph["76"]?.inputs?.image, "momi_still_01.png");
+  assert.equal(graph["163"]?.inputs?.text, "warm natural afternoon light");
+  assert.equal(graph["179"]?.inputs?.strength_model, 0.65);
+  assert.equal(graph["179"]?.inputs?.lora_name, "realistic.safetensors");
+  assert.equal(graph["145"], undefined);
+});
+
 test("a base64 preset puts image data in the graph and nothing in the payload", async () => {
   const prepared = await prepareRunpodSubmission(
     job({

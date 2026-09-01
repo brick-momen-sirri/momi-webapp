@@ -21,7 +21,7 @@
 import { resolveMediaUrl } from "../../services/api/mediaAccess";
 import type { Job, StillImageEditBaseLayer, StillImageEditWorkflow } from "../../types";
 import { baseRevisionId } from "./imageEditLayers";
-import { measuredJobCredits, measuredJobUsd } from "./podRuntimeCost";
+import { measuredJobSpend } from "./podRuntimeCost";
 import type { MaskDrawing } from "./maskDrawing";
 import type { StillImageEditLayer } from "./stillImageCategories";
 
@@ -68,13 +68,57 @@ export function editDocumentsFromJobs(jobs: Job[]) {
   return [...byDocument.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/**
+ * The spend a finalized composite carries, stamped when it was flattened.
+ *
+ * Preferred over adding up jobs in the browser, which can only see the page it
+ * has loaded: this figure was computed on the server at the one moment every job
+ * of the session was reachable, so it stays right forever. Absent on composites
+ * finished before it was recorded, and absent is shown as nothing rather than as
+ * a total that might be missing half a session.
+ */
+export function finalizedSessionSpend(job: Job) {
+  const settings = job.workflowOptions?.stillImage?.settings;
+  if (!settings?.finalizedComposite) return undefined;
+  const generations = settings.sessionGenerations;
+  const podUsd = settings.sessionPodUsd;
+  const podCredits = settings.sessionPodCredits;
+  const comfyUsd = settings.sessionComfyUsd;
+  const comfyCredits = settings.sessionComfyCredits;
+  if (
+    typeof generations !== "number" ||
+    typeof podUsd !== "number" ||
+    typeof podCredits !== "number" ||
+    typeof comfyUsd !== "number" ||
+    typeof comfyCredits !== "number"
+  ) {
+    return undefined;
+  }
+  // Totals are derived, never stored: a stored one could drift from its parts.
+  return {
+    generations,
+    podUsd,
+    podCredits,
+    comfyUsd,
+    comfyCredits,
+    usd: podUsd + comfyUsd,
+    credits: Math.round((podCredits + comfyCredits) * 100) / 100,
+  };
+}
+
 export type EditSessionCost = {
   /** Generations that were paid for, including takes that were replaced. */
   generations: number;
   /** Layers those generations produced, which is fewer once anything was redone. */
   layers: number;
-  credits: number;
+  /** RunPod worker time, rented by the second. */
+  podUsd: number;
+  podCredits: number;
+  /** Comfy credits: the partner API nodes the graph called. */
+  comfyUsd: number;
+  comfyCredits: number;
   usd: number;
+  credits: number;
   /** Generations whose spend could not be measured, so the total is a floor. */
   unmeasured: number;
 };
@@ -92,7 +136,17 @@ export type EditSessionCost = {
  * and a session containing one is a floor rather than a figure.
  */
 export function editSessionCost(jobs: Job[], documentId: string | undefined): EditSessionCost {
-  const cost: EditSessionCost = { generations: 0, layers: 0, credits: 0, usd: 0, unmeasured: 0 };
+  const cost: EditSessionCost = {
+    generations: 0,
+    layers: 0,
+    podUsd: 0,
+    podCredits: 0,
+    comfyUsd: 0,
+    comfyCredits: 0,
+    usd: 0,
+    credits: 0,
+    unmeasured: 0,
+  };
   if (!documentId) return cost;
 
   const layers = new Set<string>();
@@ -106,18 +160,22 @@ export function editSessionCost(jobs: Job[], documentId: string | undefined): Ed
     cost.generations += 1;
     if (edit.generatedCropUrl) layers.add(edit.layerId);
 
-    const credits = measuredJobCredits(job);
-    const usd = measuredJobUsd(job);
-    if (credits === undefined || usd === undefined) {
+    const spend = measuredJobSpend(job);
+    if (!spend) {
       cost.unmeasured += 1;
       continue;
     }
-    cost.credits += credits;
-    cost.usd += usd;
+    cost.podUsd += spend.podUsd;
+    cost.podCredits += spend.podCredits;
+    cost.comfyUsd += spend.comfyUsd;
+    cost.comfyCredits += spend.comfyCredits;
   }
 
   cost.layers = layers.size;
-  cost.credits = Math.round(cost.credits * 100) / 100;
+  cost.podCredits = Math.round(cost.podCredits * 100) / 100;
+  cost.comfyCredits = Math.round(cost.comfyCredits * 100) / 100;
+  cost.usd = cost.podUsd + cost.comfyUsd;
+  cost.credits = Math.round((cost.podCredits + cost.comfyCredits) * 100) / 100;
   return cost;
 }
 

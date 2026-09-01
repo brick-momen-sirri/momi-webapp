@@ -53,7 +53,7 @@ describe("StillImagesSettingsPanel", () => {
     render(<StillImagesHarness />);
 
     await user.type(screen.getByRole("textbox", { name: "Enhancement prompt" }), "preserve stone texture");
-    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.click(screen.getByRole("button", { name: "Flux 2 Klein Edit" }));
     await user.type(screen.getByRole("textbox", { name: "Edit prompt" }), "replace the sky");
     await user.click(screen.getByRole("button", { name: "General Enhancement" }));
 
@@ -68,7 +68,7 @@ describe("StillImagesSettingsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Reference Generator" }));
     await user.click(screen.getByTitle("Paste image from clipboard"));
-    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.click(screen.getByRole("button", { name: "Flux 2 Klein Edit" }));
     await user.selectOptions(screen.getByLabelText("Image count"), "3");
     await user.type(screen.getByRole("textbox", { name: "Edit prompt" }), "make the facade warmer");
 
@@ -77,10 +77,10 @@ describe("StillImagesSettingsPanel", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("mirrors every Qwen Edit mode and its Gradio input rules", async () => {
+  it("mirrors every Flux 2 Klein Edit mode and its Forge input rules", async () => {
     const user = userEvent.setup();
     render(<StillImagesHarness />);
-    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.click(screen.getByRole("button", { name: "Flux 2 Klein Edit" }));
 
     const mode = screen.getByLabelText("Mode");
     expect(screen.getByLabelText("Image count")).toBeInTheDocument();
@@ -100,6 +100,14 @@ describe("StillImagesSettingsPanel", () => {
     expect(screen.getByRole("textbox", { name: "Edit prompt" })).toBeInTheDocument();
     expect(screen.getByLabelText("Upload Raw render")).toBeInTheDocument();
 
+    await user.selectOptions(mode, "realistic");
+    expect(screen.getByLabelText("Upload Image to make realistic")).toBeInTheDocument();
+    expect(screen.getByLabelText("Realistic Mode")).toHaveValue("0.5");
+    expect(screen.getByLabelText("Realistic prompt category")).toBeInTheDocument();
+    expect(screen.getByLabelText("Realistic prompt preset")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Realistic prompt category"), "night");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Edit prompt" }).value).toContain("deep blue night sky");
+
     await user.selectOptions(mode, "edit");
     await user.selectOptions(screen.getByLabelText("Image count"), "3");
     expect(screen.getByLabelText("Upload Image 3")).toBeInTheDocument();
@@ -109,7 +117,7 @@ describe("StillImagesSettingsPanel", () => {
     const user = userEvent.setup();
     render(<StillImagesHarness />);
 
-    await user.click(screen.getByRole("button", { name: "Image Editing" }));
+    await user.click(screen.getByRole("button", { name: "Image Editing Studio" }));
 
     // Slots 2 and 3 are the mask and the marked guide, both drawn from the region
     // the artist paints. Offering them as uploads would ask for files that do not
@@ -211,7 +219,7 @@ describe("StillImagesSettingsPanel", () => {
 
     // Per preset, like the prompt and the sliders next to it.
     await user.type(seed(), "77");
-    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.click(screen.getByRole("button", { name: "Flux 2 Klein Edit" }));
     expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "General Enhancement" }));
     expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("77");

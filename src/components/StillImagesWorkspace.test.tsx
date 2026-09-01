@@ -509,7 +509,7 @@ describe("StillImagesWorkspace", () => {
     const menu = screen.getByRole("menu", { name: /send this result to a preset/i });
     expect(within(menu).getAllByRole("menuitem")).toHaveLength(STILL_IMAGE_CATEGORIES.length);
 
-    await userEvent.click(within(menu).getByRole("menuitem", { name: /qwen edit/i }));
+    await userEvent.click(within(menu).getByRole("menuitem", { name: /flux 2 klein edit/i }));
 
     expect(onUseAsInput).toHaveBeenCalledTimes(1);
     expect(onUseAsInput.mock.calls[0][1]).toBe("qwen-edit");

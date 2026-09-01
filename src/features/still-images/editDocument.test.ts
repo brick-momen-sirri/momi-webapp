@@ -4,6 +4,7 @@ import {
   editDocumentIdOfJob,
   editDocumentsFromJobs,
   editSessionCost,
+  finalizedSessionSpend,
   isFinalizedCompositeJob,
   restoreEditDocument,
 } from "./editDocument";
@@ -301,5 +302,42 @@ describe("what a session has cost", () => {
   it("is empty for a document that has not generated anything, or none at all", () => {
     expect(editSessionCost([], "editdoc_1")).toMatchObject({ generations: 0, layers: 0, credits: 0, usd: 0 });
     expect(editSessionCost([priced("edit_a", "2026-08-27T10:00:00.000Z")], undefined)).toMatchObject({ generations: 0 });
+  });
+});
+
+describe("the spend a composite carries", () => {
+  it("reads the figure stamped when the session was flattened", () => {
+    const job = finalizedJob();
+    job.workflowOptions!.stillImage!.settings = {
+      finalizedComposite: true,
+      documentId: "editdoc_1",
+      sessionGenerations: 3,
+      sessionPodCredits: 3,
+      sessionPodUsd: 0.016596,
+      sessionComfyCredits: 51.96,
+      sessionComfyUsd: 0.2463,
+    };
+    // Totals are derived from the two halves rather than stored beside them.
+    expect(finalizedSessionSpend(job)).toEqual({
+      generations: 3,
+      podCredits: 3,
+      podUsd: 0.016596,
+      comfyCredits: 51.96,
+      comfyUsd: 0.2463,
+      credits: 54.96,
+      usd: 0.262896,
+    });
+  });
+
+  it("says nothing for a composite finished before the figure was recorded", () => {
+    // Better than a total summed from whatever jobs the browser happens to hold,
+    // which could silently be missing half the session.
+    expect(finalizedSessionSpend(finalizedJob())).toBeUndefined();
+  });
+
+  it("is not offered by a layer job, only by the composite", () => {
+    const layer = layerJob({ layerId: "edit_a", at: "2026-08-27T10:00:00.000Z" });
+    layer.workflowOptions!.stillImage!.settings = { sessionGenerations: 3, sessionPodCredits: 3, sessionComfyCredits: 51.96 };
+    expect(finalizedSessionSpend(layer)).toBeUndefined();
   });
 });

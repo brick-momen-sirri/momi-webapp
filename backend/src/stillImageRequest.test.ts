@@ -79,6 +79,18 @@ test("hidden settings are dropped, not passed through", () => {
   assert.equal("creativity" in options.settings, false);
 });
 
+test("realistic mode keeps its bounded LoRA strength and hides edit-only inputs", () => {
+  const options = normalizeStillImageOptions({
+    categoryId: "qwen-edit",
+    settings: { mode: "realistic", imageCount: "3", realisticStrength: 0.7 },
+  });
+  assert.deepEqual(options.settings, { mode: "realistic", realisticStrength: 0.7 });
+  assert.throws(
+    () => normalizeStillImageOptions({ categoryId: "qwen-edit", settings: { mode: "realistic", realisticStrength: 1.01 } }),
+    /must be between 0 and 1/,
+  );
+});
+
 test("visibility is resolved from the full merged map, not just what was sent", () => {
   // generalEnhance is left out here. Its default is true, so generalDenoise is
   // visible -- reading visibility off the caller's partial map would have hidden
@@ -254,6 +266,10 @@ test("qwen edit's slot count follows its mode and image count", () => {
   const transfer = normalizeStillImageOptions({ categoryId: "qwen-edit", settings: { mode: "reference-transfer" } });
   assert.doesNotThrow(() => assertStillImageInputs(transfer, { inputImages: ["main", "ref"] }));
   assert.throws(() => assertStillImageInputs(transfer, { inputImages: ["main"] }), /needs exactly 2 input images/);
+
+  const realistic = normalizeStillImageOptions({ categoryId: "qwen-edit", settings: { mode: "realistic" } });
+  assert.doesNotThrow(() => assertStillImageInputs(realistic, { inputImages: ["main"], prompt: "soft daylight" }));
+  assert.throws(() => assertStillImageInputs(realistic, { inputImages: ["main", "extra"] }), /needs exactly 1 input image/);
 });
 
 test("a prompt is refused by presets that have no prompt field", () => {

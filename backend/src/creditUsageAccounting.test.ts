@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   balanceDeltaCredits,
+  editSessionSpend,
+  jobSpendSplit,
+  usdSpentForAccounting,
   COMPANY_BALANCE_DELTA_SOURCE,
   creditAccountingSource,
   creditsSpentForAccounting,
@@ -317,4 +320,146 @@ test("only pod-priced jobs gain the partner term, so animation accounting is unt
     creditUsage: { total_estimated_credits: 99, source: "credit_tracker:runtime_price" },
   };
   assert.equal(creditsSpentForAccounting(animation), 12);
+});
+
+test("a session's spend is every generation it paid for, in both units", () => {
+  const layer = (layerId: string, documentId = "editdoc_1", status = "completed") =>
+    ({
+      status,
+      workflowOptions: { stillImage: { categoryId: "image-editing", settings: {}, edit: { layerId, documentId } } },
+      creditsActual: 1,
+      creditsActualSource: POD_RUNTIME_SOURCE,
+      runpodTiming: { executionMs: 30000, gpuTypeId: "g", usdPerSecond: 0.0001844 },
+      creditUsage: { total_estimated_credits: 17.32, total_estimated_usd: 0.0821, source: "credit_tracker:runtime_price" },
+    }) as Parameters<typeof editSessionSpend>[0][number];
+
+  const spend = editSessionSpend(
+    [
+      layer("edit_a"),
+      layer("edit_a"), // the same layer, regenerated -- billed twice, counted twice
+      layer("edit_b"),
+      layer("edit_c", "editdoc_other"),
+      layer("edit_d", "editdoc_1", "running"),
+    ],
+    "editdoc_1",
+  );
+
+  assert.equal(spend.generations, 3);
+  // Split by the account it left: three credits of pod rental, the rest Comfy.
+  assert.equal(spend.podCredits, 3);
+  assert.equal(spend.comfyCredits, 51.96);
+  assert.ok(Math.abs(spend.podUsd - 0.016596) < 1e-6, `podUsd was ${spend.podUsd}`);
+  assert.ok(Math.abs(spend.comfyUsd - 0.2463) < 1e-6, `comfyUsd was ${spend.comfyUsd}`);
+});
+
+test("a document nobody generated for has no spend", () => {
+  assert.deepEqual(editSessionSpend([], "editdoc_1"), {
+    generations: 0,
+    podCredits: 0,
+    podUsd: 0,
+    comfyCredits: 0,
+    comfyUsd: 0,
+  });
+});
+
+test("a job's spend says which account each half left, and always reconciles", () => {
+  const edit = {
+    workflowOptions: { stillImage: { categoryId: "image-editing", settings: {} } },
+    creditsActual: 1,
+    creditsActualSource: POD_RUNTIME_SOURCE,
+    runpodTiming: { executionMs: 30000, usdPerSecond: 0.0001844 },
+    creditUsage: { total_estimated_credits: 17.32, total_estimated_usd: 0.0821, source: "credit_tracker:runtime_price" },
+  };
+  const split = jobSpendSplit(edit);
+  assert.equal(split.podCredits, 1);
+  assert.equal(split.comfyCredits, 17.32);
+  // The two halves are exactly the figure the dashboards show. They are derived
+  // from it rather than summed beside it, so they cannot drift from it.
+  assert.equal(split.podCredits + split.comfyCredits, creditsSpentForAccounting(edit));
+  assert.ok(Math.abs(split.podUsd - 0.005532) < 1e-6);
+  assert.ok(Math.abs(split.comfyUsd - 0.0821) < 1e-9);
+});
+
+test("spend that never touched a pod is all Comfy credits", () => {
+  // An animation run priced by the tracker, and a balance delta -- both of them
+  // are that account's money, so neither has a pod half.
+  const tracked = { creditsUsed: 32.17, creditUsage: { total_estimated_credits: 32.17, source: "credit_tracker:runtime_price" } };
+  assert.deepEqual(
+    { pod: jobSpendSplit(tracked).podCredits, comfy: jobSpendSplit(tracked).comfyCredits },
+    { pod: 0, comfy: 32.17 },
+  );
+
+  const delta = { creditsActual: 40, creditsActualSource: COMPANY_BALANCE_DELTA_SOURCE };
+  assert.deepEqual({ pod: jobSpendSplit(delta).podCredits, comfy: jobSpendSplit(delta).comfyCredits }, { pod: 0, comfy: 40 });
+});
+
+test("dollars come from the two terms, not from converting the credits back", () => {
+  // A run priced at one credit really cost half a cent; converting 1 credit back
+  // through the rate would report about ten times that.
+  const job = {
+    creditsActualSource: POD_RUNTIME_SOURCE,
+    runpodTiming: { executionMs: 30000, usdPerSecond: 0.0001844 },
+  };
+  assert.ok(Math.abs(usdSpentForAccounting(job) - 0.005532) < 1e-6);
+  // Nothing measured, nothing charged.
+  assert.equal(usdSpentForAccounting({ creditsActualSource: COMPANY_BALANCE_DELTA_SOURCE }), 0);
+});
+
+test("an explicit pricing_status of unknown beats a figure that looks priced", () => {
+  // A worker running the reworked tracker says outright that it could not price
+  // the run. Believing the number over the label is how a fallback rate gets
+  // mistaken for a measurement.
+  const creditUsage = {
+    total_estimated_credits: 12,
+    source: "credit_tracker:prompt_scan",
+    pricing_status: "unknown",
+    rows: [{ node_id: "1", pricing_status: "unknown", total_estimated_credits: 12 }],
+  };
+
+  assert.equal(isUnpricedCreditUsage(creditUsage), true);
+  assert.equal(isCountedCreditUsage(creditUsage), false);
+});
+
+test("known_zero is a real zero and stays counted", () => {
+  // The distinction the old all-zeroes heuristic could not draw: this node is
+  // free, so its zero is a measurement and the job is not sent back to its
+  // estimate.
+  const creditUsage = {
+    total_estimated_credits: 0,
+    source: "credit_tracker:prompt_scan",
+    pricing_status: "known_zero",
+    rows: [{ node_id: "1", pricing_status: "known_zero", total_estimated_credits: 0 }],
+  };
+
+  assert.equal(isUnpricedCreditUsage(creditUsage), false);
+  assert.equal(isCountedCreditUsage(creditUsage), true);
+});
+
+test("rows disagreeing on status fall back to reading the figures", () => {
+  // Partly priced is neither "unpriced" nor a clean "priced", and the figures
+  // already say the right thing about it.
+  const creditUsage = {
+    total_estimated_credits: 12,
+    source: "credit_tracker:prompt_scan",
+    rows: [
+      { node_id: "1", pricing_status: "unknown", total_estimated_credits: 0 },
+      { node_id: "2", pricing_status: "priced", total_estimated_credits: 12 },
+    ],
+  };
+
+  assert.equal(isUnpricedCreditUsage(creditUsage), false);
+  assert.equal(isCountedCreditUsage(creditUsage), true);
+});
+
+test("a worker that sends no pricing_status still gets the old zero-reading guard", () => {
+  // Older trackers send nothing, so the heuristic that caught the gpt-image gap
+  // has to keep working unchanged.
+  const creditUsage = {
+    total_estimated_credits: 0,
+    source: "credit_tracker:prompt_scan",
+    rows: [{ node_id: "1", pricing_mode: "unknown", total_estimated_credits: 0 }],
+  };
+
+  assert.equal(isUnpricedCreditUsage(creditUsage), true);
+  assert.equal(isCountedCreditUsage(creditUsage), false);
 });

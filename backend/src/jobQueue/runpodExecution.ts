@@ -146,7 +146,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       let step: { done: number; total: number } | undefined;
       let item: number | undefined;
       for (const chunk of [...(observation.streamChunks ?? [])].reverse()) {
-        const label = stillImage ? stillImageNodeStatusLabel(stillImage.categoryId, chunk.nodeId) : undefined;
+        const label = stillImage
+          ? stillImageNodeStatusLabel(stillImage.categoryId, chunk.nodeId, stillImage.settings)
+          : undefined;
         if (label) {
           detail = label;
           step = chunk.step;

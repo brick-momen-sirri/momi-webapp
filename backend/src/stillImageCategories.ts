@@ -249,7 +249,7 @@ export function stillImageSlotCount(category: StillImageCategoryDefinition, sett
 
   const mode = String(settings.mode ?? "edit");
   if (mode === "reference-transfer") return 2;
-  if (mode === "consistency" || mode === "raw-enhancement") return 1;
+  if (mode === "consistency" || mode === "raw-enhancement" || mode === "realistic") return 1;
   return Math.max(1, Math.min(3, Number(settings.imageCount) || 1));
 }
 

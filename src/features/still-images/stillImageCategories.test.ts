@@ -38,6 +38,7 @@ const slotCases: Array<[StillImageCategoryId, Settings, number]> = [
   ["qwen-edit", { mode: "reference-transfer", imageCount: "3" }, 2],
   ["qwen-edit", { mode: "consistency", imageCount: "3" }, 1],
   ["qwen-edit", { mode: "raw-enhancement", imageCount: "3" }, 1],
+  ["qwen-edit", { mode: "realistic", imageCount: "3" }, 1],
   ["qwen-edit", { mode: "edit", imageCount: "9" }, 3],
   ["qwen-edit", { mode: "edit", imageCount: "0" }, 1],
   ["qwen-edit", { mode: "edit", imageCount: "not-a-number" }, 1],
@@ -56,6 +57,7 @@ const promptCases: Array<[StillImageCategoryId, Settings, boolean]> = [
   ["qwen-edit", { mode: "reference-transfer" }, false],
   ["qwen-edit", { mode: "consistency" }, true],
   ["qwen-edit", { mode: "raw-enhancement" }, true],
+  ["qwen-edit", { mode: "realistic" }, true],
   ["qwen-edit", {}, true],
   ["image-editing", {}, true],
 ];
@@ -107,6 +109,7 @@ const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
   ["reference-generator", { enhancement: false }, ["colorStrength", "creativity", "structureStrength", "enhancement"]],
   ["qwen-edit", { mode: "edit" }, ["mode", "imageCount"]],
   ["qwen-edit", { mode: "consistency" }, ["mode"]],
+  ["qwen-edit", { mode: "realistic" }, ["mode", "realisticStrength"]],
   ["image-editing", {}, ["resolution", "thinking", "markRegion", "preserveUnmasked", "variations"]],
 ];
 

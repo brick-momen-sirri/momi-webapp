@@ -13,6 +13,16 @@ type JobFeedProps = {
   users: User[];
   currentUserId: string;
   currentUserRole?: "admin" | "user";
+  /**
+   * Which user's jobs to show, or "all". Owned by the workspace rather than by
+   * this component because it decides what gets *fetched*, not just what gets
+   * drawn: the browser holds one page of jobs at a time, so a filter applied only
+   * to that page answers "did this person appear in the last thirty jobs?" when
+   * the question asked was "what has this person made?". Every other filter here
+   * stays local, because every other filter narrows within a page honestly.
+   */
+  userFilter: string;
+  onUserFilterChange: (userId: string) => void;
   selectedProjectId: string;
   selectedFolderId: "all" | "root" | string;
   archiveView: boolean;
@@ -84,6 +94,8 @@ export function JobFeed({
   users,
   currentUserId,
   currentUserRole = "user",
+  userFilter,
+  onUserFilterChange,
   selectedProjectId,
   selectedFolderId,
   archiveView,
@@ -110,7 +122,6 @@ export function JobFeed({
   const [query, setQuery] = useState("");
   const [modelFilter, setModelFilter] = useState("all");
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
-  const [userFilter, setUserFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
   const [saveNumberFilter, setSaveNumberFilter] = useState("");
   const [outputFilter, setOutputFilter] = useState<OutputFilter>("all");
@@ -277,7 +288,7 @@ export function JobFeed({
       ? {
           key: "user",
           label: `User: ${users.find((user) => user.id === userFilter)?.name ?? "Selected"}`,
-          onRemove: () => setUserFilter("all"),
+          onRemove: () => onUserFilterChange("all"),
         }
       : undefined,
     dateFilter !== "all"
@@ -322,7 +333,7 @@ export function JobFeed({
     setStatusFilter("all");
     setModelFilter("all");
     setScopeFilter("all");
-    setUserFilter("all");
+    onUserFilterChange("all");
     setDateFilter("all");
     setSaveNumberFilter("");
     setOutputFilter("all");
@@ -330,7 +341,7 @@ export function JobFeed({
 
   function resetPopoverFilters() {
     setScopeFilter("all");
-    setUserFilter("all");
+    onUserFilterChange("all");
     setDateFilter("all");
     setSaveNumberFilter("");
     setOutputFilter("all");
@@ -495,7 +506,7 @@ export function JobFeed({
                         <span className="text-xs font-semibold text-stone-500">Specific user</span>
                         <select
                           value={userFilter}
-                          onChange={(event) => setUserFilter(event.target.value)}
+                          onChange={(event) => onUserFilterChange(event.target.value)}
                           className="h-10 rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                         >
                           <option value="all">User: Anyone</option>

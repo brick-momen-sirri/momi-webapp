@@ -103,6 +103,44 @@ function partnerApiCreditsFor(job: Pick<Job, "creditsActualSource" | "creditUsag
   return typeof credits === "number" && Number.isFinite(credits) && credits > 0 ? credits : 0;
 }
 
+export type JobSpendSplit = {
+  podUsd: number;
+  comfyUsd: number;
+  podCredits: number;
+  comfyCredits: number;
+  usd: number;
+  credits: number;
+};
+
+/**
+ * What a run cost, split by the account it came out of.
+ *
+ * Kept in step with jobSpendSplit in backend/src/creditUsageAccounting.ts, which
+ * is what the dashboards derive from. The two halves are worth separating
+ * because they respond to different things: pod time falls on a faster GPU,
+ * while Comfy credits only fall by calling the model fewer times.
+ *
+ * Undefined when nothing about the run was measured, which is the same condition
+ * that leaves the card showing "--" rather than a zero it cannot stand behind.
+ */
+export function measuredJobSpend(
+  job: Pick<Job, "creditsActual" | "creditsActualSource" | "runpodTiming" | "creditUsage">,
+): JobSpendSplit | undefined {
+  const podUsd = measuredPodUsd(job);
+  const podCredits = measuredPodCredits(job);
+  if (podUsd === undefined || podCredits === undefined) return undefined;
+  const comfyUsd = partnerApiUsd(job) ?? 0;
+  const comfyCredits = partnerApiCreditsFor(job);
+  return {
+    podUsd,
+    comfyUsd,
+    podCredits,
+    comfyCredits,
+    usd: podUsd + comfyUsd,
+    credits: Math.round((podCredits + comfyCredits) * 100) / 100,
+  };
+}
+
 /** A zero-filled tracker block means "not priced", never "free". */
 function isUnpricedUsage(usage: NonNullable<Job["creditUsage"]>) {
   const positive = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value > 0;

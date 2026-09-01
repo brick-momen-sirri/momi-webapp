@@ -32,7 +32,7 @@ import {
   usdSpentForJob,
 } from "../creditDashboardService.js";
 import { getCredits } from "../creditService.js";
-import { creditAccountingSource, isCountedCreditUsage } from "../creditUsageAccounting.js";
+import { creditAccountingSource, isCountedCreditUsage, jobSpendSplit } from "../creditUsageAccounting.js";
 import { currentMonthRange } from "../httpQuery.js";
 import { canAccessJob } from "../jobPermissions.js";
 import { getJobs } from "../jobQueue.js";
@@ -109,6 +109,8 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
       credits,
       usd,
       expectedCredits: expectedCreditsForJob(job),
+      podCredits: jobSpendSplit(job).podCredits,
+      comfyCredits: jobSpendSplit(job).comfyCredits,
       source: creditAccountingSource(job),
       resolution: resolutionLabel(job),
       runDurationSeconds: runDurationSeconds(job),

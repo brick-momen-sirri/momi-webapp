@@ -36,12 +36,22 @@ type WorkspaceDataOptions = {
   selectedProjectId: string;
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   selectedFolderId: string;
+  /** Whose jobs to load, or ALL_JOB_OWNERS. Narrows the fetch, like the project does. */
+  jobOwnerId: string;
   showToast: ShowToast;
 };
 
 export function useWorkspaceData(options: WorkspaceDataOptions) {
-  const { account, setAccount, setWorkspaceAccounts, selectedProjectId, setSelectedProjectId, selectedFolderId, showToast } =
-    options;
+  const {
+    account,
+    setAccount,
+    setWorkspaceAccounts,
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedFolderId,
+    jobOwnerId,
+    showToast,
+  } = options;
   const [projects, setProjects] = useState<Project[]>(emptyProjects);
   const [jobs, setJobs] = useState<Job[]>(emptyJobs);
   const [backendJobsTotal, setBackendJobsTotal] = useState(0);
@@ -78,7 +88,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
           [
             fetchBackendModels(),
             fetchBackendProjects(),
-            fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs)),
+            fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs, jobOwnerId)),
             fetchBackendCredits(),
             fetchBackendMonthlyUsage(),
             fetchBackendUsers(),
@@ -128,7 +138,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     const interval = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       tick += 1;
-      void fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs))
+      void fetchBackendJobs(jobPageParams(selectedProjectId, selectedFolderId, 0, showArchivedJobs, jobOwnerId))
         .then((page) => {
           if (!mounted) return;
           setBackendAvailable(true);
@@ -178,7 +188,20 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
       mounted = false;
       window.clearInterval(interval);
     };
-  }, [account, selectedFolderId, selectedProjectId, setAccount, setSelectedProjectId, setWorkspaceAccounts, showArchivedJobs]);
+    // jobOwnerId belongs here for the same reason selectedProjectId does: it changes
+    // which jobs exist as far as the browser is concerned, so the page has to be
+    // re-fetched and reset rather than re-filtered. It also has to reach the poll and
+    // "load more" above, or those would merge unfiltered pages back into a filtered list.
+  }, [
+    account,
+    jobOwnerId,
+    selectedFolderId,
+    selectedProjectId,
+    setAccount,
+    setSelectedProjectId,
+    setWorkspaceAccounts,
+    showArchivedJobs,
+  ]);
 
   function applyBackendJobsPage(page: BackendJobsPage, reset = false) {
     setJobs((current) => (reset ? page.jobs : mergeJobs(page.jobs, current)));
@@ -209,7 +232,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     setIsLoadingMoreJobs(true);
     try {
       const page = await fetchBackendJobs(
-        jobPageParams(selectedProjectId, selectedFolderId, backendJobsOffset, showArchivedJobs),
+        jobPageParams(selectedProjectId, selectedFolderId, backendJobsOffset, showArchivedJobs, jobOwnerId),
       );
       applyBackendJobsPage(page);
       showToast(page.jobs.length ? `Loaded ${page.jobs.length} more jobs.` : "No more jobs to load.");

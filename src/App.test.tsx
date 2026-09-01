@@ -201,11 +201,11 @@ describe("main workspace sections", () => {
     // which only shows up when the suite is under enough load to lose the race.
     await user.click(await screen.findByRole("button", { name: /^Still Images/ }));
 
-    for (const category of ["General Enhancement", "Pro Upscaler", "Reference Generator", "Qwen Edit"]) {
+    for (const category of ["General Enhancement", "Pro Upscaler", "Reference Generator", "Flux 2 Klein Edit"]) {
       expect(screen.getByRole("button", { name: category })).toBeInTheDocument();
     }
 
-    await user.click(screen.getByRole("button", { name: "Qwen Edit" }));
+    await user.click(screen.getByRole("button", { name: "Flux 2 Klein Edit" }));
     await user.selectOptions(screen.getByLabelText("Image count"), "3");
     expect(screen.getByLabelText("Upload Image 3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();

@@ -182,10 +182,23 @@ describe("EditLayersPanel", () => {
     expect(handlers.onMove).toHaveBeenCalledWith("a", 1);
   });
 
+  /** Three runs, two surviving layers: pod rental and Comfy credits kept apart. */
+  const threeRuns = {
+    generations: 3,
+    layers: 2,
+    podUsd: 0.016596,
+    podCredits: 3,
+    comfyUsd: 0.2463,
+    comfyCredits: 51.96,
+    usd: 0.262896,
+    credits: 54.96,
+    unmeasured: 0,
+  };
+
   it("shows what the session has cost, and names the redone work", () => {
-    // Three runs produced two surviving layers: the gap is the regeneration, and
-    // it is the only part of the bill that is not visible as a layer on screen.
-    renderPanel({ sessionCost: { generations: 3, layers: 2, credits: 54.96, usd: 0.262896, unmeasured: 0 } });
+    // The gap between runs and layers is the regeneration, and it is the only
+    // part of the bill with nothing on screen to represent it.
+    renderPanel({ sessionCost: threeRuns });
 
     const total = screen.getByTestId("edit-session-cost");
     expect(total).toHaveTextContent("$0.263");
@@ -193,15 +206,37 @@ describe("EditLayersPanel", () => {
     expect(within(total).getByTitle(/54.96 credits across 3 generations/)).toBeInTheDocument();
   });
 
+  it("keeps the two vendors apart, because only one of them is the artist's to change", () => {
+    renderPanel({ sessionCost: threeRuns });
+
+    // Almost all of this session is Comfy credits, which no faster GPU helps.
+    expect(screen.getByTestId("session-pod-cost")).toHaveTextContent("Pod $0.017");
+    expect(screen.getByTestId("session-comfy-cost")).toHaveTextContent("Comfy $0.246");
+  });
+
   it("marks a session containing an unpriceable run as a floor", () => {
-    renderPanel({ sessionCost: { generations: 2, layers: 2, credits: 18.32, usd: 0.0876, unmeasured: 1 } });
+    renderPanel({
+      sessionCost: { ...threeRuns, generations: 2, layers: 2, podUsd: 0.0055, comfyUsd: 0.0821, usd: 0.0876, unmeasured: 1 },
+    });
     const total = screen.getByTestId("edit-session-cost");
     expect(total).toHaveTextContent("≥ $0.088");
     expect(within(total).getByTitle(/could not be priced, so this is a floor/)).toBeInTheDocument();
   });
 
   it("says nothing about cost before anything has been generated", () => {
-    renderPanel({ sessionCost: { generations: 0, layers: 0, credits: 0, usd: 0, unmeasured: 0 } });
+    renderPanel({
+      sessionCost: {
+        generations: 0,
+        layers: 0,
+        podUsd: 0,
+        podCredits: 0,
+        comfyUsd: 0,
+        comfyCredits: 0,
+        usd: 0,
+        credits: 0,
+        unmeasured: 0,
+      },
+    });
     expect(screen.queryByTestId("edit-session-cost")).not.toBeInTheDocument();
   });
 

@@ -4,6 +4,8 @@ import { isStillImageJob } from "../still-images/jobSection";
 
 export const JOB_PAGE_SIZE = 30;
 export const ALL_PROJECTS_ID = "all";
+/** No owner filter: every user's jobs, which is what the feed shows by default. */
+export const ALL_JOB_OWNERS = "all";
 
 /**
  * What a job contributes to a credit total.
@@ -116,13 +118,31 @@ export function matchesFolder(job: Job, folderId: "all" | "root" | string) {
   return job.folderId === folderId;
 }
 
-export function jobPageParams(projectId: string, folderId: "all" | "root" | string, offset: number, archived = false) {
+/**
+ * The query for one page of the feed.
+ *
+ * `ownerId` is sent to the server rather than applied to the page after it
+ * arrives. A page is thirty jobs out of a couple of thousand, and picking a name
+ * out of a workspace-wide list is precisely the case where the person you want is
+ * not in the newest thirty -- most of the workspace has never appeared there at
+ * all. Filtering client-side made those users read as "no jobs" instead of "not on
+ * this page". `/api/jobs` has taken `userId` since it was written; nothing was
+ * passing it.
+ */
+export function jobPageParams(
+  projectId: string,
+  folderId: "all" | "root" | string,
+  offset: number,
+  archived = false,
+  ownerId: string = ALL_JOB_OWNERS,
+) {
   return {
     limit: JOB_PAGE_SIZE,
     offset,
     projectId: projectId === ALL_PROJECTS_ID ? undefined : projectId,
     folderId: projectId === ALL_PROJECTS_ID || folderId === "all" ? undefined : folderId,
     archived,
+    userId: ownerId === ALL_JOB_OWNERS ? undefined : ownerId,
   };
 }
 

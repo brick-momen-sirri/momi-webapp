@@ -19,6 +19,8 @@ import {
 } from "./config.js";
 import { mergeJobChangesById, mergeJobSnapshotById } from "./jobReadCache.js";
 import { getActualCreditsByPromptIds } from "./creditUsageService.js";
+import { editSessionSpend } from "./creditUsageAccounting.js";
+import type { StillImageSettingValue } from "./stillImageCategories.js";
 import { getProject } from "./projectService.js";
 import {
   appendAudit,
@@ -436,6 +438,21 @@ export async function createJob(request: CreateJobRequest) {
 }
 
 /** Persist the editor's visible stack as one ordinary, completed Still Images job. */
+/** The session's spend, as settings values, or nothing when it cannot be priced. */
+function sessionSpendSettings(documentId: string): Record<string, StillImageSettingValue> {
+  const spend = editSessionSpend(getJobs(), documentId);
+  if (!spend.generations) return {};
+  // Both halves rather than a total: a stored total could drift from its parts,
+  // and the parts are what the card has to show separately anyway.
+  return {
+    sessionGenerations: spend.generations,
+    sessionPodCredits: spend.podCredits,
+    sessionPodUsd: Math.round(spend.podUsd * 1e6) / 1e6,
+    sessionComfyCredits: spend.comfyCredits,
+    sessionComfyUsd: Math.round(spend.comfyUsd * 1e6) / 1e6,
+  };
+}
+
 export async function createCompletedStillImageEditJob(
   request: FinalizeStillImageEditRequest & { userId: string },
 ): Promise<Job> {
@@ -473,7 +490,14 @@ export async function createCompletedStillImageEditJob(
     workflowOptions: {
       stillImage: {
         categoryId: "image-editing",
-        settings: { finalizedComposite: true, documentId: request.documentId },
+        settings: {
+          finalizedComposite: true,
+          documentId: request.documentId,
+          // Stamped now rather than summed later. This is the moment every job of
+          // the session is reachable, and a figure computed here stays right even
+          // once those jobs have scrolled off whatever page a browser is holding.
+          ...sessionSpendSettings(request.documentId),
+        },
       },
       save: { cameraNumber: request.saveNumber },
     },

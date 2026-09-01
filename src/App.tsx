@@ -59,7 +59,12 @@ import { useTheme } from "./features/preferences/useTheme";
 import { useNotifications } from "./features/notifications/useNotifications";
 import { useProjectActions, type ConfirmDialogState } from "./features/projects/useProjectActions";
 import { useWorkspaceData } from "./features/workspace/useWorkspaceData";
-import { ALL_PROJECTS_ID, getMonthlyUsageForUser, getWorkspaceMonthlyUsage } from "./features/workspace/workspaceUtils";
+import {
+  ALL_JOB_OWNERS,
+  ALL_PROJECTS_ID,
+  getMonthlyUsageForUser,
+  getWorkspaceMonthlyUsage,
+} from "./features/workspace/workspaceUtils";
 import { chainableResultImage } from "./features/still-images/chainResult";
 import { finalizeImageEdit } from "./features/still-images/finalizeImageEdit";
 import { editDocumentIdOfJob, editSessionCost, restoreEditDocument } from "./features/still-images/editDocument";
@@ -98,6 +103,10 @@ function App() {
   } = useAuthentication(showToast);
   const [selectedProjectId, setSelectedProjectId] = useState(initialSettings.selectedProjectId ?? ALL_PROJECTS_ID);
   const [selectedFolderId, setSelectedFolderId] = useState<"all" | "root" | string>("all");
+  // Lives here, not in JobFeed, because it narrows the fetch rather than the page --
+  // see jobPageParams. Deliberately not persisted: it is an admin looking something
+  // up, not a view they should come back to tomorrow still inside.
+  const [jobOwnerId, setJobOwnerId] = useState(ALL_JOB_OWNERS);
   const [targetFolderId, setTargetFolderId] = useState(initialSettings.targetFolderId ?? "");
   const {
     projects,
@@ -130,6 +139,7 @@ function App() {
     selectedProjectId,
     setSelectedProjectId,
     selectedFolderId,
+    jobOwnerId,
     showToast,
   });
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -725,6 +735,8 @@ function App() {
               users={workspaceUsers}
               currentUserId={account.id}
               currentUserRole={account.role}
+              userFilter={jobOwnerId}
+              onUserFilterChange={setJobOwnerId}
               selectedProjectId={selectedProjectId}
               selectedFolderId={selectedFolderId}
               archiveView={showArchivedJobs}

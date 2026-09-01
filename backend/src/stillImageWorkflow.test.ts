@@ -56,6 +56,12 @@ test("every preset resolves to a graph file that exists and parses", async () =>
   }
 });
 
+test("Flux 2 Klein Realistic mode resolves the dedicated Forge graph", async () => {
+  const graphPath = stillImageWorkflowPath("qwen-edit", { mode: "realistic" });
+  assert.ok(graphPath.endsWith("qwen-edit-realistic.json"));
+  assert.notEqual(graphPath, stillImageWorkflowPath("qwen-edit"));
+});
+
 test("preset graphs live outside every scanned workflow root", async () => {
   // loadWorkflowModels recurses workflowRoots and turns each JSON into a
   // selectable model. If these four ever land inside one, four local-GPU preset
@@ -550,6 +556,18 @@ test("each qwen mode loads its own LoRA through the guider", async () => {
   }
 });
 
+test("realistic mode uses Forge's one-image graph, prompt, seed, and LoRA strength", async () => {
+  const graph = await build("qwen-edit", { mode: "realistic", realisticStrength: 0.7 }, ["main.png"], "soft natural daylight");
+
+  assert.equal(value(graph, "76", "image"), "main.png");
+  assert.equal(value(graph, "163", "text"), "soft natural daylight");
+  assert.equal(value(graph, "176", "noise_seed"), 1);
+  assert.equal(value(graph, "179", "lora_name"), "realistic.safetensors");
+  assert.equal(value(graph, "179", "strength_model"), 0.7);
+  assert.deepEqual(link(graph, "160", "images"), ["181", 0]);
+  assert.equal(graph["145"], undefined, "the multi-image edit graph must not be mixed into Realistic mode");
+});
+
 test("reference transfer builds its prompt from the VLM instead of the user", async () => {
   const graph = await build("qwen-edit", { mode: "reference-transfer" }, ["main.png", "ref.png"]);
 
@@ -706,6 +724,13 @@ test("every progress label points at a node the real graph contains", async () =
       assert.ok(graph[nodeId], `${categoryId} labels node ${nodeId}, which the exported graph does not contain`);
       assert.ok(stillImageNodeStatusLabel(categoryId, nodeId), `${categoryId} node ${nodeId} resolves to a label`);
     }
+  }
+
+  const realisticSettings = { mode: "realistic" };
+  const realisticGraph = JSON.parse(await fs.readFile(stillImageWorkflowPath("qwen-edit", realisticSettings), "utf8"));
+  for (const nodeId of stillImageLabelledNodeIds("qwen-edit", realisticSettings)) {
+    assert.ok(realisticGraph[nodeId], `qwen-edit realistic labels node ${nodeId}, which the exported graph does not contain`);
+    assert.ok(stillImageNodeStatusLabel("qwen-edit", nodeId, realisticSettings));
   }
 });
 
