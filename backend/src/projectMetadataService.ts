@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { projectFolderName } from "./projectFolderName.js";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 import { assertManifestRecordSafe, readJsonFile, writeJsonFile } from "./storageService.js";
 import type { Project, ProjectFolder, ProjectMetadata } from "./types.js";
 
@@ -193,7 +194,7 @@ export async function deleteProjectFolder(project: Project, folderId: string, us
       throw new Error("Only empty folders can be deleted.");
     }
 
-    await fs.rm(folderRoot, { recursive: true, force: true });
+    await rmWithRetry(folderRoot, { recursive: true, force: true });
     const updated: ProjectFolder = {
       ...folder,
       archived: true,
@@ -453,17 +454,17 @@ async function acquireProjectLock(projectRoot: string, maxAttempts = 80): Promis
 
 async function releaseProjectLock(lock: ProjectLock, currentProjectRoot: string) {
   await lock.handle.close().catch(() => undefined);
-  await fs.rm(lock.lockPath, { force: true }).catch(() => undefined);
+  await rmWithRetry(lock.lockPath, { force: true }).catch(() => undefined);
   const movedLockPath = path.join(currentProjectRoot, "metadata", ".lock");
   if (path.resolve(movedLockPath).toLowerCase() !== path.resolve(lock.lockPath).toLowerCase()) {
-    await fs.rm(movedLockPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(movedLockPath, { force: true }).catch(() => undefined);
   }
 }
 
 async function removeStaleLock(lockPath: string) {
   const stat = await fs.stat(lockPath).catch(() => undefined);
   if (stat && Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-    await fs.rm(lockPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(lockPath, { force: true }).catch(() => undefined);
   }
 }
 
@@ -473,11 +474,11 @@ async function renameDirSafe(oldPath: string, newPath: string) {
   if (oldResolved === newResolved) return;
   if (oldResolved.toLowerCase() === newResolved.toLowerCase()) {
     const tempPath = `${oldResolved}.__renaming_${Date.now()}`;
-    await fs.rename(oldResolved, tempPath);
-    await fs.rename(tempPath, newResolved);
+    await renameWithRetry(oldResolved, tempPath);
+    await renameWithRetry(tempPath, newResolved);
     return;
   }
-  await fs.rename(oldResolved, newResolved);
+  await renameWithRetry(oldResolved, newResolved);
 }
 
 async function assertTargetDoesNotExist(oldPath: string, newPath: string) {

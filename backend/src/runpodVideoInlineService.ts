@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 
 import {
   runpodInlineMediaMaxBytes,
@@ -103,7 +104,7 @@ async function compressVideoForInlineJson(sourcePath: string, workFolder: string
     }
   }
 
-  await fs.rm(outputPath, { force: true }).catch(() => undefined);
+  await rmWithRetry(outputPath, { force: true }).catch(() => undefined);
   throwRunpodInlineVideoTooLarge(probed.size, maxBytes, sourcePath, smallest);
 }
 
@@ -153,11 +154,11 @@ async function encodeVideo(sourcePath: string, outputPath: string, videoBitrate:
       },
     );
 
-    await fs.rm(outputPath, { force: true });
-    await fs.rename(temporaryPath, outputPath);
+    await rmWithRetry(outputPath, { force: true });
+    await renameWithRetry(temporaryPath, outputPath);
     return await fs.readFile(outputPath);
   } catch (error) {
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : "unknown FFmpeg error";
     throw new Error(`Could not re-encode video input "${path.basename(sourcePath)}" for inline submission: ${message}`);
   }

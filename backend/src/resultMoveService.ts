@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { folderDisplayName } from "./projectMetadataService.js";
+import { renameWithRetry } from "./fsRetry.js";
 import type { Job, Project, ProjectFolder } from "./types.js";
 
 export type ResultFileMove = {
@@ -73,7 +74,7 @@ export async function moveResultFiles({
   try {
     for (const operation of operations) {
       await fs.mkdir(path.dirname(operation.to), { recursive: true });
-      await fs.rename(operation.from, operation.to);
+      await renameWithRetry(operation.from, operation.to);
       completedOperations.push(operation);
     }
   } catch (error) {
@@ -190,7 +191,7 @@ async function rollbackFileMoves(operations: ResultFileMove[]) {
       .catch(() => false);
     if (!destinationExists) continue;
     await fs.mkdir(path.dirname(operation.from), { recursive: true });
-    await fs.rename(operation.to, operation.from).catch((error) => {
+    await renameWithRetry(operation.to, operation.from).catch((error) => {
       failures.push(`${path.basename(operation.to)}: ${error instanceof Error ? error.message : "filesystem operation failed"}`);
     });
   }

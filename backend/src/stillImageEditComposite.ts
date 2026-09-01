@@ -3,6 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 
 import { resolveAllowedExistingMediaPath } from "./mediaPathPolicy.js";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 import type { StillImageEditBaseLayer, StillImageEditCrop } from "./stillImageCategories.js";
 import type { Job } from "./types.js";
 import { localMediaFilePathFromUrl } from "./jobQueue/providerInputs.js";
@@ -40,7 +41,7 @@ export async function compositeStillImageEditResult(
       targetFilePath,
     );
   } catch (error) {
-    await fs.rm(generatedCropPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(generatedCropPath, { force: true }).catch(() => undefined);
     throw error;
   }
 
@@ -71,9 +72,9 @@ export async function renderStillImageEditComposite(
   const temporaryPath = `${targetFilePath}.composite-${process.pid}-${Date.now()}.tmp`;
   try {
     await sharp(originalPath, { limitInputPixels: false }).rotate().composite(overlays).png().toFile(temporaryPath);
-    await fs.rename(temporaryPath, targetFilePath);
+    await renameWithRetry(temporaryPath, targetFilePath);
   } catch (error) {
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
     throw error;
   }
 

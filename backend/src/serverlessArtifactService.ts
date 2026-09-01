@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getUserById } from "./authService.js";
 import { runpodOutputMaxBytes } from "./config.js";
+import { rmWithRetry, writeFileWithRetry } from "./fsRetry.js";
 import { detectMediaResolution, resolutionLabel } from "./mediaResolutionService.js";
 import { relativePathFromOutputRoot, resolveProjectOutputRoot, withProjectMutationLock } from "./projectMetadataService.js";
 import { projectFolderName } from "./projectFolderName.js";
@@ -222,7 +223,7 @@ async function persistOneArtifact(
     };
   } finally {
     if (reservationPath) {
-      await fs.rm(reservationPath, { force: true }).catch(() => undefined);
+      await rmWithRetry(reservationPath, { force: true }).catch(() => undefined);
     }
   }
 }
@@ -296,7 +297,7 @@ function dataUrlMediaSource(value: string): MediaSource {
     contentType,
     writeTo: async (filePath) => {
       const buffer = isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8");
-      await fs.writeFile(filePath, buffer);
+      await writeFileWithRetry(filePath, buffer);
     },
   };
 }
@@ -355,7 +356,7 @@ async function reserveArtifactTarget(
         if (await fileExists(filePath)) {
           await reservation.close();
           reservation = undefined;
-          await fs.rm(reservationPath, { force: true });
+          await rmWithRetry(reservationPath, { force: true });
           continue;
         }
         await reservation.close();
@@ -365,7 +366,7 @@ async function reserveArtifactTarget(
         await reservation?.close().catch(() => undefined);
         const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
         if (code === "EEXIST") continue;
-        await fs.rm(reservationPath, { force: true }).catch(() => undefined);
+        await rmWithRetry(reservationPath, { force: true }).catch(() => undefined);
         throw error;
       }
     }

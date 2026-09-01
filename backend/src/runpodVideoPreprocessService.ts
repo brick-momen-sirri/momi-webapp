@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { detectMediaResolution } from "./mediaResolutionService.js";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 import type { Resolution, WorkflowModel } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -102,8 +103,8 @@ export async function prepareRunpodVideoFile(sourcePath: string, outputFolder: s
       );
     }
 
-    await fs.rm(outputPath, { force: true });
-    await fs.rename(temporaryPath, outputPath);
+    await rmWithRetry(outputPath, { force: true });
+    await renameWithRetry(temporaryPath, outputPath);
     console.info(
       `[runpod] Normalized ${isKlingO3 ? "Kling O3" : "Seedance 2.0 reference"} input video ` +
         `from ${sourceResolution.width}x${sourceResolution.height}${anamorphicNote} ` +
@@ -111,7 +112,7 @@ export async function prepareRunpodVideoFile(sourcePath: string, outputFolder: s
     );
     return outputPath;
   } catch (error) {
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : "unknown FFmpeg error";
     const requirement = isKlingO3
       ? `Kling O3 requires square pixels and video dimensions between ${KLING_VIDEO_MIN_DIMENSION}px and ${KLING_VIDEO_MAX_DIMENSION}px.`

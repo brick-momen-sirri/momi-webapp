@@ -5,6 +5,8 @@ import path from "node:path";
 import { Readable, Transform, type TransformCallback } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
+
 export class ByteLimit extends Transform {
   private receivedBytes = 0;
 
@@ -41,10 +43,10 @@ export async function writeStreamAtomically(
 
   try {
     await pipeline(source, limiter, createWriteStream(temporaryPath, { flags: "wx" }), { signal });
-    await fs.rename(temporaryPath, finalPath);
+    await renameWithRetry(temporaryPath, finalPath);
     return { bytesWritten: limiter.bytes };
   } catch (error) {
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
     throw error;
   }
 }
