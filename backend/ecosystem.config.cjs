@@ -14,6 +14,14 @@ const sharedStateEnabled =
 const commonEnv = {
   NODE_ENV: "production",
   HOST: "127.0.0.1",
+  // Render output lives on the ai-data$ SMB share, not local disk. Addressed by
+  // UNC on purpose: there is no mapped drive, and a drive letter would only
+  // exist inside an interactive logon. Auth is the svc_momi_storage credential
+  // in Credential Manager under BRICK\momen.sirri -- pm2 runs in that user's
+  // session, so UNC access is automatic. Nothing here is a secret.
+  // Migrated 2026-09-01 (150.6 GB, 37,035 files); the C: original was left in
+  // place as the rollback copy. See backend/scripts/migrateOutputRoot.mjs.
+  BRICK_PROJECTS_ROOT: process.env.BRICK_PROJECTS_ROOT || "\\\\10.101.41.11\\ai-data$\\Momi\\projects",
   JSON_BODY_LIMIT: "15mb",
   RUNPOD_MAX_CONCURRENT_JOBS: process.env.RUNPOD_MAX_CONCURRENT_JOBS || "10",
   MEDIA_SCAN_CACHE_MS: "60000",
