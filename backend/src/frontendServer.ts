@@ -19,6 +19,10 @@ const app = createFrontendGateway({ frontendDistPath, apiTarget });
 const server = app.listen(port, host, () => {
   console.log(`Momi production frontend listening on http://${host}:${port}`);
   console.log(`Serving ${frontendDistPath}; proxying /api to ${apiTarget}`);
+  // The ecosystem config sets wait_ready for every app, so this must signal or
+  // a reload would stall until listen_timeout expires. The gateway has no share
+  // I/O to wait on -- it is ready as soon as the port is open.
+  process.send?.("ready");
 });
 
 server.on("error", (error) => {

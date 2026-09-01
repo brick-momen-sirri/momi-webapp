@@ -73,7 +73,7 @@ import {
   recoverRemoteResultMedia,
   scheduleRemoteResultRecovery,
 } from "./jobQueue.js";
-import { closeProjectStore, loadProjects } from "./projectService.js";
+import { closeProjectStore, loadProjects, openProjectStore } from "./projectService.js";
 
 import { loadWorkflowModels } from "./workflowService.js";
 
@@ -179,9 +179,11 @@ async function boot() {
   // Auth and projects share app-state.sqlite. Initialize its auth schema and
   // one-time migration before opening the project connection.
   await loadAuthData();
+  // Open the project store (local, instant) instead of reconciling against the
+  // share. loadProjects() runs after listen() below -- see openProjectStore().
+  openProjectStore();
   await Promise.all([
     loadWorkflowModels(),
-    loadProjects(),
     isDispatcher() && localComfyEnabled ? refreshServers() : Promise.resolve([]),
   ]);
   // Dispatcher startup may immediately resume acknowledged RunPod jobs. Load
@@ -258,6 +260,20 @@ async function boot() {
   // for serving, so a corrupt manifest should surface as a loud error rather
   // than an invisible startup stall. Failures are logged, not thrown, because
   // rejecting here would take down a process that is already serving traffic.
+  // Tell pm2 the port is actually accepting connections. With wait_ready set,
+  // a rolling reload holds the old worker until this fires instead of killing
+  // it as soon as the new process spawns.
+  process.send?.("ready");
+
+  // Reconcile the project registry against the filesystem. Deferred because it
+  // walks the SMB output root; the store opened above already serves every
+  // project that was persisted, and this only adds ones created out-of-band.
+  void loadProjects()
+    .then(() => logMemory("boot-projects-reconciled"))
+    .catch((error) => {
+      console.error(`Project reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+
   void assertMetadataHealth().catch((error) => {
     console.error(`Metadata health check failed: ${error instanceof Error ? error.message : String(error)}`);
   });

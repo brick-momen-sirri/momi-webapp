@@ -89,6 +89,17 @@ const commonEnv = {
 const processSafety = {
   autorestart: true,
   restart_delay: 5000,
+  // A rolling reload must wait for the new worker to actually accept
+  // connections, not merely to spawn. PM2 marks a process "online" the moment
+  // it forks, so on 2026-09-01 a `pm2 reload` killed the old momi-api three
+  // seconds after spawning its replacement -- while that replacement was still
+  // ~40 s from binding -- and users got ECONNREFUSED for the gap. The app now
+  // calls process.send("ready") right after listen(); wait_ready makes PM2 hold
+  // the old worker until then. listen_timeout is the backstop if "ready" never
+  // arrives, and is deliberately well above a cold boot that has to touch the
+  // SMB share.
+  wait_ready: true,
+  listen_timeout: 120000,
   // Give the graceful-shutdown handler time to drain in-flight RunPod jobs
   // and flush job state before PM2 sends SIGKILL (default is only 1600ms).
   kill_timeout: 32000,

@@ -54,9 +54,27 @@ function seedProjects(): Project[] {
 let projects: Project[] = [];
 let sqliteProjectStore: SqliteProjectStore | undefined;
 
+/**
+ * Opens the project store and nothing else. Local disk only -- no share I/O.
+ *
+ * Boot used to call loadProjects() before listen(), which walks the output root
+ * and reads every project's metadata. Once that root became an SMB share those
+ * were ~76 sequential network round trips, so the port stayed closed for about
+ * 40 seconds. That is long enough that a `pm2 reload` kills the old worker
+ * while the new one is still booting, which is exactly how a rolling restart
+ * turned into ECONNREFUSED for users on 2026-09-01.
+ *
+ * So boot opens the store (already-persisted projects, instantly) and serves;
+ * loadProjects() then reconciles against the filesystem in the background.
+ */
+export function openProjectStore() {
+  if (appStateDriver !== "sqlite") return projects;
+  if (!sqliteProjectStore) sqliteProjectStore = openSqliteProjectStore(appStateSqlitePath);
+  projects = [];
+  return getProjects();
+}
+
 export async function loadProjects() {
-  sqliteProjectStore?.close();
-  sqliteProjectStore = undefined;
   return withProjectRegistryMutationLock(brickProjectsRoot, async () => {
     await ensureProjectFolder(path.join(brickProjectsRoot, PLAYGROUND_FOLDER_NAME));
     const storedProjects = await readJsonFile<Project[]>(projectsStorePath, []);
@@ -64,7 +82,12 @@ export async function loadProjects() {
     projects = normalizeProjects(mergeProjects(storedProjects, discoveredProjects));
 
     if (appStateDriver === "sqlite") {
-      sqliteProjectStore = openSqliteProjectStore(appStateSqlitePath);
+      // Open the replacement before dropping the old handle. This function now
+      // runs while requests are being served, and a moment with no store would
+      // make getProjects() fall through to the empty `projects` array.
+      const replacement = openSqliteProjectStore(appStateSqlitePath);
+      if (sqliteProjectStore && sqliteProjectStore !== replacement) sqliteProjectStore.close();
+      sqliteProjectStore = replacement;
       const migrated = sqliteProjectStore.migrateFromJsonIfNeeded(projects);
       if (migrated && projects.length) {
         console.log(`Migrated ${projects.length} projects into app-state SQLite.`);
@@ -87,9 +110,22 @@ export async function loadProjects() {
 
       // Complete an interrupted create and refresh filesystem-owned folder
       // metadata without replacing row-owned ACL fields.
-      for (const project of sqliteProjectStore.loadProjects()) {
-        const hydrated = await ensureProjectMetadata(project);
-        sqliteProjectStore.applyToProject(project.id, (current) => mergeHydratedProject(current, hydrated));
+      //
+      // Batched rather than sequential: every ensureProjectMetadata is a share
+      // round trip, and one-at-a-time over SMB is what made this the slowest
+      // part of boot. The batch is deliberately small -- the SMB client is
+      // configured with MaxCmds 50, and saturating it would slow the render
+      // traffic this process is also serving.
+      const hydrationBatchSize = 8;
+      const toHydrate = sqliteProjectStore.loadProjects();
+      for (let index = 0; index < toHydrate.length; index += hydrationBatchSize) {
+        const batch = toHydrate.slice(index, index + hydrationBatchSize);
+        const hydratedBatch = await Promise.all(
+          batch.map(async (project) => ({ project, hydrated: await ensureProjectMetadata(project) })),
+        );
+        for (const { project, hydrated } of hydratedBatch) {
+          sqliteProjectStore.applyToProject(project.id, (current) => mergeHydratedProject(current, hydrated));
+        }
       }
       projects = [];
       return getProjects();
