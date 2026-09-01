@@ -106,12 +106,27 @@ export function invalidateMediaCache() {
   invalidateSharedMediaIndex();
 }
 
-export async function initializeMediaIndex() {
+/**
+ * Opens the persisted media index and nothing else. Local disk only.
+ *
+ * The forced first refresh walks every project directory, which on the SMB
+ * output root took the dispatcher about two minutes -- all of it before
+ * listen(), so job dispatch was down for that whole window on every restart.
+ * The store already holds the last published index (13k+ items), so opening it
+ * is enough to serve; startMediaIndexRefresh() brings it up to date afterwards.
+ *
+ * Returns whether this process should go on to refresh: only the dispatcher
+ * owns the shared index.
+ */
+export function openMediaIndex() {
   closeMediaIndex();
   const sharedStore = initializeSharedMediaIndexStore();
   sharedMediaCache = undefined;
-  if (!sharedStore || !isDispatcher()) return;
+  return Boolean(sharedStore) && isDispatcher();
+}
 
+/** Forces one refresh, then keeps the index current on a timer. */
+export async function startMediaIndexRefresh() {
   await refreshSharedMediaIndex({ force: true });
   sharedMediaRefreshTimer = setInterval(
     () => {
@@ -122,6 +137,12 @@ export async function initializeMediaIndex() {
     Math.max(100, mediaIndexRefreshMs),
   );
   sharedMediaRefreshTimer.unref?.();
+}
+
+/** Open and refresh in one step. Boot splits these; tests use this. */
+export async function initializeMediaIndex() {
+  if (!openMediaIndex()) return;
+  await startMediaIndexRefresh();
 }
 
 export function closeMediaIndex() {

@@ -79,7 +79,7 @@ import { loadWorkflowModels } from "./workflowService.js";
 
 import { assertMetadataHealth } from "./metadataHealthService.js";
 import { logMemory, startMemoryLogging } from "./memoryLogger.js";
-import { closeMediaIndex, initializeMediaIndex } from "./mediaService.js";
+import { closeMediaIndex, openMediaIndex, startMediaIndexRefresh } from "./mediaService.js";
 
 import { buildObservabilitySnapshot } from "./observabilitySnapshot.js";
 import { opsRouter } from "./routes/opsRoutes.js";
@@ -190,7 +190,9 @@ async function boot() {
   // shared projects and workflows first so those runners cannot observe an
   // empty project/model cache during lease takeover.
   await loadJobs();
-  await initializeMediaIndex();
+  // Open the persisted index only. The forced first refresh walks the share and
+  // is deferred to after listen() -- see openMediaIndex().
+  const shouldRefreshMediaIndex = openMediaIndex();
   // SQLite DR backups: dispatcher/monolith only. Running this on every API
   // worker too would multiply backup cycles by instance count for no benefit
   // (they'd all snapshot the same shared databases) and race on the same
@@ -270,8 +272,14 @@ async function boot() {
   // project that was persisted, and this only adds ones created out-of-band.
   void loadProjects()
     .then(() => logMemory("boot-projects-reconciled"))
+    .then(() => {
+      // Chained rather than concurrent: both walk the same share, and the index
+      // scan iterates getProjects(), so it should see the reconciled list.
+      if (!shouldRefreshMediaIndex) return undefined;
+      return startMediaIndexRefresh().then(() => logMemory("boot-media-index-ready"));
+    })
     .catch((error) => {
-      console.error(`Project reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`Background boot work failed: ${error instanceof Error ? error.message : String(error)}`);
     });
 
   void assertMetadataHealth().catch((error) => {
