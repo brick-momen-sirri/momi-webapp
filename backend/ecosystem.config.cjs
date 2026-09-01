@@ -22,6 +22,13 @@ const commonEnv = {
   // Migrated 2026-09-01 (150.6 GB, 37,035 files); the C: original was left in
   // place as the rollback copy. See backend/scripts/migrateOutputRoot.mjs.
   BRICK_PROJECTS_ROOT: process.env.BRICK_PROJECTS_ROOT || "\\\\10.101.41.11\\ai-data$\\Momi\\projects",
+  // Uploads followed on 2026-09-01. Only _uploads moved -- LOCAL_PROJECTS_ROOT
+  // itself stays on C:, so this must be set explicitly rather than inherited.
+  // Note the C: tree was hardlink-deduped in place (846 paths / 326 content
+  // groups); SMB does not carry hardlinks across, so the share holds the full
+  // logical 12.65 GB rather than the deduped ~9.6 GB. Nothing depends on that
+  // sharing -- the app never calls fs.link, the dedup was a one-off space pass.
+  UPLOADED_MEDIA_ROOT: process.env.UPLOADED_MEDIA_ROOT || "\\\\10.101.41.11\\ai-data$\\Momi\\_uploads",
   JSON_BODY_LIMIT: "15mb",
   RUNPOD_MAX_CONCURRENT_JOBS: process.env.RUNPOD_MAX_CONCURRENT_JOBS || "10",
   MEDIA_SCAN_CACHE_MS: "60000",

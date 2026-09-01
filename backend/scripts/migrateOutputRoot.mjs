@@ -22,23 +22,41 @@ import { fileURLToPath } from "node:url";
 const APPLY = process.argv.includes("--apply");
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-const OLD_ROOT = "C:\\ComfyUI_windows_portable_nvidia_cu128\\ComfyUI_windows_portable\\ComfyUI\\output\\projects";
-const NEW_ROOT = "\\\\10.101.41.11\\ai-data$\\Momi\\projects";
+// Each root that has moved onto the share. Both are listed permanently so the
+// script stays idempotent: a root already migrated simply reports 0.
+const ROOT_MOVES = [
+  {
+    label: "render output",
+    old: "C:\\ComfyUI_windows_portable_nvidia_cu128\\ComfyUI_windows_portable\\ComfyUI\\output\\projects",
+    new: "\\\\10.101.41.11\\ai-data$\\Momi\\projects",
+  },
+  {
+    label: "uploads",
+    old: "C:\\Momi-Animation\\backend\\data\\projects\\_uploads",
+    new: "\\\\10.101.41.11\\ai-data$\\Momi\\_uploads",
+  },
+];
 
 // How each form appears inside the raw JSON text held in the `data` column.
 const jsonEscape = (value) => value.replaceAll("\\", "\\\\");
 const forward = (value) => value.replaceAll("\\", "/");
 
-const FORMS = [
-  { label: "json-escaped backslash", from: jsonEscape(OLD_ROOT), to: jsonEscape(NEW_ROOT) },
-  { label: "forward slash", from: forward(OLD_ROOT), to: forward(NEW_ROOT) },
-  { label: "url-encoded", from: encodeURIComponent(OLD_ROOT), to: encodeURIComponent(NEW_ROOT) },
-  { label: "url-encoded (lowercase hex)", from: encodeURIComponent(OLD_ROOT).toLowerCase(), to: encodeURIComponent(NEW_ROOT) },
-  // app_projects.folder_path_norm is normalizeProjectPath(): forward slashes,
-  // lowercased, no trailing slash. It is UNIQUE and drives identity lookups, so
-  // missing it would leave every project unmatchable after the move.
-  { label: "normalized (lowercase forward)", from: forward(OLD_ROOT).toLowerCase(), to: forward(NEW_ROOT).toLowerCase() },
-];
+function formsFor(oldRoot, newRoot) {
+  return [
+    { from: jsonEscape(oldRoot), to: jsonEscape(newRoot) },
+    { from: forward(oldRoot), to: forward(newRoot) },
+    { from: encodeURIComponent(oldRoot), to: encodeURIComponent(newRoot) },
+    { from: encodeURIComponent(oldRoot).toLowerCase(), to: encodeURIComponent(newRoot) },
+    // app_projects.folder_path_norm is normalizeProjectPath(): forward slashes,
+    // lowercased, no trailing slash. It is UNIQUE and drives identity lookups,
+    // so missing it would leave every project unmatchable after the move.
+    { from: forward(oldRoot).toLowerCase(), to: forward(newRoot).toLowerCase() },
+  ];
+}
+
+// Longest `from` first: the uploads root is not a prefix of the output root, but
+// ordering by length keeps that true if a nested root is ever added.
+const FORMS = ROOT_MOVES.flatMap((move) => formsFor(move.old, move.new)).sort((a, b) => b.from.length - a.from.length);
 
 const TARGETS = [
   { db: "data/app-state.sqlite", table: "app_projects", key: "id", extraTextColumns: ["folder_path_norm"] },
