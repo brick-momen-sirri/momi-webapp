@@ -77,6 +77,8 @@ function useSubmissionHarness(overrides: HarnessOverrides = {}) {
     imageOutputCount: 1,
     selectedNanoBananaAspectRatio: "1:1",
     selectedSeedanceRatio: "16:9",
+    selectedSeedanceVersion: "2.0" as const,
+    seedanceVideoEditing: false,
     setJobs,
     setProjects,
     setBackendJobsTotal: setTotal,

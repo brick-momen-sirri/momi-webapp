@@ -24,6 +24,12 @@ import {
   supports16By9CropToggle,
   supportsImageOutputCount,
 } from "./generationUtils";
+import {
+  normalizeSeedanceVersion,
+  seedanceEffectiveModel,
+  seedanceSupportsVideoEditing,
+  seedanceVersion,
+} from "./seedanceVersions";
 
 type GenerationFormOptions = {
   initialSettings: PersistedGenerationSettings;
@@ -42,7 +48,13 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(
     normalizeNanoBananaAspectRatio(initialSettings.selectedNanoBananaAspectRatio),
   );
-  const [selectedSeedanceRatio, setSelectedSeedanceRatio] = useState(normalizeSeedanceRatio(initialSettings.selectedSeedanceRatio));
+  const [selectedSeedanceRatio, setSelectedSeedanceRatio] = useState(
+    normalizeSeedanceRatio(initialSettings.selectedSeedanceRatio),
+  );
+  const [selectedSeedanceVersion, setSelectedSeedanceVersion] = useState(
+    normalizeSeedanceVersion(initialSettings.selectedSeedanceVersion),
+  );
+  const [seedanceVideoEditing, setSeedanceVideoEditing] = useState(initialSettings.seedanceVideoEditing ?? false);
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
@@ -61,14 +73,28 @@ export function useGenerationForm(options: GenerationFormOptions) {
     () => models.find((model) => model.id === selectedModelId) ?? models[0] ?? fallbackModelCatalog[0],
     [models, selectedModelId],
   );
+  // The version is folded into the model here rather than threaded through each
+  // control: a Seedance model's resolutions and durations come from the version, not
+  // from its workflow file, so overriding them in one place leaves the resolution
+  // picker, the duration slider, the credit estimate and the reuse normalisers
+  // correct without any of them knowing that Seedance has versions.
+  const versionedModelBase = useMemo(
+    () => seedanceEffectiveModel(selectedModelBase, selectedSeedanceVersion),
+    [selectedModelBase, selectedSeedanceVersion],
+  );
   const selectedModel = useMemo(
     () => ({
-      ...selectedModelBase,
-      cost: estimateModelCredits(selectedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount),
-      costLabel: estimateModelCreditLabel(selectedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount),
+      ...versionedModelBase,
+      cost: estimateModelCredits(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
+        seedanceVersion: selectedSeedanceVersion,
+      }),
+      costLabel: estimateModelCreditLabel(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
+        seedanceVersion: selectedSeedanceVersion,
+      }),
     }),
-    [imageOutputCount, selectedDurationSeconds, selectedModelBase, selectedResolution],
+    [imageOutputCount, selectedDurationSeconds, selectedResolution, selectedSeedanceVersion, versionedModelBase],
   );
+  const selectedModelSupportsVideoEditing = seedanceSupportsVideoEditing(selectedModel, seedanceVersion(selectedSeedanceVersion));
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
@@ -91,9 +117,15 @@ export function useGenerationForm(options: GenerationFormOptions) {
     requiredImages: minimumRequiredImages,
   });
 
-  useResetWhenChanged(`${selectedModel.id}:${allowSeedance4K}`, () => {
+  useResetWhenChanged(`${selectedModel.id}:${selectedSeedanceVersion}:${allowSeedance4K}`, () => {
     setSelectedDurationSeconds((current) => normalizeDurationSeconds(current, selectedModel));
     setSelectedResolution((current) => normalizeResolutionForModel(current, selectedModel, allowSeedance4K));
+  });
+
+  // Switching to a version, or a task, with no edit mode must not leave the flag set:
+  // the server rejects it there, and it would silently come back on the next switch.
+  useResetWhenChanged(`${selectedModel.id}:${selectedSeedanceVersion}`, () => {
+    if (!selectedModelSupportsVideoEditing) setSeedanceVideoEditing(false);
   });
 
   useResetWhenChanged(selectedModelBase.id, () => {
@@ -106,6 +138,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
       selectedResolution,
       selectedNanoBananaAspectRatio,
       selectedSeedanceRatio,
+      selectedSeedanceVersion,
+      seedanceVideoEditing,
       selectedDurationSeconds,
       selectedProjectId,
       targetFolderId,
@@ -119,17 +153,22 @@ export function useGenerationForm(options: GenerationFormOptions) {
     imageOutputCount,
     prompt,
     saveNumber,
+    seedanceVideoEditing,
     selectedDurationSeconds,
     selectedModelId,
     selectedNanoBananaAspectRatio,
     selectedProjectId,
     selectedResolution,
     selectedSeedanceRatio,
+    selectedSeedanceVersion,
     targetFolderId,
   ]);
 
   function handleModelChange(modelId: string) {
-    const nextModel = models.find((model) => model.id === modelId);
+    const chosen = models.find((model) => model.id === modelId);
+    // Against the version's limits, not the workflow file's: switching to another
+    // Seedance task while on 2.5 must not seed a 4K resolution the model cannot run.
+    const nextModel = chosen && seedanceEffectiveModel(chosen, selectedSeedanceVersion);
     setSelectedModelId(modelId);
     if (nextModel) {
       setSelectedResolution((resolution) => normalizeResolutionForModel(resolution, nextModel, allowSeedance4K));
@@ -154,6 +193,10 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setSelectedNanoBananaAspectRatio,
     selectedSeedanceRatio,
     setSelectedSeedanceRatio,
+    selectedSeedanceVersion,
+    setSelectedSeedanceVersion,
+    seedanceVideoEditing,
+    setSeedanceVideoEditing,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -172,6 +215,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setVideo,
     selectedModel,
     selectedModelSupportsCropToggle,
+    selectedModelSupportsVideoEditing,
     requiredImages,
     use16By9Cropping,
     disabledReason,

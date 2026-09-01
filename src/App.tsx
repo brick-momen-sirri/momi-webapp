@@ -27,6 +27,12 @@ import {
   supportsImageOutputCount,
   supportsSeedanceRatio,
 } from "./features/generation/generationUtils";
+import {
+  normalizeSeedanceVersion,
+  seedanceEffectiveModel,
+  seedanceSupportsVideoEditing,
+  seedanceVersion,
+} from "./features/generation/seedanceVersions";
 import { useGenerationForm } from "./features/generation/useGenerationForm";
 import { useAuthentication } from "./features/auth/useAuthentication";
 import {
@@ -43,6 +49,8 @@ import {
   reusableNanoBananaAspectRatio,
   reusableSaveNumber,
   reusableSeedanceRatio,
+  reusableSeedanceVersion,
+  reusableSeedanceVideoEditing,
 } from "./features/jobs/jobReuse";
 import { useJobActions } from "./features/jobs/useJobActions";
 import { useJobSubmission } from "./features/jobs/useJobSubmission";
@@ -134,6 +142,10 @@ function App() {
     setSelectedNanoBananaAspectRatio,
     selectedSeedanceRatio,
     setSelectedSeedanceRatio,
+    selectedSeedanceVersion,
+    setSelectedSeedanceVersion,
+    seedanceVideoEditing,
+    setSeedanceVideoEditing,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -152,6 +164,7 @@ function App() {
     setVideo,
     selectedModel,
     selectedModelSupportsCropToggle,
+    selectedModelSupportsVideoEditing,
     requiredImages,
     use16By9Cropping,
     disabledReason,
@@ -242,6 +255,8 @@ function App() {
     imageOutputCount,
     selectedNanoBananaAspectRatio,
     selectedSeedanceRatio,
+    selectedSeedanceVersion,
+    seedanceVideoEditing,
     setJobs,
     setProjects,
     setBackendJobsTotal,
@@ -500,13 +515,23 @@ function App() {
       restored.add("prompt");
     }
 
+    // Restored ahead of the resolution and duration below: on Seedance it is the
+    // version that decides which of those the model accepts, so normalising them
+    // against the outgoing version would clamp a 2.5 job's 24s back to 15s.
+    const seedanceVersionId = reusableSeedanceVersion(job.workflowOptions);
+    if (seedanceVersionId) {
+      setSelectedSeedanceVersion(seedanceVersionId);
+      restored.add("model version");
+    }
+    const versionedTargetModel = seedanceEffectiveModel(targetModel, seedanceVersionId ?? selectedSeedanceVersion);
+
     if (hasKnownResolution(job)) {
-      setSelectedResolution(normalizeResolutionForModel(job.resolution, targetModel, allowSeedance4K));
+      setSelectedResolution(normalizeResolutionForModel(job.resolution, versionedTargetModel, allowSeedance4K));
       restored.add("resolution");
     }
 
     if (typeof job.durationSeconds === "number" && Number.isFinite(job.durationSeconds) && job.durationSeconds > 0) {
-      setSelectedDurationSeconds(normalizeDurationSeconds(job.durationSeconds, targetModel));
+      setSelectedDurationSeconds(normalizeDurationSeconds(job.durationSeconds, versionedTargetModel));
       restored.add("duration");
     }
 
@@ -535,9 +560,21 @@ function App() {
     }
 
     const seedanceRatio = reusableSeedanceRatio(job.workflowOptions);
-    if (seedanceRatio && supportsSeedanceRatio(targetModel)) {
+    if (seedanceRatio && supportsSeedanceRatio(targetModel, seedanceVersionId)) {
       setSelectedSeedanceRatio(seedanceRatio);
       restored.add("aspect ratio");
+    }
+
+    const seedanceVideoEdit = reusableSeedanceVideoEditing(job.workflowOptions);
+    // Guarded like the ratio above: restoring a setting this model and version has no
+    // control for would report a change the artist cannot see, and the form would
+    // clear it again on the next render anyway.
+    if (
+      seedanceVideoEdit !== undefined &&
+      seedanceSupportsVideoEditing(versionedTargetModel, seedanceVersion(seedanceVersionId))
+    ) {
+      setSeedanceVideoEditing(seedanceVideoEdit);
+      restored.add("video editing mode");
     }
 
     if (hasInputImageMetadata(job)) {
@@ -600,6 +637,9 @@ function App() {
                 allowSeedance4K={allowSeedance4K}
                 selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
                 selectedSeedanceRatio={selectedSeedanceRatio}
+                selectedSeedanceVersion={selectedSeedanceVersion}
+                seedanceVideoEditing={seedanceVideoEditing}
+                showSeedanceVideoEditing={selectedModelSupportsVideoEditing}
                 selectedDurationSeconds={selectedDurationSeconds}
                 prompt={prompt}
                 archVizGridOptions={archVizGridOptions}
@@ -619,6 +659,8 @@ function App() {
                 onResolutionChange={handleResolutionChange}
                 onNanoBananaAspectRatioChange={(value) => setSelectedNanoBananaAspectRatio(normalizeNanoBananaAspectRatio(value))}
                 onSeedanceRatioChange={(value) => setSelectedSeedanceRatio(normalizeSeedanceRatio(value))}
+                onSeedanceVersionChange={(value) => setSelectedSeedanceVersion(normalizeSeedanceVersion(value))}
+                onSeedanceVideoEditingChange={setSeedanceVideoEditing}
                 onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
                 onPromptChange={setPrompt}
                 onArchVizGridOptionsChange={setArchVizGridOptions}

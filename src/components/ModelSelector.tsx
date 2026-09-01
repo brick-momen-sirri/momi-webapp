@@ -16,6 +16,8 @@ import klingIcon from "../assets/model-icons/kling.png";
 import openAiIcon from "../assets/model-icons/openai.png";
 import seedanceIcon from "../assets/model-icons/seedance.png";
 import veo3Icon from "../assets/model-icons/veo3.png";
+import { SEEDANCE_VERSIONS, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { ModelType } from "../types";
 import { cn } from "../utils/classNames";
 import { hasResultImageDragData } from "../utils/resultDrag";
@@ -23,7 +25,9 @@ import { hasResultImageDragData } from "../utils/resultDrag";
 type ModelSelectorProps = {
   models: ModelType[];
   selectedModel: ModelType;
+  seedanceVersion: SeedanceVersionId;
   onChange: (modelId: string) => void;
+  onSeedanceVersionChange: (version: SeedanceVersionId) => void;
 };
 
 const taskCategories = [
@@ -84,7 +88,7 @@ const providerOptions = [
   },
 ] as const;
 
-export function ModelSelector({ models, selectedModel, onChange }: ModelSelectorProps) {
+export function ModelSelector({ models, selectedModel, seedanceVersion, onChange, onSeedanceVersionChange }: ModelSelectorProps) {
   const selectedCategory = categoryForModel(selectedModel) ?? taskCategories[0];
   const CategoryIcon = selectedCategory.icon;
   const categoryModels = models.filter((model) => modelMatchesCategory(model, selectedCategory.id));
@@ -216,6 +220,42 @@ export function ModelSelector({ models, selectedModel, onChange }: ModelSelector
           })}
         </div>
       </div>
+
+      {isSeedanceWorkflowModel(selectedModel) ? (
+        <div className="mt-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Model version</p>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Seedance model version">
+            {SEEDANCE_VERSIONS.map((version) => {
+              const selected = version.id === seedanceVersion;
+              return (
+                <label
+                  key={version.id}
+                  title={version.hint}
+                  className={cn(
+                    "flex cursor-pointer flex-col rounded-md border px-2.5 py-2 transition",
+                    selected
+                      ? "border-accent bg-accent text-white shadow-card"
+                      : "border-line bg-white text-stone-700 hover:border-accent hover:bg-mist",
+                  )}
+                >
+                  <input
+                    className="sr-only"
+                    type="radio"
+                    name="seedance-version"
+                    value={version.id}
+                    checked={selected}
+                    onChange={() => onSeedanceVersionChange(version.id)}
+                  />
+                  <span className="truncate text-xs font-bold">{version.label}</span>
+                  <span className={cn("mt-0.5 truncate text-[11px]", selected ? "text-white/75" : "text-stone-500")}>
+                    {version.hint}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-3 rounded-md border border-line bg-mist/70 p-3">
         <div className="flex gap-3">

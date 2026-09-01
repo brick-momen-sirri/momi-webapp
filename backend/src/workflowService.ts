@@ -5,6 +5,7 @@ import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { isPathWithinRoot } from "./pathContainment.js";
+import { applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
 import { isGptImageKey, isGptImageModel, isNanoBananaModel, supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
@@ -33,7 +34,6 @@ const gptImageSizeOptions = [
 ];
 
 const nanoBananaAspectRatioOptions = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
-const seedanceRatioOptions = new Set(["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
 export async function loadWorkflowModels() {
   const files = (await Promise.all(workflowRoots.map((root) => listJsonFiles(root)))).flat();
   modelsCache = await Promise.all(files.map(inferWorkflowModel));
@@ -218,6 +218,7 @@ function resolutionFromLabel(label: string) {
   }
   if (normalized === "1k") return { width: 1024, height: 1024, label: "1K" };
   if (normalized === "2k") return { width: 2048, height: 2048, label: "2K" };
+  if (normalized === "480p") return { width: 854, height: 480, label: "480p" };
   if (normalized === "720p") return { width: 1280, height: 720, label: "720p" };
   if (normalized === "4k") return { width: 3840, height: 2160, label: "4K" };
   return { width: 1920, height: 1080, label: "1080p" };
@@ -1032,7 +1033,12 @@ function injectInputs(
   objectInfo: ComfyNode,
 ) {
   const resolution = request.resolution;
-  const durationSeconds = normalizeDurationSeconds(request.durationSeconds, model);
+  // Via the effective model so a 2.5 job's 16-30s duration is not clamped to the
+  // 15s ceiling the workflow file was inferred to have.
+  const durationSeconds = normalizeDurationSeconds(
+    request.durationSeconds,
+    seedanceEffectiveModel(model, request.workflowOptions),
+  );
   const images = request.inputImages ?? [];
   const startFrame = request.startFrame ?? images[0];
   const endFrame = request.endFrame ?? images[1];
@@ -1059,8 +1065,7 @@ function injectInputs(
       }
       if (resolution && lowerKey === "width") inputs[key] = resolution.width;
       if (resolution && lowerKey === "height") inputs[key] = resolution.height;
-      if (resolution && lowerKey === "resolution")
-        inputs[key] = directResolutionLabel(resolution.label ?? "1080p", inputs[key]);
+      if (resolution && lowerKey === "resolution") inputs[key] = directResolutionLabel(resolution.label ?? "1080p", inputs[key]);
       if (resolution && lowerKey === "model.resolution") inputs[key] = resolutionWidgetLabel(resolution.label ?? "1080p");
       if (resolution && isGptImageNode(node) && lowerKey === "size") inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
       if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) {
@@ -1106,7 +1111,7 @@ function injectInputs(
       applyNanoBananaAspectRatioInput(inputs, request.workflowOptions);
     }
     if (isSeedance2ClassType(classType)) {
-      applySeedanceRatioInput(inputs, request.workflowOptions);
+      applySeedanceModelInputs(inputs, model, request.workflowOptions);
     }
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {
@@ -1218,24 +1223,6 @@ function applyNanoBananaAspectRatioInput(inputs: ComfyNode, workflowOptions: Cre
 
 function isSeedance2ClassType(classType: string) {
   return classType.includes("bytedance2");
-}
-
-function normalizeSeedanceRatio(value: unknown) {
-  return typeof value === "string" && seedanceRatioOptions.has(value) ? value : undefined;
-}
-
-// The Seedance nodes expose the ratio as a nested dynamic-combo input, so the
-// executable key is "model.ratio". Older graphs that spell it "ratio" are honored
-// as-is rather than gaining a second, ignored key.
-function applySeedanceRatioInput(inputs: ComfyNode, workflowOptions: CreateJobRequest["workflowOptions"]) {
-  const ratio = normalizeSeedanceRatio(workflowOptions?.seedance?.ratio);
-  if (!ratio) return;
-  const key =
-    Object.keys(inputs).find((item) => {
-      const lower = item.toLowerCase();
-      return lower === "model.ratio" || lower === "ratio";
-    }) ?? "model.ratio";
-  inputs[key] = ratio;
 }
 
 function isGptImageNode(node: ComfyNode) {
@@ -1473,6 +1460,7 @@ function resolutionWidgetLabel(label: string) {
   if (normalized === "1k") return "1K";
   if (normalized === "2k") return "2K";
   if (normalized === "4k") return "4k";
+  if (normalized === "480p") return "480p";
   if (normalized === "720p") return "720p";
   return "1080p";
 }
@@ -1499,6 +1487,9 @@ function directResolutionLabel(label: string, currentValue: unknown) {
   const usesKScale = typeof currentValue === "string" && /^\d+\s*k$/i.test(currentValue.trim());
 
   if (normalized === "4k") return usesKScale ? "4K" : "4k";
+  // Reachable only from a p-scale node that offers 480p. Returning 1080p instead
+  // would quietly render a deliberate 480p choice at four times the cost.
+  if (normalized === "480p") return usesKScale ? "1080p" : "480p";
   if (normalized === "720p") return "720p";
   // 1K and 2K exist only in the K-scale vocabulary. Asking a p-scale node for one
   // is a combination no picker offers, and 1080p is what its own default would be.

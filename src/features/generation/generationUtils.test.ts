@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ModelType } from "../../types";
 import {
   DEFAULT_SEEDANCE_RATIO,
   normalizeSeedanceRatio,
@@ -7,7 +8,7 @@ import {
   workflowOptionsForJob,
 } from "./generationUtils";
 
-function model(overrides: Partial<Parameters<typeof supports16By9CropToggle>[0]> = {}) {
+function model(overrides: Partial<ModelType> = {}) {
   return {
     id: "brick_api_flux3_i2v",
     label: "Flux 3 Image To Video",
@@ -47,17 +48,35 @@ describe("seedance ratio", () => {
   const seedanceReference = model({
     id: "brick_api_seedance2_0_i2v",
     label: "Seedance2 0 I2v",
+    backendCategory: "image_to_video",
     workflowPath: "C:/Momi-Animation/workflow/i2v/Brick_api_seedance2_0_i2v .json",
   });
   const seedanceFirstLast = model({
     id: "brick_api_seedance_2_0flf2v",
     label: "Api Seedance 2.0flf2v",
+    backendCategory: "first_last_frame_to_video",
     workflowPath: "C:/Momi-Animation/workflow/flf2v/Brick_api_Seedance 2.0flf2v.json",
   });
 
-  it("offers the ratio on both Seedance video nodes", () => {
-    expect(supportsSeedanceRatio(seedanceReference)).toBe(true);
-    expect(supportsSeedanceRatio(seedanceFirstLast)).toBe(true);
+  it("offers the ratio on both Seedance video nodes on 2.0", () => {
+    expect(supportsSeedanceRatio(seedanceReference, "2.0")).toBe(true);
+    expect(supportsSeedanceRatio(seedanceFirstLast, "2.0")).toBe(true);
+  });
+
+  // 2.5's first-last-frame option has no ratio input at all, so offering one would
+  // be a setting ComfyUI silently drops.
+  it("drops the ratio for 2.5 first-last-frame but keeps it on the reference node", () => {
+    expect(supportsSeedanceRatio(seedanceReference, "2.5")).toBe(true);
+    expect(supportsSeedanceRatio(seedanceFirstLast, "2.5")).toBe(false);
+  });
+
+  it("infers the first-last-frame node from the workflow path when no category is set", () => {
+    const uncategorized = model({
+      id: "brick_api_seedance_2_0flf2v",
+      label: "Api Seedance 2.0flf2v",
+      workflowPath: "C:\\Momi-Animation\\workflow\\flf2v\\Brick_api_Seedance 2.0flf2v.json",
+    });
+    expect(supportsSeedanceRatio(uncategorized, "2.5")).toBe(false);
   });
 
   it("leaves non-Seedance models alone", () => {
@@ -72,15 +91,54 @@ describe("seedance ratio", () => {
     expect(normalizeSeedanceRatio(undefined)).toBe(DEFAULT_SEEDANCE_RATIO);
   });
 
-  it("submits the ratio only for Seedance models", () => {
-    const options = {
-      archVizGrid: { slotCount: "1" as const, useSmartDefaults: true, cameraSlots: [] },
-      saveNumber: "0001",
-      imageOutputCount: 1 as const,
-      nanoBananaAspectRatio: "auto",
-      seedanceRatio: "9:16",
-    };
-    expect(workflowOptionsForJob({ ...options, model: seedanceFirstLast }).seedance).toEqual({ ratio: "9:16" });
-    expect(workflowOptionsForJob({ ...options, model: model() }).seedance).toBeUndefined();
+  const submissionOptions = {
+    archVizGrid: { slotCount: "1" as const, useSmartDefaults: true, cameraSlots: [] },
+    saveNumber: "0001",
+    imageOutputCount: 1 as const,
+    nanoBananaAspectRatio: "auto",
+    seedanceRatio: "9:16",
+    seedanceVersionId: "2.0" as const,
+    seedanceVideoEditing: false,
+  };
+
+  it("submits the version and ratio only for Seedance models", () => {
+    expect(workflowOptionsForJob({ ...submissionOptions, model: seedanceFirstLast }).seedance).toEqual({
+      version: "2.0",
+      ratio: "9:16",
+    });
+    expect(workflowOptionsForJob({ ...submissionOptions, model: model() }).seedance).toBeUndefined();
+  });
+
+  it("omits the ratio on 2.5 first-last-frame, whose node has no such input", () => {
+    expect(workflowOptionsForJob({ ...submissionOptions, model: seedanceFirstLast, seedanceVersionId: "2.5" }).seedance).toEqual({
+      version: "2.5",
+    });
+  });
+
+  it("sends the edit switch only where 2.5 has one", () => {
+    const videoEdit = model({
+      id: "brick_api_seedance2_0_r2v",
+      label: "Api Seedance2 0 R2v",
+      backendCategory: "video_editing",
+      requiresVideo: true,
+      workflowPath: "C:/Momi-Animation/workflow/video_edit/Brick_api_seedance2_0_r2v.json",
+    });
+    const asked = { ...submissionOptions, seedanceVideoEditing: true };
+
+    expect(workflowOptionsForJob({ ...asked, model: videoEdit, seedanceVersionId: "2.5" }).seedance).toEqual({
+      version: "2.5",
+      ratio: "9:16",
+      videoEditing: true,
+    });
+    // 2.0 has no video_editing input, and the reference node with no video has
+    // nothing to edit.
+    expect(workflowOptionsForJob({ ...asked, model: videoEdit, seedanceVersionId: "2.0" }).seedance).toEqual({
+      version: "2.0",
+      ratio: "9:16",
+    });
+    expect(workflowOptionsForJob({ ...asked, model: seedanceReference, seedanceVersionId: "2.5" }).seedance).toEqual({
+      version: "2.5",
+      ratio: "9:16",
+    });
   });
 });

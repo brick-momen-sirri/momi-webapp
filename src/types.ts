@@ -318,10 +318,18 @@ export type WorkflowOptions = {
   gptImage?: {
     outputCount?: 1 | 2;
   };
-  // Output aspect ratio for the Seedance 2.x video nodes. "adaptive" lets the model
-  // keep the reference frame's own aspect instead of forcing a grid ratio.
+  // Which Seedance model to run, and the settings that version exposes. The version
+  // decides the resolutions, durations and node inputs -- see
+  // features/generation/seedanceVersions.ts -- so it travels with the job.
   seedance?: {
+    /** "2.0" or "2.5". Absent on jobs from before the picker existed, which ran 2.0. */
+    version?: string;
+    // Output aspect ratio for the Seedance video nodes. "adaptive" lets the model
+    // keep the reference frame's own aspect instead of forcing a grid ratio. Absent
+    // for 2.5 first-last-frame, whose node has no ratio input.
     ratio?: string;
+    /** 2.5 only: edit the connected reference video instead of generating a new one. */
+    videoEditing?: boolean;
   };
   save?: {
     cameraNumber?: string;

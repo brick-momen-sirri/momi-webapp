@@ -2,6 +2,14 @@ import type { RequestHandler } from "express";
 
 import { getRequestUser } from "./authMiddleware.js";
 import { remoteVideoInputRejection, requiresNormalizedVideoInput } from "./runpodVideoPreprocessService.js";
+import {
+  isSeedanceVersionId,
+  seedanceEffectiveModel,
+  seedanceSupportsRatio,
+  seedanceVersion,
+  seedanceVersionIdFromOptions,
+  SEEDANCE_VERSION_IDS,
+} from "./seedanceVersions.js";
 import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImageModels.js";
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
@@ -19,9 +27,6 @@ export type JobSubmissionDependencies = {
 
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
 const NANO_BANANA_ASPECT_RATIOS = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
-// The ratio combo the ByteDance2 Seedance nodes offer; "adaptive" derives the
-// output aspect from the reference frame instead of forcing one of the grid ratios.
-const SEEDANCE_RATIOS = new Set(["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
 
 export function createJobSubmissionHandler(deps: JobSubmissionDependencies): RequestHandler {
   return async (req, res) => {
@@ -76,8 +81,13 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   const endFrame = optionalString(body.endFrame, "endFrame");
   const inputVideo = optionalString(body.inputVideo, "inputVideo");
   const resolution = optionalResolution(body.resolution);
-  const durationSeconds = optionalDuration(body.durationSeconds, model);
   const workflowOptions = optionalWorkflowOptions(body.workflowOptions);
+  // Seedance's limits come from the picked version, not from the workflow file: 2.5
+  // runs to 30s and drops 4K. Parsed before the two checks below so both see the
+  // same limits the picker offered, rather than the file's inferred 2.0 ones.
+  const effectiveModel = seedanceEffectiveModel(model, workflowOptions);
+  assertSeedanceOptionsFitVersion(model, workflowOptions);
+  const durationSeconds = optionalDuration(body.durationSeconds, effectiveModel);
   const targetFolderId = optionalFolderId(body.targetFolderId);
 
   // Still image presets carry their own input rules, and they are the stricter
@@ -132,13 +142,18 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   // is re-encoded before dispatch. That needs the bytes on disk: an http(s) link
   // would otherwise reach the provider untouched and fail there. Data URLs are
   // fine -- externalizeJobInputMedia writes them to the job folder first.
-  if (inputVideo && !inputVideo.startsWith("data:") && requiresNormalizedVideoInput(model) && !isLocalMediaReference(inputVideo)) {
+  if (
+    inputVideo &&
+    !inputVideo.startsWith("data:") &&
+    requiresNormalizedVideoInput(model) &&
+    !isLocalMediaReference(inputVideo)
+  ) {
     throw new JobSubmissionError(remoteVideoInputRejection(model));
   }
   if (inputImages && model.imageSlotCount && inputImages.length > model.imageSlotCount) {
     throw new JobSubmissionError(`This workflow accepts at most ${model.imageSlotCount} input image(s).`);
   }
-  if (resolution) assertSupportedResolution(resolution, model);
+  if (resolution) assertSupportedResolution(resolution, effectiveModel);
 
   return {
     clientRequestId,
@@ -266,6 +281,26 @@ function optionalResolution(value: unknown): Resolution | undefined {
   return { width, height, label: candidate.label as string | undefined };
 }
 
+/**
+ * Reject Seedance settings the picked version's node has no input for.
+ *
+ * ComfyUI drops an input the selected model option does not declare, so sending a
+ * ratio to 2.5 first-last-frame would render at some other aspect and look like the
+ * picker lied. Refusing it here says so instead.
+ */
+function assertSeedanceOptionsFitVersion(model: WorkflowModel, workflowOptions: WorkflowOptions | undefined) {
+  const seedance = workflowOptions?.seedance;
+  if (!seedance || !isSeedanceModel(model)) return;
+  const version = seedanceVersion(seedanceVersionIdFromOptions(workflowOptions));
+
+  if (seedance.ratio != null && !seedanceSupportsRatio(model, version)) {
+    throw new JobSubmissionError(`Seedance ${version.id} ${model.category} has no aspect ratio input.`);
+  }
+  if (seedance.videoEditing === true && model.category === "first_last_frame_to_video") {
+    throw new JobSubmissionError(`Seedance ${version.id} first-last-frame has no video editing mode.`);
+  }
+}
+
 function assertSupportedResolution(resolution: Resolution, model: WorkflowModel) {
   const supported = model.supportedResolutions ?? [];
   if (!supported.length) return;
@@ -284,6 +319,7 @@ function assertSupportedResolution(resolution: Resolution, model: WorkflowModel)
 function resolutionAlias(width: number, height: number) {
   if (width === 1024 && height === 1024) return "1K";
   if (width === 2048 && height === 2048) return "2K";
+  if (width === 854 && height === 480) return "480p";
   if (width === 1280 && height === 720) return "720p";
   if (width === 1920 && height === 1080) return "1080p";
   if ((width === 3840 && height === 2160) || (width === 2160 && height === 3840)) return "4K";
@@ -312,8 +348,18 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   }
   if (options.seedance != null) {
     const seedance = plainRecord(options.seedance, "Seedance options");
-    if (seedance.ratio != null && (typeof seedance.ratio !== "string" || !SEEDANCE_RATIOS.has(seedance.ratio))) {
-      throw new JobSubmissionError("Seedance ratio is not supported.");
+    if (seedance.version != null && !isSeedanceVersionId(seedance.version)) {
+      throw new JobSubmissionError(`Seedance version must be one of: ${SEEDANCE_VERSION_IDS.join(", ")}.`);
+    }
+    const version = seedanceVersion(seedance.version);
+    if (seedance.ratio != null && (typeof seedance.ratio !== "string" || !version.ratios.includes(seedance.ratio))) {
+      throw new JobSubmissionError(`Seedance ratio is not supported by Seedance ${version.id}.`);
+    }
+    if (seedance.videoEditing != null && typeof seedance.videoEditing !== "boolean") {
+      throw new JobSubmissionError("Seedance videoEditing must be true or false.");
+    }
+    if (seedance.videoEditing === true && !version.supportsVideoEditing) {
+      throw new JobSubmissionError(`Seedance ${version.id} has no video editing mode.`);
     }
   }
   if (options.gptImage != null) {

@@ -4,6 +4,7 @@ import type { ArchVizGridOptions, Job, ModelType, UploadedImage, UploadedVideo, 
 import { getImageSize } from "../../utils/imageCrop";
 import { createClientId } from "../../utils/id";
 import { normalizeNanoBananaAspectRatio, normalizeSeedanceRatio } from "../generation/generationUtils";
+import { normalizeSeedanceVersion } from "../generation/seedanceVersions";
 
 export function canReuseJobSettings(job: Job, models: ModelType[]) {
   return Boolean(
@@ -165,6 +166,22 @@ export function reusableNanoBananaAspectRatio(options: WorkflowOptions | undefin
 
 export function reusableSeedanceRatio(options: WorkflowOptions | undefined) {
   return typeof options?.seedance?.ratio === "string" ? normalizeSeedanceRatio(options.seedance.ratio) : undefined;
+}
+
+/**
+ * Which Seedance version the job ran on, if it recorded one.
+ *
+ * Undefined rather than the default for a job that has no version: those predate
+ * the picker and reusing one should leave the current choice alone, not silently
+ * reset it to 2.0.
+ */
+export function reusableSeedanceVersion(options: WorkflowOptions | undefined) {
+  const version = options?.seedance?.version;
+  return typeof version === "string" ? normalizeSeedanceVersion(version) : undefined;
+}
+
+export function reusableSeedanceVideoEditing(options: WorkflowOptions | undefined) {
+  return typeof options?.seedance?.videoEditing === "boolean" ? options.seedance.videoEditing : undefined;
 }
 
 export async function rehydrateJobInputImages(job: Job, slotCount: number) {

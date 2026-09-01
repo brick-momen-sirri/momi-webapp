@@ -3,6 +3,14 @@ import { isSeedanceWorkflowModel, KLING_PROMPT_CHARACTER_LIMIT } from "../../ser
 import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, UploadedVideo, WorkflowOptions } from "../../types";
 import { createClientId } from "../../utils/id";
 import { ALL_PROJECTS_ID } from "../workspace/workspaceUtils";
+import {
+  DEFAULT_SEEDANCE_VERSION,
+  normalizeSeedanceVersion,
+  seedanceSupportsRatio,
+  seedanceSupportsVideoEditing,
+  seedanceVersion,
+  type SeedanceVersionId,
+} from "./seedanceVersions";
 
 type DisabledReasonInput = {
   isDemoAccount: boolean;
@@ -56,6 +64,7 @@ export function parseResolution(value: string) {
   if (normalized === "auto") return { width: 1024, height: 1024, label: normalized };
   if (normalized === "1K") return { width: 1024, height: 1024, label: normalized };
   if (normalized === "2K") return { width: 2048, height: 2048, label: normalized };
+  if (normalized === "480p") return { width: 854, height: 480, label: normalized };
   if (normalized === "720p") return { width: 1280, height: 720, label: normalized };
   if (normalized === "1080p") return { width: 1920, height: 1080, label: normalized };
   if (normalized === "4K") return { width: 3840, height: 2160, label: normalized };
@@ -108,11 +117,13 @@ export function normalizeNanoBananaAspectRatio(value: unknown) {
   return typeof value === "string" && nanoBananaAspectRatioValues.includes(value) ? value : "auto";
 }
 
-// The ratio options the ByteDance Seedance 2.0 Reference and First-Last-Frame nodes
-// offer. The default stays 16:9 because that is what the shipped Seedance workflows
-// already send; "adaptive" is the opt-in that keeps the source frame's own aspect.
-export const SEEDANCE_RATIO_VALUES = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"];
-export const DEFAULT_SEEDANCE_RATIO = "16:9";
+// The ratio options the ByteDance Seedance nodes offer. Both versions take the same
+// list, so this needs no version: what the version decides is whether the node has a
+// ratio input at all -- see seedanceSupportsRatio. The default stays 16:9 because
+// that is what the shipped Seedance workflows already send; "adaptive" is the opt-in
+// that keeps the source frame's own aspect.
+export const SEEDANCE_RATIO_VALUES = seedanceVersion(DEFAULT_SEEDANCE_VERSION).ratios;
+export const DEFAULT_SEEDANCE_RATIO = seedanceVersion(DEFAULT_SEEDANCE_VERSION).defaultRatio;
 
 export function normalizeSeedanceRatio(value: unknown) {
   return typeof value === "string" && SEEDANCE_RATIO_VALUES.includes(value) ? value : DEFAULT_SEEDANCE_RATIO;
@@ -133,6 +144,7 @@ function normalizeResolutionAlias(value: string) {
   const lower = value.toLowerCase().replace(/\s+/g, "");
   if (lower === "1k" || lower === "1024x1024") return "1K";
   if (lower === "2k" || lower === "2048x2048") return "2K";
+  if (lower === "480p" || lower === "854x480") return "480p";
   if (lower === "720p" || lower === "1280x720") return "720p";
   if (lower === "1080p" || lower === "1920x1080" || lower === "16:9landscape") return "1080p";
   if (lower === "4k" || lower === "3840x2160") return "4K";
@@ -225,13 +237,17 @@ export function workflowOptionsForJob({
   imageOutputCount,
   nanoBananaAspectRatio,
   seedanceRatio,
+  seedanceVersionId,
+  seedanceVideoEditing,
 }: {
-  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">;
+  model: SeedanceModelFields;
   archVizGrid: ArchVizGridOptions;
   saveNumber: string;
   imageOutputCount: 1 | 2;
   nanoBananaAspectRatio: string;
   seedanceRatio: string;
+  seedanceVersionId: SeedanceVersionId;
+  seedanceVideoEditing: boolean;
 }): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
@@ -240,7 +256,7 @@ export function workflowOptionsForJob({
       ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } }
       : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
-    ...(supportsSeedanceRatio(model) ? { seedance: { ratio: normalizeSeedanceRatio(seedanceRatio) } } : {}),
+    ...seedanceWorkflowOptions(model, seedanceVersionId, seedanceRatio, seedanceVideoEditing),
     save: {
       cameraNumber: normalizedSaveNumber,
       shotNumber: normalizedSaveNumber,
@@ -248,8 +264,37 @@ export function workflowOptionsForJob({
   };
 }
 
-export function supportsSeedanceRatio(model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">) {
-  return isSeedanceWorkflowModel(model);
+type SeedanceModelFields = Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath" | "requiresVideo">;
+
+/**
+ * The Seedance block, carrying only the settings the picked version's node has.
+ *
+ * A ratio or an edit switch the node does not declare gets dropped by ComfyUI
+ * without a word, so the server refuses one instead -- which makes sending only what
+ * applies part of the contract rather than tidiness.
+ */
+function seedanceWorkflowOptions(
+  model: SeedanceModelFields,
+  versionId: SeedanceVersionId,
+  ratio: string,
+  videoEditing: boolean,
+): Pick<WorkflowOptions, "seedance"> {
+  if (!isSeedanceWorkflowModel(model)) return {};
+  const version = seedanceVersion(versionId);
+  return {
+    seedance: {
+      version: version.id,
+      ...(seedanceSupportsRatio(model, version) ? { ratio: normalizeSeedanceRatio(ratio) } : {}),
+      ...(seedanceSupportsVideoEditing(model, version) ? { videoEditing } : {}),
+    },
+  };
+}
+
+export function supportsSeedanceRatio(
+  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">,
+  versionId: unknown = DEFAULT_SEEDANCE_VERSION,
+) {
+  return isSeedanceWorkflowModel(model) && seedanceSupportsRatio(model, seedanceVersion(normalizeSeedanceVersion(versionId)));
 }
 
 export function isNanoBananaModel(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">) {
@@ -288,6 +333,8 @@ export function createLocalJob({
   imageOutputCount,
   selectedNanoBananaAspectRatio,
   selectedSeedanceRatio,
+  selectedSeedanceVersion,
+  seedanceVideoEditing,
   use16By9Cropping,
   requiredImages,
 }: {
@@ -304,6 +351,8 @@ export function createLocalJob({
   imageOutputCount: 1 | 2;
   selectedNanoBananaAspectRatio: string;
   selectedSeedanceRatio: string;
+  selectedSeedanceVersion: SeedanceVersionId;
+  seedanceVideoEditing: boolean;
   use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
@@ -340,6 +389,8 @@ export function createLocalJob({
       imageOutputCount,
       nanoBananaAspectRatio: selectedNanoBananaAspectRatio,
       seedanceRatio: selectedSeedanceRatio,
+      seedanceVersionId: selectedSeedanceVersion,
+      seedanceVideoEditing,
     }),
     status: "queued",
     inputImages,

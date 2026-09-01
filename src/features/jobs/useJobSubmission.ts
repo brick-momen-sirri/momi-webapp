@@ -12,6 +12,7 @@ import {
   uploadJobMediaUrl,
   workflowOptionsForJob,
 } from "../generation/generationUtils";
+import type { SeedanceVersionId } from "../generation/seedanceVersions";
 import { ALL_PROJECTS_ID, incrementProjectJobCount, mergeJobs } from "../workspace/workspaceUtils";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
@@ -38,6 +39,8 @@ type JobSubmissionOptions = {
   imageOutputCount: 1 | 2;
   selectedNanoBananaAspectRatio: string;
   selectedSeedanceRatio: string;
+  selectedSeedanceVersion: SeedanceVersionId;
+  seedanceVideoEditing: boolean;
   setJobs: Dispatch<SetStateAction<Job[]>>;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setBackendJobsTotal: Dispatch<SetStateAction<number>>;
@@ -79,6 +82,8 @@ export function useJobSubmission(options: JobSubmissionOptions) {
       imageOutputCount,
       selectedNanoBananaAspectRatio,
       selectedSeedanceRatio,
+      selectedSeedanceVersion,
+      seedanceVideoEditing,
       setJobs,
       setProjects,
       setBackendJobsTotal,
@@ -111,6 +116,8 @@ export function useJobSubmission(options: JobSubmissionOptions) {
           imageOutputCount,
           nanoBananaAspectRatio: selectedNanoBananaAspectRatio,
           seedanceRatio: selectedSeedanceRatio,
+          seedanceVersionId: selectedSeedanceVersion,
+          seedanceVideoEditing,
         });
         const fingerprint = submissionFingerprint({
           accountId: account.id,
@@ -221,6 +228,8 @@ export function useJobSubmission(options: JobSubmissionOptions) {
         imageOutputCount,
         selectedNanoBananaAspectRatio,
         selectedSeedanceRatio,
+        selectedSeedanceVersion,
+        seedanceVideoEditing,
         use16By9Cropping,
         requiredImages,
       });
@@ -313,6 +322,8 @@ function fingerprintForCurrentOptions(options: JobSubmissionOptions) {
       imageOutputCount: options.imageOutputCount,
       nanoBananaAspectRatio: options.selectedNanoBananaAspectRatio,
       seedanceRatio: options.selectedSeedanceRatio,
+      seedanceVersionId: options.selectedSeedanceVersion,
+      seedanceVideoEditing: options.seedanceVideoEditing,
     }),
   });
 }

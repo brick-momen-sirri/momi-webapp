@@ -1,4 +1,5 @@
 import { Eye } from "lucide-react";
+import type { SeedanceVersionId } from "../features/generation/seedanceVersions";
 import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
 import { ArchVizGridControls } from "./ArchVizGridControls";
@@ -10,6 +11,7 @@ import { PromptBox } from "./PromptBox";
 import { ResolutionSelector } from "./ResolutionSelector";
 import { ResultDestinationControl } from "./ResultDestinationControl";
 import { SaveNumberControl } from "./SaveNumberControl";
+import { SeedanceVideoEditingControl } from "./SeedanceVideoEditingControl";
 import { VideoUploader } from "./VideoUploader";
 
 type LeftSettingsPanelProps = {
@@ -21,6 +23,9 @@ type LeftSettingsPanelProps = {
   allowSeedance4K: boolean;
   selectedNanoBananaAspectRatio: string;
   selectedSeedanceRatio: string;
+  selectedSeedanceVersion: SeedanceVersionId;
+  seedanceVideoEditing: boolean;
+  showSeedanceVideoEditing: boolean;
   selectedDurationSeconds: number;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
@@ -40,6 +45,8 @@ type LeftSettingsPanelProps = {
   onResolutionChange: (resolution: string) => void;
   onNanoBananaAspectRatioChange: (aspectRatio: string) => void;
   onSeedanceRatioChange: (ratio: string) => void;
+  onSeedanceVersionChange: (version: SeedanceVersionId) => void;
+  onSeedanceVideoEditingChange: (enabled: boolean) => void;
   onDurationChange: (seconds: number) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
@@ -62,6 +69,9 @@ export function LeftSettingsPanel({
   allowSeedance4K,
   selectedNanoBananaAspectRatio,
   selectedSeedanceRatio,
+  selectedSeedanceVersion,
+  seedanceVideoEditing,
+  showSeedanceVideoEditing,
   selectedDurationSeconds,
   prompt,
   archVizGridOptions,
@@ -81,6 +91,8 @@ export function LeftSettingsPanel({
   onResolutionChange,
   onNanoBananaAspectRatioChange,
   onSeedanceRatioChange,
+  onSeedanceVersionChange,
+  onSeedanceVideoEditingChange,
   onDurationChange,
   onPromptChange,
   onArchVizGridOptionsChange,
@@ -100,7 +112,13 @@ export function LeftSettingsPanel({
 
   return (
     <div className="space-y-3 pb-3">
-      <ModelSelector models={models} selectedModel={selectedModel} onChange={onModelChange} />
+      <ModelSelector
+        models={models}
+        selectedModel={selectedModel}
+        seedanceVersion={selectedSeedanceVersion}
+        onChange={onModelChange}
+        onSeedanceVersionChange={onSeedanceVersionChange}
+      />
       {showResolution ? (
         <ResolutionSelector
           selectedModel={selectedModel}
@@ -111,6 +129,7 @@ export function LeftSettingsPanel({
           onAspectRatioChange={onNanoBananaAspectRatioChange}
           seedanceRatio={selectedSeedanceRatio}
           onSeedanceRatioChange={onSeedanceRatioChange}
+          seedanceVersionId={selectedSeedanceVersion}
           imageOutputCount={imageOutputCount}
           onImageOutputCountChange={onImageOutputCountChange}
         />
@@ -149,6 +168,9 @@ export function LeftSettingsPanel({
           textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
         />
         {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
+        {showSeedanceVideoEditing ? (
+          <SeedanceVideoEditingControl value={seedanceVideoEditing} onChange={onSeedanceVideoEditingChange} />
+        ) : null}
         {showArchVizGridControls ? (
           <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
         ) : (

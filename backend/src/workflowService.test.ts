@@ -490,12 +490,10 @@ test("Seedance workflows apply the selected output ratio to both node types", as
 
 test("Seedance workflows keep their saved ratio when none is selected or the value is unknown", async () => {
   const firstLast = requiredModel("brick_api_seedance_2_0flf2v");
-  const untouched = (await loadWorkflowForRunpod(
-    firstLast,
-    request(firstLast, ["start.png", "end.png"]),
-    "0000_ply_graound",
-    ["start.png", "end.png"],
-  )) as Record<string, any>;
+  const untouched = (await loadWorkflowForRunpod(firstLast, request(firstLast, ["start.png", "end.png"]), "0000_ply_graound", [
+    "start.png",
+    "end.png",
+  ])) as Record<string, any>;
 
   assert.equal(untouched["1"].inputs["model.ratio"], "16:9");
 
@@ -510,6 +508,107 @@ test("Seedance workflows keep their saved ratio when none is selected or the val
   )) as Record<string, any>;
 
   assert.equal(rejected["1"].inputs["model.ratio"], "16:9");
+});
+
+test("Seedance 2.5 rewrites the model combo and the inputs that version's node declares", async () => {
+  const reference = requiredModel("brick_api_seedance2_0_r2v");
+  const referenceWorkflow = (await loadWorkflowForRunpod(
+    reference,
+    {
+      ...request(reference, ["main.png"], "seedance.mp4"),
+      durationSeconds: 24,
+      workflowOptions: { seedance: { version: "2.5", ratio: "21:9", videoEditing: true } },
+    },
+    "0000_ply_graound",
+    ["main.png"],
+  )) as Record<string, any>;
+
+  const referenceInputs = referenceWorkflow["359"].inputs;
+  assert.equal(referenceInputs.model, "Seedance 2.5");
+  assert.equal(referenceInputs["model.ratio"], "21:9");
+  // Both are required inputs of the 2.5 option, so a prompt without them is
+  // rejected by ComfyUI before the job runs.
+  assert.equal(referenceInputs["model.output_format"], "mp4");
+  assert.equal(referenceInputs["model.video_editing"], true);
+  // 24s is inside 2.5's 4-30 range and outside 2.0's 4-15, so this also proves the
+  // duration is clamped against the picked version rather than the workflow file.
+  assert.equal(referenceInputs["model.duration"], 24);
+});
+
+test("Seedance 2.0 carries none of the inputs only 2.5 has", async () => {
+  const reference = requiredModel("brick_api_seedance2_0_r2v");
+  const referenceWorkflow = (await loadWorkflowForRunpod(
+    reference,
+    {
+      ...request(reference, ["main.png"], "seedance.mp4"),
+      workflowOptions: { seedance: { version: "2.0", ratio: "4:3" } },
+    },
+    "0000_ply_graound",
+    ["main.png"],
+  )) as Record<string, any>;
+
+  const referenceInputs = referenceWorkflow["359"].inputs;
+  assert.equal(referenceInputs.model, "Seedance 2.0");
+  assert.equal(referenceInputs["model.ratio"], "4:3");
+  assert.ok(!("model.output_format" in referenceInputs));
+  assert.ok(!("model.video_editing" in referenceInputs));
+});
+
+test("Seedance 2.5 first-last-frame drops the ratio its node does not have", async () => {
+  const firstLast = requiredModel("brick_api_seedance_2_0flf2v");
+  const workflow = (await loadWorkflowForRunpod(
+    firstLast,
+    {
+      ...request(firstLast, ["start.png", "end.png"]),
+      // Asking for a ratio anyway: the picker hides the control and the submission
+      // route refuses the field, so this is the belt to those braces.
+      workflowOptions: { seedance: { version: "2.5", ratio: "9:16" } },
+    },
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+
+  const inputs = workflow["1"].inputs;
+  assert.equal(inputs.model, "Seedance 2.5");
+  assert.ok(!("model.ratio" in inputs), "2.5 first-last-frame has no ratio input to send.");
+  assert.equal(inputs["model.output_format"], "mp4");
+  // No video_editing on the first-last-frame node in either version.
+  assert.ok(!("model.video_editing" in inputs));
+});
+
+test("Seedance 480p reaches the node as 480p on both versions", async () => {
+  const sd = { width: 854, height: 480, label: "480p" };
+  const reference = requiredModel("brick_api_seedance2_0_i2v");
+
+  for (const version of ["2.0", "2.5"]) {
+    const workflow = (await loadWorkflowForRunpod(
+      reference,
+      {
+        ...request(reference, ["main.png"]),
+        resolution: sd,
+        workflowOptions: { seedance: { version, ratio: "16:9" } },
+      },
+      "0000_ply_graound",
+      ["main.png"],
+    )) as Record<string, any>;
+
+    // resolutionWidgetLabel used to fall through to 1080p for any label it did not
+    // list, which would have rendered a deliberate 480p pick at four times the cost.
+    assert.equal(workflow["359"].inputs["model.resolution"], "480p", `version ${version}`);
+  }
+});
+
+test("a submission with no Seedance options leaves the saved graph alone", async () => {
+  const firstLast = requiredModel("brick_api_seedance_2_0flf2v");
+  const workflow = (await loadWorkflowForRunpod(firstLast, request(firstLast, ["start.png", "end.png"]), "0000_ply_graound", [
+    "start.png",
+    "end.png",
+  ])) as Record<string, any>;
+
+  const inputs = workflow["1"].inputs;
+  assert.equal(inputs.model, "Seedance 2.0");
+  assert.equal(inputs["model.ratio"], "16:9");
+  assert.ok(!("model.output_format" in inputs));
 });
 
 test("Kling video workflows randomize fixed seeds and preserve long prompts for RunPod submission", async () => {
@@ -610,12 +709,9 @@ test("no shipped workflow holds a widget value of the wrong type", async () => {
 
 test("Veo3 image-to-video sends no negative prompt unless one is asked for", async () => {
   const veo = requiredModel("brick_api_veo3_i2v");
-  const veoWorkflow = (await loadWorkflowForRunpod(
-    veo,
-    request(veo, ["start.png"]),
-    "0000_ply_graound",
-    ["start.png"],
-  )) as Record<string, any>;
+  const veoWorkflow = (await loadWorkflowForRunpod(veo, request(veo, ["start.png"]), "0000_ply_graound", [
+    "start.png",
+  ])) as Record<string, any>;
 
   // Empty, and specifically not the request's own prompt: isEditablePromptInput
   // excludes anything containing "negative", which is what makes an empty string

@@ -56,6 +56,38 @@ const model: WorkflowModel = {
   estimatedCredits: 42,
 };
 
+// Shaped like the models inferWorkflowModel produces for the shipped Seedance
+// graphs: the limits below are the workflow file's inferred 2.0 ones, which is
+// exactly what the version has to override.
+const seedanceModel: WorkflowModel = {
+  id: "brick_api_seedance2_0_i2v",
+  name: "Api Seedance2 0 I2v",
+  category: "image_to_video",
+  workflowPath: "i2v/Brick_api_seedance2_0_i2v .json",
+  requiredInputs: ["prompt", "single_image"],
+  supportedResolutions: ["720p", "1080p", "4K"],
+  defaultResolution: "1080p",
+  supportedDurations: Array.from({ length: 12 }, (_, index) => index + 4),
+  defaultDurationSeconds: 5,
+  requiresPrompt: true,
+  requiresImage: true,
+  requiresStartEndFrames: false,
+  imageSlotCount: 1,
+  outputType: "video",
+  estimatedCredits: 560,
+};
+
+const seedanceFirstLastModel: WorkflowModel = {
+  ...seedanceModel,
+  id: "brick_api_seedance_2_0flf2v",
+  name: "Api Seedance 2.0flf2v",
+  category: "first_last_frame_to_video",
+  workflowPath: "flf2v/Brick_api_Seedance 2.0flf2v.json",
+  requiredInputs: ["prompt", "start_frame", "end_frame"],
+  requiresStartEndFrames: true,
+  imageSlotCount: 2,
+};
+
 // Shaped like the model inferWorkflowModel produces for the Nano Banana graph:
 // image_editing, so requiredInputs carries single_image even though the provider
 // generates from a prompt alone.
@@ -99,7 +131,8 @@ let replayCreation = false;
 
 const handler = createJobSubmissionHandler({
   getProject: (id) => (id === project.id ? project : undefined),
-  getWorkflowModel: (id) => (id === model.id ? model : stillImageWorkflowModel(id)),
+  getWorkflowModel: (id) =>
+    [model, seedanceModel, seedanceFirstLastModel].find((candidate) => candidate.id === id) ?? stillImageWorkflowModel(id),
   canViewProject: (candidate, target) =>
     candidate.role === "admin" ||
     target.ownerId === candidate.id ||
@@ -292,6 +325,84 @@ test("accepts every ratio the Seedance nodes offer", async () => {
   }
 });
 
+test("Seedance limits follow the picked version, not the workflow file", async () => {
+  // 24s is 2.5-only. The workflow file was inferred as 4-15s, so accepting this is
+  // what proves the version, not the file, is what the route validates against.
+  const long = await call({
+    ...seedanceBody(),
+    durationSeconds: 24,
+    workflowOptions: { seedance: { version: "2.5", ratio: "16:9" } },
+  });
+  assert.equal(long.status, 201, JSON.stringify(long.body));
+  assert.equal(createRequests.at(-1)?.durationSeconds, 24);
+
+  const longOn2 = await call({
+    ...seedanceBody(),
+    durationSeconds: 24,
+    workflowOptions: { seedance: { version: "2.0", ratio: "16:9" } },
+  });
+  assert.equal(longOn2.status, 400);
+  assert.match(String(longOn2.body.error), /duration.*supported/i);
+});
+
+test("Seedance accepts 480p on both versions, with or without a label", async () => {
+  for (const version of ["2.0", "2.5"]) {
+    const labelled = await call({
+      ...seedanceBody(),
+      resolution: { width: 854, height: 480, label: "480p" },
+      workflowOptions: { seedance: { version } },
+    });
+    assert.equal(labelled.status, 201, `${version}: ${JSON.stringify(labelled.body)}`);
+    assert.equal(createRequests.at(-1)?.resolution?.label, "480p");
+
+    // resolutionAlias recovers the label from the pixels, for a client that sends none.
+    const unlabelled = await call({
+      ...seedanceBody(),
+      resolution: { width: 854, height: 480 },
+      workflowOptions: { seedance: { version } },
+    });
+    assert.equal(unlabelled.status, 201, `${version} unlabelled: ${JSON.stringify(unlabelled.body)}`);
+  }
+});
+
+test("Seedance 2.5 refuses 4K, which its node cannot produce", async () => {
+  const fourK = { width: 3840, height: 2160, label: "4K" };
+  const on25 = await call({
+    ...seedanceBody(),
+    resolution: fourK,
+    workflowOptions: { seedance: { version: "2.5" } },
+  });
+  assert.equal(on25.status, 400);
+  assert.match(String(on25.body.error), /resolution.*not supported/i);
+
+  // Still an admin-only capability on 2.0, and the editor is not one -- so the 403
+  // rather than the 400 is the proof it is 2.0's list the resolution passed.
+  const on20 = await call({ ...seedanceBody(), resolution: fourK, workflowOptions: { seedance: { version: "2.0" } } });
+  assert.equal(on20.status, 403);
+  assert.match(String(on20.body.error), /administrators only/i);
+});
+
+test("rejects an unknown Seedance version and a ratio the picked node has no input for", async () => {
+  const unknown = await call({ ...seedanceBody(), workflowOptions: { seedance: { version: "3.0" } } });
+  assert.equal(unknown.status, 400);
+  assert.match(String(unknown.body.error), /seedance version must be one of/i);
+
+  const ratioOnFirstLast = await call({
+    ...seedanceBody(),
+    modelId: seedanceFirstLastModel.id,
+    startFrame: "https://media.example/start.png",
+    endFrame: "https://media.example/end.png",
+    inputImages: ["https://media.example/start.png", "https://media.example/end.png"],
+    workflowOptions: { seedance: { version: "2.5", ratio: "9:16" } },
+  });
+  assert.equal(ratioOnFirstLast.status, 400);
+  assert.match(String(ratioOnFirstLast.body.error), /no aspect ratio input/i);
+
+  const editOn20 = await call({ ...seedanceBody(), workflowOptions: { seedance: { version: "2.0", videoEditing: true } } });
+  assert.equal(editOn20.status, 400);
+  assert.match(String(editOn20.body.error), /no video editing mode/i);
+});
+
 test("propagates media ownership failures without creating observable state", async () => {
   const response = await call({ ...validBody(), inputImages: ["blocked-media"] });
   assert.equal(response.status, 400);
@@ -325,6 +436,10 @@ function validBody() {
     durationSeconds: 5,
     inputImages: ["https://media.example/reference.png"],
   };
+}
+
+function seedanceBody() {
+  return { ...validBody(), modelId: seedanceModel.id };
 }
 
 function stillBody(stillImage: unknown, overrides: Record<string, unknown> = {}) {
@@ -591,7 +706,10 @@ test("Kling O3 refuses a linked video but accepts saved media", () => {
   // Models with no square-pixel requirement keep taking links.
   const linked = "https://cdn.example/clip.mp4";
   const permissive: WorkflowModel = { ...klingModel, id: "safe_v2v", name: "Safe V2V", workflowPath: "safe_v2v.json" };
-  assert.equal(validatedRequest({ ...base, modelId: permissive.id, inputVideo: linked }, permissive, users.owner.id).inputVideo, linked);
+  assert.equal(
+    validatedRequest({ ...base, modelId: permissive.id, inputVideo: linked }, permissive, users.owner.id).inputVideo,
+    linked,
+  );
 });
 
 async function call(body: unknown) {

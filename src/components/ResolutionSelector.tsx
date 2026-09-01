@@ -1,4 +1,10 @@
 import { ChevronDown, Monitor, TriangleAlert } from "lucide-react";
+import {
+  DEFAULT_SEEDANCE_VERSION,
+  seedanceSupportsRatio,
+  seedanceVersion,
+  type SeedanceVersionId,
+} from "../features/generation/seedanceVersions";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { ModelType } from "../types";
 
@@ -11,6 +17,7 @@ type ResolutionSelectorProps = {
   onAspectRatioChange?: (value: string) => void;
   seedanceRatio?: string;
   onSeedanceRatioChange?: (value: string) => void;
+  seedanceVersionId?: SeedanceVersionId;
   imageOutputCount?: 1 | 2;
   onImageOutputCountChange?: (value: 1 | 2) => void;
 };
@@ -19,6 +26,7 @@ const resolutionOptions = [
   { value: "auto", label: "Auto", width: 1024, height: 1024 },
   { value: "1K", label: "1K", width: 1024, height: 1024 },
   { value: "2K", label: "2K", width: 2048, height: 2048 },
+  { value: "480p", label: "480p", width: 854, height: 480 },
   { value: "720p", label: "720p", width: 1280, height: 720 },
   { value: "1080p", label: "1080p", width: 1920, height: 1080 },
   { value: "4K", label: "4K", width: 3840, height: 2160 },
@@ -34,8 +42,6 @@ const resolutionOptions = [
 
 const defaultVideoResolutionOptions = ["720p", "1080p", "4K"];
 const nanoBananaAspectRatioOptions = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
-// The ratio combo the ByteDance Seedance 2.0 Reference and First-Last-Frame nodes offer.
-const seedanceRatioOptions = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"];
 
 function parseResolution(value: string) {
   const option = resolutionOptions.find((item) => item.value.toLowerCase() === value.toLowerCase());
@@ -84,6 +90,7 @@ export function ResolutionSelector({
   onAspectRatioChange,
   seedanceRatio = "16:9",
   onSeedanceRatioChange,
+  seedanceVersionId = DEFAULT_SEEDANCE_VERSION,
   imageOutputCount,
   onImageOutputCountChange,
 }: ResolutionSelectorProps) {
@@ -106,6 +113,7 @@ export function ResolutionSelector({
     onAspectRatioChange,
     seedanceRatio,
     onSeedanceRatioChange,
+    seedanceVersionId,
   });
   const disableSeedance4K = isSeedanceWorkflowModel(selectedModel) && !allowSeedance4K;
 
@@ -117,7 +125,12 @@ export function ResolutionSelector({
       messages.push("This model requires a 16:9 landscape resolution.");
     }
 
-    if ((selectedModel.category === "video" || selectedModel.category === "upscale") && shortSide < 720) {
+    // Only for a value this model does not actually offer -- one left over from
+    // another model, a reused job or a stored preference. A resolution that is in the
+    // list above was chosen deliberately from what the model supports, so flagging it
+    // would be second-guessing the picker's own options: Seedance offers 480p.
+    const offered = supportedResolutions.some((resolution) => resolution.toLowerCase() === selectedValue.toLowerCase());
+    if ((selectedModel.category === "video" || selectedModel.category === "upscale") && shortSide < 720 && !offered) {
       messages.push("This resolution is low for the selected model.");
     }
 
@@ -239,7 +252,10 @@ function supportsImageOutputCount(model: ModelType) {
 
 function ratioControlForModel(
   model: ModelType,
-  props: Pick<ResolutionSelectorProps, "aspectRatio" | "onAspectRatioChange" | "seedanceRatio" | "onSeedanceRatioChange">,
+  props: Pick<
+    ResolutionSelectorProps,
+    "aspectRatio" | "onAspectRatioChange" | "seedanceRatio" | "onSeedanceRatioChange" | "seedanceVersionId"
+  >,
 ) {
   if (isNanoBananaModel(model) && props.onAspectRatioChange) {
     return {
@@ -251,11 +267,15 @@ function ratioControlForModel(
     };
   }
   if (isSeedanceWorkflowModel(model) && props.onSeedanceRatioChange) {
+    // 2.5's first-last-frame node has no ratio input at all, so there is nothing to
+    // control: the picker hides rather than offering a setting that would be dropped.
+    const version = seedanceVersion(props.seedanceVersionId);
+    if (!seedanceSupportsRatio(model, version)) return undefined;
     return {
       id: "seedance-ratio",
       name: "seedance_ratio",
-      options: seedanceRatioOptions,
-      value: seedanceRatioOptions.includes(props.seedanceRatio ?? "") ? (props.seedanceRatio as string) : "16:9",
+      options: version.ratios,
+      value: version.ratios.includes(props.seedanceRatio ?? "") ? (props.seedanceRatio as string) : version.defaultRatio,
       onChange: props.onSeedanceRatioChange,
     };
   }

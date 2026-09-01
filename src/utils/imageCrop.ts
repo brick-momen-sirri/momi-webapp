@@ -25,6 +25,7 @@ export function outputSizeForResolution(resolution: string, aspectRatio = 16 / 9
   if (normalized === "auto") return { width: 1024, height: 1024 };
   if (normalized === "1k") return { width: 1024, height: 1024 };
   if (normalized === "2k") return { width: 2048, height: 2048 };
+  if (normalized === "480p") return { width: 854, height: 480 };
   if (normalized === "720p") return { width: 1280, height: 720 };
   if (normalized === "1080p") return { width: 1920, height: 1080 };
   if (normalized === "4k") return { width: 3840, height: 2160 };

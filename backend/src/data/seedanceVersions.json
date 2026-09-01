@@ -1,0 +1,55 @@
+{
+  "comment": [
+    "What each Seedance model version accepts, as the ByteDance2 nodes define it.",
+    "Read by backend/src/seedanceVersions.ts (which validates submissions and builds the",
+    "graph) and by src/features/generation/seedanceVersions.ts (which drives the picker),",
+    "the same way stillImagePresets.json is shared. One table so a widened range cannot",
+    "be offered by the UI and then refused by the server.",
+    "",
+    "Transcribed from GET /object_info on ComfyUI 0.33.2, where the `model` input of",
+    "ByteDance2ReferenceNode / ByteDance2FirstLastFrameNode is a dynamic combo whose",
+    "selected option decides which nested inputs exist. `resolutions` lists every option",
+    "each version's combo offers, so 4K is 2.0-only and 480p is on both. 480p is the one",
+    "value the Resolution panel still flags as low for a video model -- that note is",
+    "advice, not a refusal.",
+    "",
+    "The Fast and Mini tiers the combo also offers are deliberately absent: no Momi",
+    "workflow selects them and the credit tracker has no fitted rate for either, so a",
+    "cost shown for one would be a guess."
+  ],
+  "defaultVersion": "2.0",
+  "versions": [
+    {
+      "id": "2.0",
+      "label": "Seedance 2.0",
+      "hint": "Highest quality. 4K, up to 15s.",
+      "comfyModelValue": "Seedance 2.0",
+      "resolutions": ["480p", "720p", "1080p", "4K"],
+      "defaultResolution": "1080p",
+      "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+      "defaultRatio": "16:9",
+      "minDurationSeconds": 4,
+      "maxDurationSeconds": 15,
+      "defaultDurationSeconds": 5,
+      "supportsRatioOnFirstLastFrame": true,
+      "outputFormat": null,
+      "supportsVideoEditing": false
+    },
+    {
+      "id": "2.5",
+      "label": "Seedance 2.5",
+      "hint": "Newest model. Up to 30s, no 4K.",
+      "comfyModelValue": "Seedance 2.5",
+      "resolutions": ["480p", "720p", "1080p"],
+      "defaultResolution": "1080p",
+      "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+      "defaultRatio": "16:9",
+      "minDurationSeconds": 4,
+      "maxDurationSeconds": 30,
+      "defaultDurationSeconds": 5,
+      "supportsRatioOnFirstLastFrame": false,
+      "outputFormat": "mp4",
+      "supportsVideoEditing": true
+    }
+  ]
+}
