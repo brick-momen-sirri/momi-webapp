@@ -249,6 +249,10 @@ export const jsonBodyLimit = process.env.JSON_BODY_LIMIT ?? "15mb";
 // on demand and cached on disk keyed by source path + mtime + size, so the
 // existing library is covered without a backfill pass and a re-rendered result
 // invalidates itself.
+// Deliberately local, not on the ai-data$ share that now holds output and
+// uploads. These are hot, small and regenerable: putting them on SMB would add
+// network latency to every preview, and losing them costs only CPU. See
+// backend/docs/share-storage-runbook.md.
 export const thumbnailCacheDir = process.env.THUMBNAIL_CACHE_DIR?.trim() || path.join(backendRoot, "data", "thumbnail-cache");
 // Whitelisted widths. Requests for anything else snap to the nearest allowed
 // width, so an arbitrary ?w= cannot fan the cache out to unbounded variants.
@@ -354,6 +358,10 @@ export const watchdogMemoryHighMiB = positiveNumber(process.env.WATCHDOG_MEMORY_
 // sends a single { text } (also works for Teams/Mattermost/Google Chat incoming
 // webhooks); "json" sends the raw structured event.
 export const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL?.trim() || "";
+// Storage canary: render output and uploads live on an SMB share, so a write
+// probe is the only thing that catches a dropped session or a rotated
+// svc_momi_storage credential before a user does. 0 disables it.
+export const storageCanaryIntervalMs = Number(process.env.STORAGE_CANARY_INTERVAL_MS ?? 300_000);
 export const alertWebhookFormat: "json" | "slack" =
   process.env.ALERT_WEBHOOK_FORMAT?.trim().toLowerCase() === "slack" ? "slack" : "json";
 

@@ -13,6 +13,7 @@ import cors from "cors";
 import express from "express";
 
 import { backendProcessRole, isDispatcher } from "./processRole.js";
+import { startStorageCanary } from "./storageCanaryService.js";
 
 import { createHealthWatchdog } from "./healthWatchdog.js";
 import { backupMediaViaAzcopy, startScheduledBackups, uploadViaAzcopy } from "./sqliteBackupService.js";
@@ -35,6 +36,8 @@ import {
   watchdogMemoryHighMiB,
   alertWebhookUrl,
   alertWebhookFormat,
+  storageCanaryIntervalMs,
+  brickProjectsRoot,
   backupEnabled,
   backupIntervalMs,
   backupRetentionCount,
@@ -186,7 +189,6 @@ async function boot() {
   // empty project/model cache during lease takeover.
   await loadJobs();
   await initializeMediaIndex();
-  await assertMetadataHealth();
   // SQLite DR backups: dispatcher/monolith only. Running this on every API
   // worker too would multiply backup cycles by instance count for no benefit
   // (they'd all snapshot the same shared databases) and race on the same
@@ -248,6 +250,29 @@ async function boot() {
   });
 
   installGracefulShutdown(server);
+
+  // Deliberately after listen(). This reads every project's manifest.jsonl, and
+  // since render output moved to the SMB share that is 100 files / ~20 MB of
+  // network reads -- it was pushing API boot to ~90 s while the port stayed
+  // closed. It asserts that metadata is well-formed; it is not a precondition
+  // for serving, so a corrupt manifest should surface as a loud error rather
+  // than an invisible startup stall. Failures are logged, not thrown, because
+  // rejecting here would take down a process that is already serving traffic.
+  void assertMetadataHealth().catch((error) => {
+    console.error(`Metadata health check failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+
+  // Dispatcher-only: one probe per interval is enough to know the share is
+  // alive, and running it on every API worker would multiply identical writes
+  // and duplicate every alert by instance count.
+  if (isDispatcher() && storageCanaryIntervalMs > 0) {
+    startStorageCanary({
+      root: brickProjectsRoot,
+      intervalMs: storageCanaryIntervalMs,
+      webhookUrl: alertWebhookUrl || undefined,
+      webhookFormat: alertWebhookFormat,
+    });
+  }
 
   if (isDispatcher() && resultRecoveryIntervalMs > 0) {
     // Re-download completed results that are still remote-only (failed or

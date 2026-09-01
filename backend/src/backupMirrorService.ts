@@ -29,6 +29,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 
 const MIRROR_OWNER_FILE = "mirror-owner.json";
 
@@ -185,8 +186,7 @@ export async function pruneMirror(destinationDir: string, name: string, keep: nu
   for (const file of remove) {
     // A failed delete is not a failed mirror. The copy is what matters; an
     // undeletable old snapshot costs space and is reported, not raised.
-    const ok = await fs
-      .rm(path.join(destinationDir, file), { force: true })
+    const ok = await rmWithRetry(path.join(destinationDir, file), { force: true })
       .then(() => true)
       .catch(() => false);
     if (ok) removed.push(file);
@@ -272,7 +272,7 @@ export async function mirrorSnapshots(opts: {
     const partPath = `${destPath}.part`;
     try {
       const sourceStat = await fs.stat(sourcePath);
-      await fs.rm(partPath, { force: true }).catch(() => undefined);
+      await rmWithRetry(partPath, { force: true }).catch(() => undefined);
       await fs.copyFile(sourcePath, partPath);
       const copiedStat = await fs.stat(partPath);
       if (copiedStat.size !== sourceStat.size) {
@@ -282,14 +282,14 @@ export async function mirrorSnapshots(opts: {
         // the wire would re-read every byte for a much rarer failure.
         throw new Error(`copied ${copiedStat.size} bytes but the source is ${sourceStat.size}`);
       }
-      await fs.rename(partPath, destPath);
+      await renameWithRetry(partPath, destPath);
       files.push({ file, ok: true, bytes: copiedStat.size });
       if (!opts.names?.length) {
         const inferred = databaseNameFromSnapshot(file);
         if (inferred) names.add(inferred);
       }
     } catch (error) {
-      await fs.rm(partPath, { force: true }).catch(() => undefined);
+      await rmWithRetry(partPath, { force: true }).catch(() => undefined);
       files.push({ file, ok: false, error: error instanceof Error ? error.message : String(error) });
     }
   }

@@ -17,7 +17,8 @@ export type AlertRule =
   | "backup_upload_failed"
   | "backup_staging_conflict"
   | "backup_shrink_suspect"
-  | "backup_mirror_failed";
+  | "backup_mirror_failed"
+  | "storage_unreachable";
 export type AlertPhase = "firing" | "resolved";
 
 export type AlertEvent = {

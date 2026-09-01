@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 import { spawn, spawnSync } from "node:child_process";
 import { emitAlert, type AlertRule, type WebhookFormat } from "./healthWatchdog.js";
 import { mirrorSnapshots, type BackupMirrorResult } from "./backupMirrorService.js";
@@ -291,7 +292,7 @@ export async function backupOneDatabase(target: BackupTarget, stagingDir: string
     }
     // Backstop: remove any sidecar that might still exist (e.g. the pragma
     // itself failed after creating one) before treating tmpPath as final.
-    await Promise.all([fs.rm(`${tmpPath}-wal`, { force: true }), fs.rm(`${tmpPath}-shm`, { force: true })]);
+    await Promise.all([rmWithRetry(`${tmpPath}-wal`, { force: true }), rmWithRetry(`${tmpPath}-shm`, { force: true })]);
 
     if (integrity !== "ok") {
       await fs.rm(tmpPath, { force: true });
@@ -304,8 +305,8 @@ export async function backupOneDatabase(target: BackupTarget, stagingDir: string
       };
     }
 
-    await fs.rm(destPath, { force: true });
-    await fs.rename(tmpPath, destPath);
+    await rmWithRetry(destPath, { force: true });
+    await renameWithRetry(tmpPath, destPath);
     const stat = await fs.stat(destPath);
     return {
       name: target.name,
@@ -332,7 +333,7 @@ export async function rotateBackups(stagingDir: string, name: string, keep: numb
   const mine = entries.filter((file) => file.startsWith(`${name}-`) && file.endsWith(".sqlite")).sort(); // label is an ISO-ish timestamp, so lexical order == chronological
   const remove = mine.slice(0, Math.max(0, mine.length - keep));
   for (const file of remove) {
-    await fs.rm(path.join(stagingDir, file), { force: true }).catch(() => undefined);
+    await rmWithRetry(path.join(stagingDir, file), { force: true }).catch(() => undefined);
   }
   return remove;
 }
@@ -482,14 +483,14 @@ async function writeJsonAtomically(filePath: string, value: unknown): Promise<vo
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   try {
-    await fs.rename(tmpPath, filePath);
+    await renameWithRetry(tmpPath, filePath);
   } catch (error) {
     // Windows rename does not consistently replace an existing destination.
     // The completed temp file is already durable, so replace only after it is
     // ready and make one final rename attempt.
     if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-    await fs.rm(filePath, { force: true });
-    await fs.rename(tmpPath, filePath);
+    await rmWithRetry(filePath, { force: true });
+    await renameWithRetry(tmpPath, filePath);
   } finally {
     await fs.rm(tmpPath, { force: true }).catch(() => undefined);
   }

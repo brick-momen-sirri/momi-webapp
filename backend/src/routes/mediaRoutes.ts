@@ -7,6 +7,7 @@ import path from "node:path";
 import { getRequestUser } from "../authMiddleware.js";
 import { PORT, mediaUploadMaxBytes, uploadedMediaRoot } from "../config.js";
 import {
+  cleanMediaExtension,
   contentTypeFromFilePath,
   contentTypeFromUrl,
   downloadFileName,
@@ -27,8 +28,9 @@ import { getQueryValue } from "../httpQuery.js";
 import { canAccessJob, canCreateJobInProject, canViewProject, getVisibleJobForResult, isDemoAccount } from "../jobPermissions.js";
 import { getOrCreatePlayableVideo } from "../playableVideoService.js";
 import { getProject, getProjects } from "../projectService.js";
+import { rmWithRetry } from "../fsRetry.js";
 import { safeSegment } from "../storageService.js";
-import { writeStreamAtomically } from "../streamingMediaService.js";
+import { writeContentAddressedStream, writeStreamAtomically } from "../streamingMediaService.js";
 import { getOrCreateThumbnail, streamConvertedImage, type DownloadImageFormat } from "../thumbnailService.js";
 
 export const mediaRouter = express.Router();
@@ -69,19 +71,32 @@ mediaRouter.post("/api/media/upload", async (req, res) => {
     }
 
     const fileName = uploadedMediaFileName(getQueryValue(req.query.name), kind, contentType);
-    const uploadId = `${Date.now()}-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-    const filePath = path.join(uploadedMediaRoot, safeSegment(project.id), safeSegment(user.id), `${uploadId}-${fileName}`);
-    const { bytesWritten } = await writeStreamAtomically(req, filePath, mediaUploadMaxBytes, requestAbortSignal(req));
+    // The directory still starts with the project id: authorizeMediaRead below
+    // derives the owning project from that first segment. Only the file name is
+    // content-addressed, so a re-upload of the same bytes reuses the stored file
+    // instead of adding another full copy.
+    const directory = path.join(uploadedMediaRoot, safeSegment(project.id), safeSegment(user.id));
+    const extension = cleanMediaExtension(path.extname(fileName)) || (kind === "image" ? ".png" : ".mp4");
+    const { filePath, bytesWritten, deduplicated } = await writeContentAddressedStream(
+      req,
+      directory,
+      extension,
+      mediaUploadMaxBytes,
+      requestAbortSignal(req),
+    );
     if (bytesWritten <= 0) {
-      await fs.rm(filePath, { force: true }).catch(() => undefined);
+      await rmWithRetry(filePath, { force: true }).catch(() => undefined);
       return res.status(400).json({ error: "Upload body was empty." });
     }
 
+    // `name` keeps the caller's original filename even though the path no longer
+    // carries it, so the UI still shows what the user actually uploaded.
     res.status(201).json({
       url: mediaUrl(filePath),
       name: fileName,
       kind,
       bytes: bytesWritten,
+      deduplicated,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not upload media.";
