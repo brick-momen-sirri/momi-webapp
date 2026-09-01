@@ -25,6 +25,7 @@ import {
   supportsImageOutputCount,
 } from "./generationUtils";
 import {
+  defaultSeedanceVideoEditing,
   normalizeSeedanceVersion,
   seedanceEffectiveModel,
   seedanceSupportsVideoEditing,
@@ -122,10 +123,12 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setSelectedResolution((current) => normalizeResolutionForModel(current, selectedModel, allowSeedance4K));
   });
 
-  // Switching to a version, or a task, with no edit mode must not leave the flag set:
-  // the server rejects it there, and it would silently come back on the next switch.
+  // Re-derived on every model or version change, like the resolution and duration
+  // above: on wherever the switch is offered, off everywhere else. Off on a task
+  // with no edit mode would be rejected by the server; off on 2.5 video editing is
+  // the setting that failed at the provider -- see defaultSeedanceVideoEditing.
   useResetWhenChanged(`${selectedModel.id}:${selectedSeedanceVersion}`, () => {
-    if (!selectedModelSupportsVideoEditing) setSeedanceVideoEditing(false);
+    setSeedanceVideoEditing(defaultSeedanceVideoEditing(selectedModel, seedanceVersion(selectedSeedanceVersion)));
   });
 
   useResetWhenChanged(selectedModelBase.id, () => {

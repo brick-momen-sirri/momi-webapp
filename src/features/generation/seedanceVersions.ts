@@ -85,6 +85,27 @@ export function seedanceSupportsVideoEditing(
 }
 
 /**
+ * Whether the edit switch should start on.
+ *
+ * On, wherever it is offered. That is only 2.5 on a task with a video input --
+ * Momi's Video Editing workflow -- where editing the clip is the whole point.
+ *
+ * It defaulted to off at first, to keep 2.5 behaving like 2.0 in that workflow.
+ * A real job on 2026-09-01 showed that to be the wrong trade: with it off the node
+ * keeps the picked ratio and duration and asks the provider to generate a new clip
+ * using the source as an omni-reference, and a 6.7s 1080p reference failed with
+ * "Timeout occurred while processing video". The same job succeeded with it on,
+ * where the node sends ratio "adaptive" and duration -1 and the provider edits the
+ * clip directly. Parity with 2.0 is not worth a default that does not run.
+ */
+export function defaultSeedanceVideoEditing(
+  model: SeedanceTaskFields & Pick<ModelType, "requiresVideo">,
+  version: SeedanceVersion,
+) {
+  return seedanceSupportsVideoEditing(model, version);
+}
+
+/**
  * The model as the picked version constrains it.
  *
  * Returned in ModelType shape on purpose. A Seedance model's resolutions and

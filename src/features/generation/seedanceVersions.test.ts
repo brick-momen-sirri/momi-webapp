@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ModelType } from "../../types";
 import {
   DEFAULT_SEEDANCE_VERSION,
+  defaultSeedanceVideoEditing,
   normalizeSeedanceVersion,
   seedanceDurations,
   seedanceEffectiveModel,
@@ -102,6 +103,17 @@ describe("per-version node inputs", () => {
     expect(seedanceSupportsRatio(model(), seedanceVersion("2.5"))).toBe(true);
     expect(seedanceSupportsRatio(firstLast, seedanceVersion("2.0"))).toBe(true);
     expect(seedanceSupportsRatio(firstLast, seedanceVersion("2.5"))).toBe(false);
+  });
+
+  // Not a style preference: with the switch off, 2.5 keeps the picked ratio and
+  // duration and asks the provider to generate from the clip as an omni-reference,
+  // which failed with "Timeout occurred while processing video" on a real 6.7s 1080p
+  // job. The same job succeeded with it on.
+  it("starts the edit switch on wherever it is offered", () => {
+    expect(defaultSeedanceVideoEditing(videoEdit, seedanceVersion("2.5"))).toBe(true);
+    expect(defaultSeedanceVideoEditing(videoEdit, seedanceVersion("2.0"))).toBe(false);
+    expect(defaultSeedanceVideoEditing(model(), seedanceVersion("2.5"))).toBe(false);
+    expect(defaultSeedanceVideoEditing(firstLast, seedanceVersion("2.5"))).toBe(false);
   });
 
   it("offers the edit switch only on 2.5, and only where a clip is an input", () => {
