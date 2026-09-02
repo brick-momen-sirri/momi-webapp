@@ -724,3 +724,78 @@ describe("stillImageSubmissionCount", () => {
     expect(stillImageSubmissionCount("image-editing", { ...imageEditing, activeEditLayerId: "edit_1" })).toBe(1);
   });
 });
+
+describe("edits that run at the same time", () => {
+  /** A region, as a rectangle selection at a known place on the source. */
+  function regionAt(x: number, y: number, size = 120) {
+    return {
+      ...state["image-editing"],
+      images: [image("source")],
+      mask: { width: 1200, height: 800, softness: 35, selection: { x, y, width: size, height: size }, strokes: [] },
+      prompt: "remove the cable",
+      editDocumentId: "editdoc_12345678",
+    };
+  }
+
+  const submitRegion = (hook: ReturnType<typeof setup>["hook"], categoryState: ReturnType<typeof regionAt>) =>
+    hook.result.current.submit({
+      projectId: "prj_1",
+      categoryId: "image-editing",
+      categoryState,
+      targetFolderId: "",
+      saveNumber: "0001",
+    });
+
+  it("refuses a second edit that overlaps one already running, and says why", async () => {
+    const { hook, onError } = setup();
+    // Left in flight deliberately: the point is what happens while it runs.
+    const first = submitRegion(hook, regionAt(100, 100));
+
+    const overlapping = await submitRegion(hook, regionAt(140, 140));
+    expect(overlapping).toMatchObject({ ok: false, error: expect.stringMatching(/overlaps an edit still running/i) });
+    // And the artist is told, rather than pressing Generate and seeing nothing.
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/overlaps an edit still running/i));
+
+    await act(async () => {
+      await first;
+    });
+  });
+
+  it("lets an edit somewhere else go straight out", async () => {
+    const { hook, onJobCreated } = setup();
+    const first = submitRegion(hook, regionAt(100, 100));
+    // Far enough away that the two crops share no pixel, so the compositor gets
+    // the same picture whichever of them lands first.
+    const elsewhere = submitRegion(hook, regionAt(900, 600));
+
+    await act(async () => {
+      await Promise.all([first, elsewhere]);
+    });
+    expect(onJobCreated).toHaveBeenCalledTimes(2);
+  });
+
+  it("still refuses the very same edit twice, which is a double-click", async () => {
+    const { hook } = setup();
+    const first = submitRegion(hook, regionAt(100, 100));
+    const again = await submitRegion(hook, regionAt(100, 100));
+
+    expect(again).toMatchObject({ ok: false, error: expect.stringMatching(/already processing/i) });
+
+    await act(async () => {
+      await first;
+    });
+  });
+
+  it("reports each running edit, and empties as they finish", async () => {
+    const { hook } = setup();
+    const first = submitRegion(hook, regionAt(100, 100));
+    const second = submitRegion(hook, regionAt(900, 600));
+
+    await act(async () => {
+      await Promise.all([first, second]);
+    });
+    // Both released their claim, so the editor is not left looking busy.
+    expect(hook.result.current.inFlight).toEqual([]);
+    expect(hook.result.current.submitting).toBe(false);
+  });
+});

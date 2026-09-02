@@ -2,19 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createBackendJob, fetchBackendJob, uploadBackendMedia } from "../../services/backendApi";
 import { resolveMediaUrl } from "../../services/api/mediaAccess";
-import type { Job, StillImageEditWorkflow, UploadedImage } from "../../types";
+import type { Job, StillImageEditCrop, StillImageEditWorkflow, UploadedImage } from "../../types";
 import { createClientId } from "../../utils/id";
 // Shared media helper; features/jobs uses the same one for the Animation path.
 import { uploadJobMediaUrl } from "../generation/generationUtils";
 import {
   drawingForCrop,
   editCropHeight,
+  aspectEditCrop,
   editCropWidth,
   descriptorMaskDrawing,
   editGenerationBaseLayers,
   type EditLayerCompositeDescriptor,
 } from "./imageEditLayers";
-import { hasPaintedRegion, type MaskDrawing } from "./maskDrawing";
+import { hasPaintedRegion, maskCropAspect, maskCropMargin, type MaskDrawing } from "./maskDrawing";
 import {
   canvasToPngFile,
   currentMaskEditCrop,
@@ -38,10 +39,30 @@ import {
 } from "./stillImageCategories";
 import { stillImageModelId } from "./stillImageModelId";
 
+/** One edit on its way to the pods, and the region it has claimed while it goes. */
+export type StillImageSubmissionInFlight = {
+  key: string;
+  phase: "preparing" | "processing";
+  /** The crop this edit will paste back, so a second edit can avoid it. */
+  crop?: StillImageEditCrop;
+  layerId?: string;
+};
+
 export type StillImagesSubmissionState = {
+  /** True while anything is in flight. Kept for callers that only need a boolean. */
   submitting: boolean;
   phase?: "preparing" | "processing";
   error?: string;
+  /**
+   * Every edit currently running.
+   *
+   * Edits to different parts of one picture are independent: the compositor
+   * pastes each layer through its own mask at its own crop, so two that do not
+   * overlap produce the same result whichever finishes first. Holding them as a
+   * list rather than a boolean is what lets the editor stay open and keep taking
+   * work while the pods chew.
+   */
+  inFlight: StillImageSubmissionInFlight[];
 };
 
 /**
@@ -60,18 +81,37 @@ export function useStillImagesSubmission(options: {
   onEditJobCompleted?: (job: Job) => void;
   onError?: (message: string) => void;
 }) {
-  const [state, setState] = useState<StillImagesSubmissionState>({ submitting: false });
+  const [state, setState] = useState<StillImagesSubmissionState>({ submitting: false, inFlight: [] });
   // Survives a failed attempt so a retry is recognised as the same submission.
-  const pendingRequestIdRef = useRef<string[] | undefined>(undefined);
-  const inFlightRef = useRef(false);
-  const lifecycleAbortRef = useRef<AbortController | undefined>(undefined);
+  // Keyed, because several edits can be in flight and each needs its own ids: one
+  // shared slot would hand the second edit the first one's request ids and have
+  // the server replay a job that was never asked for again.
+  const pendingRequestIdsRef = useRef(new Map<string, string[]>());
+  const inFlightRef = useRef(new Map<string, StillImageSubmissionInFlight>());
+  const lifecycleAbortsRef = useRef(new Map<string, AbortController>());
   const mountedRef = useRef(true);
+
+  /** Publish the in-flight list from the ref that the async paths mutate. */
+  const publishInFlight = useCallback((error?: string) => {
+    if (!mountedRef.current) return;
+    const inFlight = [...inFlightRef.current.values()];
+    setState({
+      submitting: inFlight.length > 0,
+      phase: inFlight.some((entry) => entry.phase === "processing") ? "processing" : inFlight[0]?.phase,
+      inFlight,
+      error,
+    });
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
+    // Captured on the way in. The map itself is stable for the hook's lifetime --
+    // entries come and go, the Map does not -- so holding the reference is what
+    // lets unmount abort whatever is still polling.
+    const lifecycleAborts = lifecycleAbortsRef.current;
     return () => {
       mountedRef.current = false;
-      lifecycleAbortRef.current?.abort();
+      for (const controller of lifecycleAborts.values()) controller.abort();
     };
   }, []);
 
@@ -99,11 +139,28 @@ export function useStillImagesSubmission(options: {
       if (paintsItsOwnSlots && !hasPaintedRegion(input.categoryState.mask)) {
         return fail("Paint or select the region to edit before generating.");
       }
-      // React cannot paint the disabled button until this event returns. A ref is
-      // the synchronous guard that closes the tiny gap in which a fast double-click
-      // could otherwise submit the same edit twice.
-      if (inFlightRef.current) {
+      // What this edit will paste back, worked out before anything is sent so it
+      // can be checked against the edits already running.
+      const claim = paintsItsOwnSlots ? plannedEditCrop(input.categoryState.mask) : undefined;
+      const submissionKey = editSubmissionKey(input.categoryState, claim);
+
+      // React cannot paint the disabled button until this event returns, so the
+      // ref is still the synchronous guard against a fast double-click -- but now
+      // it only refuses the *same* edit twice, not any second edit.
+      if (inFlightRef.current.has(submissionKey)) {
         return { ok: false as const, error: "This edit is already processing." };
+      }
+      // Two edits that touch the same pixels are not independent: each was given a
+      // base without the other's result, and whichever lands on top wins. Edits
+      // that do not overlap compose the same way whatever order they finish in, so
+      // only the overlap is refused.
+      const conflict = claim && [...inFlightRef.current.values()].find((entry) => entry.crop && cropsOverlap(entry.crop, claim));
+      if (conflict) {
+        // Through fail(), unlike the double-click guard above: that one is a UI
+        // race the artist did not mean, while this is a decision they need told
+        // about -- they painted a region and pressed Generate, and nothing else
+        // on screen would explain why no job appeared.
+        return fail("That region overlaps an edit still running. Wait for it, or choose a region somewhere else.");
       }
       const editMode = input.categoryState.editMode ?? "inpaint";
       // General Enhancement has no reference-conditioning branch. Keep the
@@ -114,12 +171,20 @@ export function useStillImagesSubmission(options: {
         paintsItsOwnSlots && editMode === "enhance" ? "general-enhancement" : input.categoryId;
       const backendCategory = getStillImageCategory(backendCategoryId);
 
-      inFlightRef.current = true;
-      setState({ submitting: true, phase: "preparing" });
+      // Set by the catch and published once by the finally, so there is exactly
+      // one place that decides what the panel says when this submission ends.
+      let failure: string | undefined;
+      inFlightRef.current.set(submissionKey, {
+        key: submissionKey,
+        phase: "preparing",
+        crop: claim,
+        layerId: input.categoryState.activeEditLayerId,
+      });
+      publishInFlight();
       // Regeneration replaces one layer. Extra variations would silently create
       // sibling layers, contradicting the explicit regenerate action.
       const variations = stillImageSubmissionCount(input.categoryId, input.categoryState);
-      const clientRequestIds = takeRequestIds(pendingRequestIdRef, variations);
+      const clientRequestIds = takeRequestIds(pendingRequestIdsRef.current, submissionKey, variations);
 
       try {
         // Blob and data URLs have to become saved project media first: the backend
@@ -227,16 +292,18 @@ export function useStillImagesSubmission(options: {
         }
         if (!creation) return fail("Nothing was submitted.");
 
-        pendingRequestIdRef.current = undefined;
+        pendingRequestIdsRef.current.delete(submissionKey);
         if (paintsItsOwnSlots) {
-          setState({ submitting: true, phase: "processing" });
+          const claimed = inFlightRef.current.get(submissionKey);
+          if (claimed) inFlightRef.current.set(submissionKey, { ...claimed, phase: "processing" });
+          publishInFlight();
           const controller = new AbortController();
-          lifecycleAbortRef.current = controller;
+          lifecycleAbortsRef.current.set(submissionKey, controller);
           const finishedJobs = await waitForTerminalJobs(createdJobs, {
             signal: controller.signal,
             onUpdate: options.onJobUpdated,
           });
-          lifecycleAbortRef.current = undefined;
+          lifecycleAbortsRef.current.delete(submissionKey);
 
           const completed = finishedJobs.filter((job) => job.status === "completed");
           const failed = finishedJobs.filter((job) => job.status === "failed" || job.status === "canceled");
@@ -258,7 +325,6 @@ export function useStillImagesSubmission(options: {
             );
           }
         }
-        if (mountedRef.current) setState({ submitting: false });
         // The last job, for a caller that wants one back. Every job was handed to
         // onJobCreated as it landed, which is what the feed actually reads.
         return { ok: true as const, job: creation.job, jobs: createdJobs, replayed: creation.replayed };
@@ -267,20 +333,24 @@ export function useStillImagesSubmission(options: {
           return { ok: false as const, error: "The edit status check was canceled." };
         }
         const message = error instanceof Error ? error.message : "Could not start this still image job.";
-        if (mountedRef.current) setState({ submitting: false, error: message });
+        // Recorded rather than published here: the finally below is the single
+        // writer, so releasing the claim cannot wipe the message on its way out.
+        failure = message;
         options.onError?.(message);
         return { ok: false as const, error: message };
       } finally {
-        inFlightRef.current = false;
+        inFlightRef.current.delete(submissionKey);
+        lifecycleAbortsRef.current.delete(submissionKey);
+        publishInFlight(failure);
       }
 
       function fail(message: string) {
-        if (mountedRef.current) setState({ submitting: false, error: message });
+        publishInFlight(message);
         options.onError?.(message);
         return { ok: false as const, error: message };
       }
     },
-    [options],
+    [options, publishInFlight],
   );
 
   return { ...state, submit };
@@ -376,12 +446,60 @@ function abortableDelay(milliseconds: number, signal: AbortSignal) {
  * single submission holds one -- a network error after the server accepted job two
  * must not pay for job two twice.
  */
-function takeRequestIds(store: { current: string[] | undefined }, count: number) {
-  const existing = store.current;
+function takeRequestIds(store: Map<string, string[]>, key: string, count: number) {
+  const existing = store.get(key);
   if (existing?.length === count) return existing;
   const ids = Array.from({ length: count }, () => createClientId("still_").padEnd(16, "0").slice(0, 40));
-  store.current = ids;
+  store.set(key, ids);
   return ids;
+}
+
+/**
+ * What an edit will paste back, before it is sent.
+ *
+ * Worked out from the geometry rather than by rasterising the mask, which is the
+ * difference between a claim and the real crop: `currentMaskEditCrop` samples
+ * pixels to find what the strokes actually cover after erasing, and that needs a
+ * canvas. This takes the stroke bounds instead -- cheap, synchronous, and
+ * conservative, since erased pixels can only make the true crop smaller. A claim
+ * that reserves slightly more than the edit will use is the safe direction: it
+ * can refuse a neighbour that would have just fitted, never admit one that
+ * overlaps.
+ */
+function plannedEditCrop(drawing: MaskDrawing | undefined) {
+  if (!drawing || !hasPaintedRegion(drawing)) return undefined;
+  try {
+    return aspectEditCrop(drawing, maskCropAspect(drawing), maskCropMargin(drawing) / 100);
+  } catch {
+    // Too large for the chosen aspect on this image. The submission path raises
+    // that properly a moment later; a claim nobody can compute claims nothing.
+    return undefined;
+  }
+}
+
+/**
+ * Identity for one submission, stable across a retry of the same edit.
+ *
+ * A regeneration is identified by its layer, and a new edit by the region it
+ * covers, so pressing Generate again after a network failure replays the job the
+ * server already accepted instead of paying for a second render -- while two
+ * edits on different regions stay distinct and get their own request ids.
+ */
+function editSubmissionKey(state: StillImageCategoryState, crop: StillImageEditCrop | undefined) {
+  const document = state.editDocumentId ?? "doc";
+  if (state.activeEditLayerId) return `${document}:layer:${state.activeEditLayerId}`;
+  if (!crop) return `${document}:new`;
+  return `${document}:crop:${crop.x},${crop.y},${editCropWidth(crop)},${editCropHeight(crop)}`;
+}
+
+/** Do two crops share any pixel? Touching edges do not count as overlapping. */
+function cropsOverlap(left: StillImageEditCrop, right: StillImageEditCrop) {
+  return (
+    left.x < right.x + editCropWidth(right) &&
+    right.x < left.x + editCropWidth(left) &&
+    left.y < right.y + editCropHeight(right) &&
+    right.y < left.y + editCropHeight(left)
+  );
 }
 
 /**

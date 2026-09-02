@@ -87,7 +87,10 @@ type StillImagesSettingsPanelProps = {
   editSessionCost?: EditSessionCost;
   /** Bumped by the caller to open the full editor -- reopening a document does. */
   openEditorRequest?: number;
+  /** True only while a submission is being dispatched, not while one runs. */
   submitting?: boolean;
+  /** How many edits are on the pods right now, for a non-blocking indicator. */
+  runningEdits?: number;
   submitError?: string;
 };
 
@@ -129,6 +132,7 @@ export function StillImagesSettingsPanel({
   editSessionCost,
   openEditorRequest = 0,
   submitting = false,
+  runningEdits = 0,
   submitError,
 }: StillImagesSettingsPanelProps) {
   const [regionOpenRequest, setRegionOpenRequest] = useState(0);
@@ -186,11 +190,20 @@ export function StillImagesSettingsPanel({
         ))
       : undefined;
   const compositeLayers = paintsItsOwnSlots ? visibleEditLayers(state) : [];
-  const editorProcessing =
-    submitting ||
-    Boolean(paintsItsOwnSlots && state.editLayers?.some((layer) => ["queued", "sending", "running"].includes(layer.status)));
+  // Edits on different regions are independent -- the compositor pastes each
+  // through its own mask at its own crop -- so a running one no longer freezes
+  // the editor. The canvas stays live and the next region can be painted while
+  // the pods work; only the brief dispatch of a submission locks anything, and
+  // the submission hook refuses a second edit that overlaps a running one.
+  const editsRunning =
+    runningEdits || (state.editLayers ?? []).filter((layer) => ["queued", "sending", "running"].includes(layer.status)).length;
+  const editorProcessing = submitting;
   const editorProcessingLabel =
-    (state.editMode ?? "inpaint") === "enhance" ? "Enhancing selected region" : "Inpainting selected region";
+    editsRunning > 1
+      ? `${editsRunning} edits running`
+      : (state.editMode ?? "inpaint") === "enhance"
+        ? "Enhancing selected region"
+        : "Inpainting selected region";
   const activeLayer = state.editLayers?.find((layer) => layer.id === state.activeEditLayerId);
   const activeLayerError = activeLayer?.status === "failed" ? activeLayer.errorMessage : undefined;
   const editTarget: StillImageEditTarget = state.editTarget ?? "content";
@@ -398,6 +411,7 @@ export function StillImagesSettingsPanel({
               }
               sessionCost={editSessionCost}
               disabled={editorProcessing}
+              busy={editsRunning > 0}
               processingLabel={editorProcessingLabel}
             />
           }

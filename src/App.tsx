@@ -285,6 +285,12 @@ function App() {
       setJobs((current) => mergeJobs([job], current));
       setBackendJobsTotal((current) => current + 1);
       setBackendJobsOffset((current) => current + 1);
+      // An edit becomes a layer the moment its job exists, not when it finishes.
+      // That is what frees the canvas: the region is now recorded on a row of the
+      // Layers panel showing "queued", so the draft can be cleared and the next
+      // region painted while this one runs. commitEditLayer ignores anything that
+      // is not an edit, so every other preset is unaffected.
+      stillImagesForm.commitEditLayer(job);
       showToast("Still image job queued.", "success");
     },
     onJobUpdated: (job) => setJobs((current) => mergeJobs([job], current)),
@@ -725,7 +731,8 @@ function App() {
                 finishingEdit={finishingStillImageEdit}
                 editSessionCost={openEditSessionCost}
                 openEditorRequest={stillImageEditorOpenRequest}
-                submitting={stillImagesSubmission.submitting}
+                submitting={stillImagesSubmission.inFlight.some((entry) => entry.phase === "preparing")}
+                runningEdits={stillImagesSubmission.inFlight.length}
                 submitError={stillImagesSubmission.error}
               />
             )}

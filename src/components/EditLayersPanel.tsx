@@ -86,6 +86,13 @@ type EditLayersPanelProps = {
   /** What this document has cost so far, counting takes that were replaced. */
   sessionCost?: EditSessionCost;
   disabled?: boolean;
+  /**
+   * Edits are on the pods, but the panel stays usable.
+   *
+   * Distinct from `disabled`: a running edit no longer blocks anything, because
+   * edits on different regions compose independently. This only says so.
+   */
+  busy?: boolean;
   processingLabel?: string;
 };
 
@@ -114,6 +121,7 @@ export function EditLayersPanel({
   regenerateHint,
   sessionCost,
   disabled = false,
+  busy = false,
   processingLabel = "Processing selected region",
 }: EditLayersPanelProps) {
   // Displayed top-down the way every layer stack is, while order counts upwards.
@@ -148,13 +156,17 @@ export function EditLayersPanel({
         </button>
       </div>
 
-      {disabled ? (
+      {disabled || busy ? (
         <p
           className="mt-3 flex items-center gap-2 rounded-md bg-cyan-50 px-2.5 py-2 text-[11px] font-semibold text-cyan-800"
           role="status"
+          data-testid="edit-layers-busy"
         >
           <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
           {processingLabel}
+          {busy && !disabled ? (
+            <span className="ml-auto font-medium text-cyan-700">Keep painting — this runs in the background</span>
+          ) : null}
         </p>
       ) : null}
 
