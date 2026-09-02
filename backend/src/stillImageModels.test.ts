@@ -81,6 +81,13 @@ test("credit estimates are positive and do not collide with an animation pricing
 
   for (const model of stillImageWorkflowModels()) {
     const credits = estimateWorkflowCredits(model);
+    if (model.id === "still_image-editing") {
+      // The one preset with a deliberate rule of its own: it can be run through
+      // either Nano Banana or GPT Image, whose rates differ several times over,
+      // so a single flat figure on the model cannot answer for both.
+      assert.ok(credits > 0, `${model.id} has a positive estimate`);
+      continue;
+    }
     assert.equal(credits, model.estimatedCredits, `${model.id} fell through to its own estimate`);
     assert.ok(credits > 0, `${model.id} has a positive estimate`);
   }

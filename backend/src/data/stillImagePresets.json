@@ -145,8 +145,28 @@
       "imageSlots": 3,
       "acceptsPrompt": true,
       "settings": [
-        { "id": "resolution", "kind": "select", "defaultValue": "1K", "options": ["1K", "2K", "4K"] },
-        { "id": "thinking", "kind": "select", "defaultValue": "MINIMAL", "options": ["MINIMAL", "HIGH"] },
+        { "id": "engine", "kind": "select", "defaultValue": "nano-banana", "options": ["nano-banana", "gpt-image"] },
+        {
+          "id": "resolution",
+          "kind": "select",
+          "defaultValue": "1K",
+          "options": ["1K", "2K", "4K"],
+          "visibleWhen": { "settingId": "engine", "equals": "nano-banana" }
+        },
+        {
+          "id": "thinking",
+          "kind": "select",
+          "defaultValue": "MINIMAL",
+          "options": ["MINIMAL", "HIGH"],
+          "visibleWhen": { "settingId": "engine", "equals": "nano-banana" }
+        },
+        {
+          "id": "quality",
+          "kind": "select",
+          "defaultValue": "medium",
+          "options": ["low", "medium", "high"],
+          "visibleWhen": { "settingId": "engine", "equals": "gpt-image" }
+        },
         { "id": "markRegion", "kind": "checkbox", "defaultValue": true },
         { "id": "preserveUnmasked", "kind": "checkbox", "defaultValue": true },
         { "id": "variations", "kind": "range", "defaultValue": 1, "minimum": 1, "maximum": 4, "step": 1 }

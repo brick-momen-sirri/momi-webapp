@@ -254,7 +254,17 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
       hint: "Say what the region should become, not what to do to it. Everything outside it is kept from the original.",
     },
     settings: {
+      engine: {
+        label: "Model",
+        hint: "GPT Image is stronger on instructions with several parts, and bills a flat ~61 credits an edit however small the region. Nano Banana is 17-39 depending on resolution.",
+        optionLabels: { "nano-banana": "Nano Banana", "gpt-image": "GPT Image" },
+      },
       resolution: { label: "Output resolution", optionLabels: { "1K": "1K", "2K": "2K", "4K": "4K" } },
+      quality: {
+        label: "Quality",
+        hint: "How much work GPT puts into the render. Higher is slower; the provider charges the same either way.",
+        optionLabels: { low: "Fast", medium: "Balanced", high: "Best" },
+      },
       thinking: {
         label: "Reasoning",
         hint: "Thorough plans the edit before drawing it. Slower, and better on instructions with more than one part.",

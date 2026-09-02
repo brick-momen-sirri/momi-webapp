@@ -759,3 +759,97 @@ function editMetadata(mode: "inpaint" | "enhance", referenceSourceUrls: string[]
     referenceSourceUrls,
   };
 }
+
+// -- image editing through GPT Image ------------------------------------------
+//
+// The same preset, the same 13-node graph, a different provider at node 1. What
+// these assert is that the switch changes only the call: the plumbing that makes
+// the edit behave like an inpaint has to survive it intact, or a GPT edit would
+// quietly repaint the whole picture.
+
+function editFixture(crop: { size: number; width?: number; height?: number }) {
+  return {
+    layerId: "edit_12345678",
+    operation: "create" as const,
+    mode: "inpaint" as const,
+    documentId: "editdoc_12345678",
+    crop: { x: 0, y: 0, sourceWidth: 4000, sourceHeight: 3000, ...crop },
+    mask: { width: 4000, height: 3000, softness: 20, strokes: [] },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+  };
+}
+
+async function buildGptEdit(settings: Record<string, unknown>, crop: { size: number; width?: number; height?: number }) {
+  seedCounter = 0;
+  return buildStillImageWorkflow({
+    options: normalizeStillImageOptions({
+      categoryId: "image-editing",
+      settings: { engine: "gpt-image", ...settings },
+      edit: editFixture(crop),
+    }),
+    images: ["src.png", "mask.png", "guide.png"],
+    prompt: "  add a window  ",
+    nextSeed: seeds,
+  });
+}
+
+test("choosing GPT Image loads the GPT graph, not Nano Banana's", async () => {
+  const graph = await buildGptEdit({}, { size: 1024 });
+  assert.equal(graph["1"].class_type, "OpenAIGPTImage1");
+  assert.equal(value(graph, "1", "model"), "gpt-image-2");
+  assert.equal(value(graph, "1", "seed"), 1);
+  assert.equal(value(graph, "1", "quality"), "medium");
+});
+
+test("the region instruction leads the prompt, because GPT has no system prompt", async () => {
+  // Nano Banana carries this in system_prompt. Lose it on the GPT path and the
+  // magenta region marker gets painted into the result as part of the scene.
+  const graph = await buildGptEdit({}, { size: 1024 });
+  const prompt = String(value(graph, "1", "prompt"));
+  assert.match(prompt, /translucent magenta wash marking the region/);
+  assert.ok(prompt.trimEnd().endsWith("add a window"), "the artist's own prompt must come last");
+});
+
+test("the requested size is Custom, sized from the crop and legal", async () => {
+  // 4:3 crop. The node rejects the whole prompt on any of its Custom rules, so
+  // what matters is that what the builder writes would actually be accepted.
+  const graph = await buildGptEdit({}, { size: 0, width: 1600, height: 1200 });
+  assert.equal(value(graph, "1", "size"), "Custom");
+  const width = Number(value(graph, "1", "custom_width"));
+  const height = Number(value(graph, "1", "custom_height"));
+  assert.equal(width % 16, 0);
+  assert.equal(height % 16, 0);
+  assert.ok(Math.max(width, height) <= 3840);
+  assert.ok(width * height >= 655_360 && width * height <= 8_294_400);
+  assert.ok(Math.abs(width / height - 4 / 3) < 0.02, `${width}x${height} lost the crop's shape`);
+});
+
+test("a region far below the pixel floor is still sized legally", async () => {
+  const graph = await buildGptEdit({}, { size: 256 });
+  const width = Number(value(graph, "1", "custom_width"));
+  const height = Number(value(graph, "1", "custom_height"));
+  assert.ok(width * height >= 655_360, `${width}x${height} is under the floor the node enforces`);
+});
+
+test("the GPT graph keeps the plumbing that makes the edit an inpaint", async () => {
+  const graph = await buildGptEdit({}, { size: 1024 });
+
+  // batch -> call -> scale to source -> paste through the mask -> save.
+  assert.deepEqual(link(graph, "1", "image"), ["11", 0]);
+  assert.deepEqual(link(graph, "22", "image"), ["1", 0]);
+  assert.deepEqual(link(graph, "24", "source"), ["22", 0]);
+  assert.deepEqual(link(graph, "24", "destination"), ["3", 0]);
+  assert.deepEqual(link(graph, "24", "mask"), ["23", 0]);
+
+  // The node accepts a mask, but refuses one alongside a multi-image batch --
+  // and the composite above is the stronger guarantee anyway.
+  assert.equal("mask" in (graph["1"].inputs ?? {}), false);
+});
+
+test("Nano Banana stays the default, so an existing request is unaffected", async () => {
+  const graph = await build("image-editing", {}, ["a", "b", "c"], "p");
+  assert.equal(graph["1"].class_type, "GeminiNanoBanana2");
+});

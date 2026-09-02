@@ -90,11 +90,12 @@ const MODEL_METADATA: Record<StillImageCategoryId, StillImageModelMetadata> = {
   "image-editing": {
     name: "Image Editing Studio",
     category: "image_editing",
-    // The odd one out: not GPU-seconds on our own pod but a per-image Nano Banana
-    // charge, so this figure is a provider price rather than a placeholder. It is
-    // the 1K rate; 2K and 4K bill more, and the worker's credit_usage is what
-    // lands on the job either way.
-    estimatedCredits: 4,
+    // The odd one out twice over: not GPU-seconds on our own pod but a per-image
+    // provider charge, and the only preset whose provider is chosen per job. This
+    // figure is a floor and is not what gets quoted -- imageEditingStudioCredits
+    // in creditEstimator prices the actual engine and resolution, and the
+    // worker's credit_usage is what finally lands on the job.
+    estimatedCredits: 18,
     estimatedTime: "20-60 sec",
   },
 };

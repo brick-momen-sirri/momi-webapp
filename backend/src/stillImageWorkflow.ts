@@ -24,6 +24,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { stillImageWorkflowRoot } from "./config.js";
+import { gptImageCustomSize } from "./gptImageCustomSize.js";
 import {
   stillImageRequestSlotCount,
   type StillImageCategoryId,
@@ -77,6 +78,14 @@ export type StillImagePreset = {
   workflowFile: string;
   /** A mode may select a genuinely different exported graph on the same endpoint. */
   workflowFilesByMode?: Readonly<Record<string, string>>;
+  /**
+   * A preset may offer the same edit through more than one provider.
+   *
+   * Separate from workflowFilesByMode because the two are independent: mode is
+   * what the preset does, engine is who does it, and a preset could one day want
+   * both. Keying engine off `mode` would make them fight over one setting.
+   */
+  workflowFilesByEngine?: Readonly<Record<string, string>>;
   inputTransport: StillImageInputTransport;
   /**
    * Where this preset's graph has to run.
@@ -128,7 +137,9 @@ export function stillImagePreset(categoryId: StillImageCategoryId): StillImagePr
 export function stillImageWorkflowPath(categoryId: StillImageCategoryId, settings: Record<string, StillImageSettingValue> = {}) {
   const preset = stillImagePreset(categoryId);
   const mode = typeof settings.mode === "string" ? settings.mode : "";
-  const workflowFile = preset.workflowFilesByMode?.[mode] ?? preset.workflowFile;
+  const engine = typeof settings.engine === "string" ? settings.engine : "";
+  const workflowFile =
+    preset.workflowFilesByEngine?.[engine] ?? preset.workflowFilesByMode?.[mode] ?? preset.workflowFile;
   return path.join(stillImageWorkflowRoot, workflowFile);
 }
 
@@ -726,6 +737,7 @@ const RAW_ENHANCEMENT_QWEN_PROMPT = [
 // -- image editing -----------------------------------------------------------
 
 const IMAGE_EDIT = {
+  /** Node 1 in both graphs: the remote call, Nano Banana or GPT Image. */
   gemini: "1",
   source: "3",
   mask: "20",
@@ -755,10 +767,15 @@ const IMAGE_EDIT = {
  * whole-image drift would quietly re-render the parts nobody asked about.
  */
 function applyImageEditing(graph: StillImageGraph, input: ResolvedBuildInput) {
-  set(graph, IMAGE_EDIT.gemini, "prompt", input.prompt);
   set(graph, IMAGE_EDIT.gemini, "seed", input.nextSeed());
-  set(graph, IMAGE_EDIT.gemini, "resolution", choice(input.settings, "resolution", "1K"));
-  set(graph, IMAGE_EDIT.gemini, "thinking_level", choice(input.settings, "thinking", "MINIMAL"));
+
+  if (choice(input.settings, "engine", NANO_BANANA_ENGINE) === GPT_IMAGE_ENGINE) {
+    applyGptImageCall(graph, input);
+  } else {
+    set(graph, IMAGE_EDIT.gemini, "prompt", input.prompt);
+    set(graph, IMAGE_EDIT.gemini, "resolution", choice(input.settings, "resolution", "1K"));
+    set(graph, IMAGE_EDIT.gemini, "thinking_level", choice(input.settings, "thinking", "MINIMAL"));
+  }
 
   // The guide is the only optional slot, so imageCount is what says whether it
   // was uploaded. Reading markRegion here instead would let a stale setting point
@@ -780,6 +797,69 @@ function applyImageEditing(graph: StillImageGraph, input: ResolvedBuildInput) {
   // editable crop mask while rebuilding the full-resolution original, so this is
   // only a pre-blend preference and never permission to change outside the mask.
   connect(graph, IMAGE_EDIT.save, "images", flag(input.settings, "preserveUnmasked") ? IMAGE_EDIT.composite : IMAGE_EDIT.gemini);
+}
+
+export const NANO_BANANA_ENGINE = "nano-banana";
+export const GPT_IMAGE_ENGINE = "gpt-image";
+
+/**
+ * The instruction the edit depends on, which GPT has nowhere else to put.
+ *
+ * The Nano Banana graph carries this as `system_prompt`, a field GPT Image does
+ * not have -- so on that path it has to lead the user's own prompt instead. It
+ * is not decoration: without the first two sentences the magenta region marker
+ * gets painted into the result as if it were part of the scene.
+ *
+ * Kept verbatim from the Nano Banana export rather than rewritten for GPT. The
+ * wording was arrived at against real edits, and two prompts that differ would
+ * make the two engines quietly incomparable.
+ */
+const EDIT_INSTRUCTION =
+  "You are an expert image editor. The first image is the source. The second image is that same source " +
+  "overlaid with a translucent magenta wash marking the region the user wants changed: the wash is a region " +
+  "marker only. Never reproduce it, never let it tint the result, and never treat it as part of the scene. " +
+  "Any remaining images are visual references supplied by the user; use them for the requested identity, " +
+  "appearance, material, colour, or style without copying their framing. Apply the user's instruction inside " +
+  "the marked region and leave everything outside it identical to the source. Always return an image with the " +
+  "same framing and aspect ratio as the source. You must ALWAYS produce an image.";
+
+/**
+ * The GPT Image half of the editing graph.
+ *
+ * Everything structural is shared with Nano Banana -- same batch in, same scale
+ * and composite out -- so only the call itself differs. Three things about it do
+ * not carry over.
+ *
+ * There is no system_prompt, so the instruction leads the prompt.
+ *
+ * There is no aspect_ratio. `size` offers a fixed enum whose aspects are 1:1,
+ * 2:3, 3:2, 16:9 and 9:16, and since the result is scaled back to the source
+ * before compositing, any other shape would return *distorted* rather than
+ * cropped. Custom is the only setting that always preserves the framing, and
+ * gptImageCustomSize works out dimensions the node will accept.
+ *
+ * There is a mask input, and it is deliberately unused: the node refuses a mask
+ * alongside a multi-image batch, and the guide plus references are worth more
+ * than native masking when the composite already guarantees the region.
+ */
+function applyGptImageCall(graph: StillImageGraph, input: ResolvedBuildInput) {
+  const instructed = input.prompt.trim() ? `${EDIT_INSTRUCTION}
+
+${input.prompt}` : EDIT_INSTRUCTION;
+  set(graph, IMAGE_EDIT.gemini, "prompt", instructed);
+  set(graph, IMAGE_EDIT.gemini, "quality", choice(input.settings, "quality", "medium"));
+
+  // The crop is what node 3 loads and what the result is scaled back to, so its
+  // shape is the one to preserve. Absent only on a malformed request, where the
+  // node's own default is a legal size and the request fails elsewhere.
+  const crop = input.edit?.crop;
+  const width = crop?.width ?? crop?.size;
+  const height = crop?.height ?? crop?.size;
+  if (typeof width === "number" && typeof height === "number") {
+    const size = gptImageCustomSize(width, height);
+    set(graph, IMAGE_EDIT.gemini, "custom_width", size.width);
+    set(graph, IMAGE_EDIT.gemini, "custom_height", size.height);
+  }
 }
 
 /**
@@ -868,7 +948,8 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
     "20": "Loading the painted mask",
     "12": "Loading the marked guide",
     "11": "Collecting the inputs",
-    "1": "Editing with Nano Banana",
+    // Labels are per preset, and this preset now has two engines behind node 1.
+    "1": "Editing the painted region",
     "22": "Matching the source size",
     "24": "Pasting the edit back through the mask",
     "10": "Saving final image",
@@ -998,6 +1079,7 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
   "image-editing": {
     categoryId: "image-editing",
     workflowFile: "image-editing.json",
+    workflowFilesByEngine: { "gpt-image": "image-editing-gpt.json" },
     endpoint: "shared",
     // Nano Banana is a remote API node, so nothing here is size-critical enough
     // to justify inlining: the bytes ride in the RunPod payload like every other

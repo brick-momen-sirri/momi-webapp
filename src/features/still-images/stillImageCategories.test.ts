@@ -110,7 +110,15 @@ const visibilityCases: Array<[StillImageCategoryId, Settings, string[]]> = [
   ["qwen-edit", { mode: "edit" }, ["mode", "imageCount"]],
   ["qwen-edit", { mode: "consistency" }, ["mode"]],
   ["qwen-edit", { mode: "realistic" }, ["mode", "realisticStrength"]],
-  ["image-editing", {}, ["resolution", "thinking", "markRegion", "preserveUnmasked", "variations"]],
+  // Two engines behind one preset, each hiding the other's controls. The engine
+  // is passed explicitly rather than {} because the panel resolves visibility
+  // from a fully defaulted map, the same way the server does.
+  [
+    "image-editing",
+    { engine: "nano-banana" },
+    ["engine", "resolution", "thinking", "markRegion", "preserveUnmasked", "variations"],
+  ],
+  ["image-editing", { engine: "gpt-image" }, ["engine", "quality", "markRegion", "preserveUnmasked", "variations"]],
 ];
 
 describe("still image catalogue truth tables", () => {

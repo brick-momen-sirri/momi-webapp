@@ -47,6 +47,10 @@ export function estimateWorkflowCredits(
     return nanoBanana2Credits(resolutionLabel) * nanoBananaOutputCount(workflowOptions);
   }
 
+  if (key.includes("still_image-editing")) {
+    return imageEditingStudioCredits(workflowOptions);
+  }
+
   if (key.includes("ref_transfer") || key.includes("ref transfer")) {
     return 4;
   }
@@ -281,6 +285,38 @@ function openAiGptImage2UpperCredits(quality: "low" | "medium" | "high") {
 
 function exteriorGridGeneratorCredits() {
   return 6;
+}
+
+/**
+ * What one Image Editing Studio edit is expected to cost.
+ *
+ * The preset is the only one whose provider can be chosen per job, so the flat
+ * `estimatedCredits` on the model cannot answer this: it is one number for two
+ * engines whose rates differ by several times over. Reading the engine off the
+ * job's own settings is what keeps the figure attached to what actually ran.
+ *
+ * Rates are the tracker's measured means from official_usage_events rather than
+ * list prices -- the same source that prices the run afterwards, so the estimate
+ * and the eventual charge are quoted in the same terms.
+ *
+ * Deliberately not routed through nanoBanana2Credits. That function serves the
+ * Animation models and still holds the pre-2026-08-08 rates, which understate
+ * Nano Banana by around 20% and price 2K at the 1K rate; borrowing it here would
+ * spread a known-stale number into a new place.
+ */
+function imageEditingStudioCredits(workflowOptions: WorkflowOptions | undefined) {
+  const settings = workflowOptions?.stillImage?.settings ?? {};
+  const engine = typeof settings.engine === "string" ? settings.engine : "nano-banana";
+
+  if (engine === "gpt-image") {
+    // Flat, because the graph always asks for a Custom size and the provider
+    // prices every Custom render the same however small the painted region is.
+    return roundCredits(creditsFromUsd(0.29031));
+  }
+
+  const resolution = typeof settings.resolution === "string" ? settings.resolution : "1K";
+  const usd: Record<string, number> = { "1k": 0.083062, "2k": 0.124611, "4k": 0.183589 };
+  return roundCredits(creditsFromUsd(usd[resolution.toLowerCase()] ?? usd["1k"]));
 }
 
 function nanoBanana2Credits(resolution: string) {

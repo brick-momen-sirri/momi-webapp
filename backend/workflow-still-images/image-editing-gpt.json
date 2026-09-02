@@ -1,0 +1,100 @@
+{
+  "1": {
+    "inputs": {
+      "prompt": "",
+      "model": "gpt-image-2",
+      "seed": 42,
+      "size": "Custom",
+      "custom_width": 1024,
+      "custom_height": 1024,
+      "quality": "medium",
+      "background": "auto",
+      "n": 1,
+      "image": ["11", 0]
+    },
+    "class_type": "OpenAIGPTImage1",
+    "_meta": { "title": "GPT Image" }
+  },
+  "3": {
+    "inputs": { "image": "momi_still_01.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Source image" }
+  },
+  "20": {
+    "inputs": { "image": "momi_still_02.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Edit mask" }
+  },
+  "12": {
+    "inputs": { "image": "momi_still_03.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Marked guide" }
+  },
+  "11": {
+    "inputs": {
+      "images.image0": ["3", 0],
+      "images.image1": ["12", 0]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": { "title": "Batch Images" }
+  },
+  "21": {
+    "inputs": { "image": ["3", 0] },
+    "class_type": "GetImageSize",
+    "_meta": { "title": "Source size" }
+  },
+  "22": {
+    "inputs": {
+      "image": ["1", 0],
+      "upscale_method": "lanczos",
+      "width": ["21", 0],
+      "height": ["21", 1],
+      "crop": "center"
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Back to source size" }
+  },
+  "23": {
+    "inputs": { "image": ["20", 0], "channel": "red" },
+    "class_type": "ImageToMask",
+    "_meta": { "title": "Mask from painted region" }
+  },
+  "24": {
+    "inputs": {
+      "destination": ["3", 0],
+      "source": ["22", 0],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": ["23", 0]
+    },
+    "class_type": "ImageCompositeMasked",
+    "_meta": { "title": "Paste the edit back through the mask" }
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": ["24", 0]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": { "title": "Save Image (Advanced)" }
+  },
+  "30": {
+    "inputs": { "image": "momi_still_04.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 1" }
+  },
+  "31": {
+    "inputs": { "image": "momi_still_05.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 2" }
+  },
+  "32": {
+    "inputs": { "image": "momi_still_06.png" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference image 3" }
+  }
+}
