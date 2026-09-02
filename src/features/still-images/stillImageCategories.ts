@@ -256,13 +256,13 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
     settings: {
       engine: {
         label: "Model",
-        hint: "GPT Image is stronger on instructions with several parts, and bills a flat ~61 credits an edit however small the region. Nano Banana is 17-39 depending on resolution.",
+        hint: "GPT Image handles instructions with several parts better. Its cost follows the Quality setting rather than the resolution — up to about 4, 35 or 141 credits. Nano Banana is 18-39 by resolution.",
         optionLabels: { "nano-banana": "Nano Banana", "gpt-image": "GPT Image" },
       },
       resolution: { label: "Output resolution", optionLabels: { "1K": "1K", "2K": "2K", "4K": "4K" } },
       quality: {
         label: "Quality",
-        hint: "How much work GPT puts into the render. Higher is slower; the provider charges the same either way.",
+        hint: "The main thing that drives what a GPT edit costs, far more than the size: roughly 4 credits on Fast, 35 on Balanced, 141 on Best. Higher is also slower.",
         optionLabels: { low: "Fast", medium: "Balanced", high: "Best" },
       },
       thinking: {

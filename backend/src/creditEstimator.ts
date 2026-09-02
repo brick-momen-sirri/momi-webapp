@@ -274,6 +274,11 @@ function veo3CreditsPerSecond(key: string, resolution: string) {
   return creditsFromUsd(hasAudio ? 0.4 : 0.2);
 }
 
+/** The Quality the request asked for, defaulting the way the graph does. */
+function gptImageQuality(value: unknown): "low" | "medium" | "high" {
+  return value === "low" || value === "high" ? value : "medium";
+}
+
 function openAiGptImage2UpperCredits(quality: "low" | "medium" | "high") {
   const maxUsd = {
     low: 0.019,
@@ -309,9 +314,21 @@ function imageEditingStudioCredits(workflowOptions: WorkflowOptions | undefined)
   const engine = typeof settings.engine === "string" ? settings.engine : "nano-banana";
 
   if (engine === "gpt-image") {
-    // Flat, because the graph always asks for a Custom size and the provider
-    // prices every Custom render the same however small the painted region is.
-    return roundCredits(creditsFromUsd(0.29031));
+    // Priced off Quality, not off the size the graph asks for.
+    //
+    // The first version of this used the tracker's mean for Custom renders,
+    // $0.29031, as though it were a rate. It is not: across 38 measured Custom
+    // runs the charge ranges from $0.0142 to $0.7394, a fifty-fold spread that no
+    // single figure represents, and the other sizes scatter just as widely
+    // ($0.0131-$0.4674 over 25 runs at 2048x1152). Resolution does not predict
+    // what OpenAI bills. The observed range instead brackets the per-quality
+    // bounds below almost exactly, which is the signal worth estimating from.
+    //
+    // These are upper bounds, so the quote leans high rather than surprising
+    // anyone: one measured Balanced render at Custom 1600x1200 came back at
+    // $0.0898 against the $0.168 bound. Reused rather than re-tabulated -- the
+    // same numbers already price the Animation GPT model.
+    return openAiGptImage2UpperCredits(gptImageQuality(settings.quality));
   }
 
   const resolution = typeof settings.resolution === "string" ? settings.resolution : "1K";

@@ -156,3 +156,36 @@ test("GPT image estimate doubles when two output images are requested", () => {
 
   assert.equal(double, single * 2);
 });
+
+// Matches what stillImageWorkflowModels() builds: estimateWorkflowCredits keys
+// off the id/name/category/path string, so the id is what routes it here.
+const EDIT_STUDIO = {
+  id: "still_image-editing",
+  name: "Image Editing Studio",
+  category: "image_editing",
+  workflowPath: "workflow-still-images/image-editing.json",
+  estimatedCredits: 18,
+} as never;
+
+test("an Image Editing Studio estimate follows the engine, and GPT follows Quality", () => {
+  // Quality is what OpenAI actually bills on. Resolution is not: across 38
+  // measured Custom renders the charge ran from $0.0142 to $0.7394, so any
+  // single flat figure -- including the mean this once used -- is meaningless.
+  const gpt = (quality?: string) =>
+    estimateWorkflowCredits(EDIT_STUDIO, undefined, undefined, {
+      stillImage: { categoryId: "image-editing", settings: { engine: "gpt-image", ...(quality ? { quality } : {}) } },
+    } as never);
+
+  assert.ok(gpt("low") < gpt("medium"), "Fast must quote less than Balanced");
+  assert.ok(gpt("medium") < gpt("high"), "Balanced must quote less than Best");
+  // Balanced is the graph's default, so an unset quality must not quote Fast.
+  assert.equal(gpt(), gpt("medium"));
+
+  // Nano Banana stays on its own measured per-resolution rates, which unlike
+  // GPT's really do track resolution.
+  const nano = (resolution: string) =>
+    estimateWorkflowCredits(EDIT_STUDIO, undefined, undefined, {
+      stillImage: { categoryId: "image-editing", settings: { engine: "nano-banana", resolution } },
+    } as never);
+  assert.ok(nano("1K") < nano("2K") && nano("2K") < nano("4K"));
+});
