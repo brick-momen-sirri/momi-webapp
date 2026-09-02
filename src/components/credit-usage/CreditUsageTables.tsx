@@ -290,12 +290,24 @@ export function SelectedRunBreakdown({
             {job.projectName} - {job.userName} - {job.jobId}
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2 text-right text-xs font-semibold text-stone-600 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 text-right text-xs font-semibold text-stone-600 sm:grid-cols-3 lg:grid-cols-6">
           <span>
             <b className="block text-ink">{formatCredits(job.credits)}</b>credits
           </span>
           <span>
             <b className="block text-ink">{formatUsd(job.usd)}</b>cost
+          </span>
+          <span>
+            <b className="block text-ink">
+              {formatCredits(job.podCredits ?? 0)} / {formatUsd(job.podUsd ?? 0)}
+            </b>
+            RunPod
+          </span>
+          <span>
+            <b className="block text-ink">
+              {formatCredits(job.comfyCredits ?? job.credits)} / {formatUsd(job.comfyUsd ?? job.usd)}
+            </b>
+            Comfy
           </span>
           <span>
             <b className="block text-ink">{job.resolution || "-"}</b>resolution

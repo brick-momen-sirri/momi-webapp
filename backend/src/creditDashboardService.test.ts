@@ -299,6 +299,10 @@ test("projectStatNameCandidates offers the folder name first and drops empties",
 // list the route caps at 500 rows and so under-reported on busy ranges.
 
 function pivotEvent(overrides: Partial<CreditDashboardRecentJob> & { timestamp: string }): CreditDashboardRecentJob {
+  const credits = overrides.credits ?? 10;
+  const usd = overrides.usd ?? 0.05;
+  const podCredits = overrides.podCredits ?? 0;
+  const podUsd = overrides.podUsd ?? 0;
   return {
     jobId: `job-${overrides.timestamp}-${overrides.modelId ?? "m"}`,
     projectId: "p1",
@@ -308,8 +312,12 @@ function pivotEvent(overrides: Partial<CreditDashboardRecentJob> & { timestamp: 
     modelId: "m1",
     modelName: "Veo 3",
     status: "completed",
-    credits: 10,
-    usd: 0.05,
+    credits,
+    usd,
+    podCredits,
+    podUsd,
+    comfyCredits: overrides.comfyCredits ?? Math.max(0, credits - podCredits),
+    comfyUsd: overrides.comfyUsd ?? Math.max(0, usd - podUsd),
     expectedCredits: 10,
     source: "tracker",
     resolution: "1080p",
@@ -394,7 +402,15 @@ test("buildCreditPivot totals each bucket and splits it by project, user and mod
   const startAt = new Date(2026, 7, 3);
   const endAt = new Date(2026, 7, 17);
   const events = [
-    pivotEvent({ timestamp: "2026-08-04T10:00:00.000Z", credits: 30, usd: 0.15 }),
+    pivotEvent({
+      timestamp: "2026-08-04T10:00:00.000Z",
+      credits: 30,
+      usd: 0.15,
+      podCredits: 5,
+      podUsd: 0.02,
+      comfyCredits: 25,
+      comfyUsd: 0.13,
+    }),
     pivotEvent({
       timestamp: "2026-08-05T10:00:00.000Z",
       credits: 20,
@@ -420,6 +436,13 @@ test("buildCreditPivot totals each bucket and splits it by project, user and mod
     buckets.map((bucket) => bucket.jobs),
     [2, 1],
   );
+  assert.deepEqual(
+    buckets.map((bucket) => [bucket.podCredits, bucket.comfyCredits]),
+    [
+      [5, 45],
+      [0, 50],
+    ],
+  );
 
   // perBucket is index-aligned with buckets, so the pivot's row and column
   // totals are the same numbers read two ways.
@@ -434,10 +457,7 @@ test("buildCreditPivot totals each bucket and splits it by project, user and mod
       ["Seedance", 20],
     ],
   );
-  assert.deepEqual(
-    breakdown.user.find((row) => row.id === "u2")?.perBucket,
-    [0, 50],
-  );
+  assert.deepEqual(breakdown.user.find((row) => row.id === "u2")?.perBucket, [0, 50]);
 });
 
 test("buildCreditPivot ignores events that fall outside the bucket window", () => {
@@ -480,10 +500,7 @@ test("buildCreditPivot folds everything past the top rows into one Other series"
   // land in the first bucket.
   assert.deepEqual(breakdown.model[8].perBucket, [182, 180]);
   assert.equal(breakdown.model[8].credits, 362);
-  assert.equal(
-    Math.round(breakdown.model.reduce((sum, row) => sum + row.percentage, 0)),
-    100,
-  );
+  assert.equal(Math.round(breakdown.model.reduce((sum, row) => sum + row.percentage, 0)), 100);
 });
 
 // Still Images renders draw real provider balance but their pods report no
@@ -514,9 +531,9 @@ test("countUncostedRuns falls back through the job's timestamps", () => {
   const monthStart = new Date("2026-08-01T00:00:00.000Z");
   const monthEnd = new Date("2026-09-01T00:00:00.000Z");
   // A completed job with no completedAt still happened; createdAt places it.
-  const jobs = [{ workflowOptions: stillImage, status: "completed", createdAt: "2026-08-05T10:00:00.000Z" }] as unknown as Parameters<
-    typeof countUncostedRuns
-  >[0];
+  const jobs = [
+    { workflowOptions: stillImage, status: "completed", createdAt: "2026-08-05T10:00:00.000Z" },
+  ] as unknown as Parameters<typeof countUncostedRuns>[0];
 
   assert.deepEqual(countUncostedRuns(jobs, monthStart, monthEnd), { uncostedRuns: 1, uncostedMonthRuns: 1 });
 });

@@ -121,14 +121,25 @@ export function buildBucketChartRows(
   groupBy: ChartGroupBy,
 ) {
   if (groupBy === "total") {
+    const hasSourceSplit = buckets.some((bucket) => bucket.podCredits !== undefined || bucket.comfyCredits !== undefined);
     return {
-      legend: [{ label: "Total", color: chartColors[0] }],
-      rows: buckets.map((bucket) => ({
-        key: bucket.key,
-        label: bucket.label,
-        total: bucket.credits,
-        segments: bucket.credits > 0 ? [{ label: "Total", credits: bucket.credits, color: chartColors[0] }] : [],
-      })),
+      legend: hasSourceSplit
+        ? [
+            { label: "RunPod", color: chartColors[0] },
+            { label: "Comfy", color: chartColors[1] },
+          ]
+        : [{ label: "Total", color: chartColors[0] }],
+      rows: buckets.map((bucket) => {
+        const segments = hasSourceSplit
+          ? [
+              { label: "RunPod", credits: finiteNumber(bucket.podCredits), color: chartColors[0] },
+              { label: "Comfy", credits: finiteNumber(bucket.comfyCredits), color: chartColors[1] },
+            ].filter((segment) => segment.credits > 0)
+          : bucket.credits > 0
+            ? [{ label: "Total", credits: bucket.credits, color: chartColors[0] }]
+            : [];
+        return { key: bucket.key, label: bucket.label, total: bucket.credits, segments };
+      }),
     };
   }
 
@@ -253,6 +264,10 @@ export function recentJobsCsv(rows: BackendCreditDashboardRecentJob[]) {
     "workflow",
     "credits",
     "cost",
+    "runpod_credits",
+    "runpod_cost",
+    "comfy_credits",
+    "comfy_cost",
     "status",
     "resolution",
     "duration_seconds",
@@ -265,6 +280,10 @@ export function recentJobsCsv(rows: BackendCreditDashboardRecentJob[]) {
     job.modelName,
     job.credits,
     job.usd,
+    job.podCredits ?? "",
+    job.podUsd ?? "",
+    job.comfyCredits ?? "",
+    job.comfyUsd ?? "",
     job.status,
     job.resolution,
     job.runDurationSeconds ?? "",

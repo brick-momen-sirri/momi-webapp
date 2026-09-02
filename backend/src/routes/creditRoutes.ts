@@ -18,7 +18,6 @@ import {
   creditAnomalies,
   creditDashboardGranularity,
   creditDashboardRange,
-  creditsSpentForJob,
   daysBetween,
   expectedCreditsForJob,
   fillDailyRange,
@@ -29,7 +28,6 @@ import {
   sortedGroups,
   startOfDay,
   stringField,
-  usdSpentForJob,
 } from "../creditDashboardService.js";
 import { getCredits } from "../creditService.js";
 import { creditAccountingSource, isCountedCreditUsage, jobSpendSplit } from "../creditUsageAccounting.js";
@@ -90,8 +88,8 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
   };
 
   for (const job of visibleJobs) {
-    const credits = creditsSpentForJob(job);
-    const usd = usdSpentForJob(job);
+    const spend = jobSpendSplit(job);
+    const { credits, usd } = spend;
     const hasUsage = credits > 0 || usd > 0 || Boolean(job.creditUsage);
     const eventDate = new Date(job.completedAt ?? job.startedAt ?? job.createdAt);
     const timestamp = eventDate.getTime();
@@ -109,8 +107,10 @@ creditRouter.get("/api/credits/dashboard", (req, res) => {
       credits,
       usd,
       expectedCredits: expectedCreditsForJob(job),
-      podCredits: jobSpendSplit(job).podCredits,
-      comfyCredits: jobSpendSplit(job).comfyCredits,
+      podCredits: spend.podCredits,
+      podUsd: spend.podUsd,
+      comfyCredits: spend.comfyCredits,
+      comfyUsd: spend.comfyUsd,
       source: creditAccountingSource(job),
       resolution: resolutionLabel(job),
       runDurationSeconds: runDurationSeconds(job),

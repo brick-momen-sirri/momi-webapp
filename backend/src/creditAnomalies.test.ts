@@ -17,6 +17,10 @@ import {
 // eagerly gets the whole panel ignored; one that never fires is decoration.
 
 function event(overrides: Partial<CreditDashboardRecentJob> = {}): CreditDashboardRecentJob {
+  const credits = overrides.credits ?? 10;
+  const usd = overrides.usd ?? 0.4;
+  const podCredits = overrides.podCredits ?? 0;
+  const podUsd = overrides.podUsd ?? 0;
   return {
     jobId: "job_1",
     projectId: "proj_1",
@@ -26,8 +30,12 @@ function event(overrides: Partial<CreditDashboardRecentJob> = {}): CreditDashboa
     modelId: "kling_v3",
     modelName: "Kling 3.0",
     status: "completed",
-    credits: 10,
-    usd: 0.4,
+    credits,
+    usd,
+    podCredits,
+    podUsd,
+    comfyCredits: overrides.comfyCredits ?? Math.max(0, credits - podCredits),
+    comfyUsd: overrides.comfyUsd ?? Math.max(0, usd - podUsd),
     expectedCredits: 0,
     source: "backend_job",
     resolution: "1080p",

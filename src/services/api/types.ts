@@ -140,6 +140,11 @@ export type BackendCreditDashboardBucket = {
   endAt: string;
   credits: number;
   usd: number;
+  /** Optional during a rolling deploy against an older API worker. */
+  podCredits?: number;
+  podUsd?: number;
+  comfyCredits?: number;
+  comfyUsd?: number;
   jobs: number;
 };
 
@@ -171,6 +176,11 @@ export type BackendCreditDashboardRecentJob = {
   status: Job["status"];
   credits: number;
   usd: number;
+  /** Optional during a rolling deploy against an older API worker. */
+  podCredits?: number;
+  podUsd?: number;
+  comfyCredits?: number;
+  comfyUsd?: number;
   expectedCredits: number;
   source: string;
   resolution: string;

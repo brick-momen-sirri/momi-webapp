@@ -3,7 +3,7 @@
 // ~330 lines of pure date/credit math wedged between route handlers, which made
 // both harder to read and left the math untested.
 
-import { creditsSpentForAccounting, isCountedCreditUsage, isCreditExemptJob } from "./creditUsageAccounting.js";
+import { creditsSpentForAccounting, isCreditExemptJob, usdSpentForAccounting } from "./creditUsageAccounting.js";
 import type { CreditTrackerProjectStats } from "./creditUsageService.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { currentMonthRange, getQueryValue } from "./httpQuery.js";
@@ -77,6 +77,10 @@ export type CreditDashboardBucket = {
   endAt: string;
   credits: number;
   usd: number;
+  podCredits: number;
+  podUsd: number;
+  comfyCredits: number;
+  comfyUsd: number;
   jobs: number;
 };
 
@@ -109,7 +113,9 @@ export type CreditDashboardRecentJob = {
   usd: number;
   /** The same spend, split by the account it left: RunPod, and Comfy credits. */
   podCredits: number;
+  podUsd: number;
   comfyCredits: number;
+  comfyUsd: number;
   expectedCredits: number;
   source: string;
   resolution: string;
@@ -147,14 +153,7 @@ export type CreditDashboardAnomaly = {
 };
 
 export function usdSpentForJob(job: Job) {
-  if (!isCountedCreditUsage(job.creditUsage)) return 0;
-  const direct = Number(job.creditUsage?.total_estimated_usd ?? 0);
-  if (Number.isFinite(direct) && direct > 0) return direct;
-  const rows = job.creditUsage?.rows ?? [];
-  return rows.reduce((sum, row) => {
-    const value = Number(row.total_estimated_usd ?? 0);
-    return Number.isFinite(value) && value > 0 ? sum + value : sum;
-  }, 0);
+  return usdSpentForAccounting(job);
 }
 
 export function roundUsd(value: number) {
@@ -342,6 +341,10 @@ export function buildCreditBuckets(startAt: Date, endAt: Date, granularity: Cred
     endAt: nextBucketStart(start, granularity).toISOString(),
     credits: 0,
     usd: 0,
+    podCredits: 0,
+    podUsd: 0,
+    comfyCredits: 0,
+    comfyUsd: 0,
     jobs: 0,
   }));
 }
@@ -368,6 +371,10 @@ export function buildCreditPivot(
     const bucket = buckets[index];
     bucket.credits = roundCredits(bucket.credits + event.credits);
     bucket.usd = roundUsd(bucket.usd + event.usd);
+    bucket.podCredits = roundCredits(bucket.podCredits + event.podCredits);
+    bucket.podUsd = roundUsd(bucket.podUsd + event.podUsd);
+    bucket.comfyCredits = roundCredits(bucket.comfyCredits + event.comfyCredits);
+    bucket.comfyUsd = roundUsd(bucket.comfyUsd + event.comfyUsd);
     bucket.jobs += 1;
     addBreakdownRow(project, event.projectId, event.projectName, index, buckets.length, event);
     addBreakdownRow(user, event.userId, event.userName, index, buckets.length, event);

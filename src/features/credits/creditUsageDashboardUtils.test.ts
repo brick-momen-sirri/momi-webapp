@@ -84,6 +84,10 @@ function bucket(key: string, label: string, credits: number, usd = 0, jobs = 1):
     endAt: `${key}T23:59:59.999Z`,
     credits,
     usd,
+    podCredits: 0,
+    podUsd: 0,
+    comfyCredits: credits,
+    comfyUsd: usd,
     jobs,
   };
 }
@@ -105,13 +109,31 @@ function breakdownRow(
 const buckets = [bucket("2026-08-01", "Aug 01", 30), bucket("2026-08-02", "Aug 02", 20)];
 
 describe("chart aggregation", () => {
-  it("reads bucket totals straight through for the total view", () => {
-    const chart = buildBucketChartRows(buckets, { project: [], user: [], model: [] }, "total");
+  it("splits the source view into RunPod and Comfy without changing bucket totals", () => {
+    const sourceBuckets = [
+      { ...buckets[0], podCredits: 5, comfyCredits: 25 },
+      { ...buckets[1], podCredits: 2, comfyCredits: 18 },
+    ];
+    const chart = buildBucketChartRows(sourceBuckets, { project: [], user: [], model: [] }, "total");
     expect(chart.rows.map((row) => [row.key, row.label, row.total])).toEqual([
       ["2026-08-01", "Aug 01", 30],
       ["2026-08-02", "Aug 02", 20],
     ]);
-    expect(chart.legend).toEqual([{ label: "Total", color: expect.any(String) }]);
+    expect(chart.legend.map((item) => item.label)).toEqual(["RunPod", "Comfy"]);
+    expect(chart.rows[0].segments.map((segment) => [segment.label, segment.credits])).toEqual([
+      ["RunPod", 5],
+      ["Comfy", 25],
+    ]);
+  });
+
+  it("falls back to a total series while an older API is still serving the dashboard", () => {
+    const legacyBuckets = buckets.map(
+      ({ podCredits: _podCredits, podUsd: _podUsd, comfyCredits: _comfyCredits, comfyUsd: _comfyUsd, ...legacy }) => legacy,
+    );
+    const chart = buildBucketChartRows(legacyBuckets, { project: [], user: [], model: [] }, "total");
+
+    expect(chart.legend.map((item) => item.label)).toEqual(["Total"]);
+    expect(chart.rows.map((row) => row.segments.map((segment) => segment.credits))).toEqual([[30], [20]]);
   });
 
   it("keeps a zero-usage bucket present but empty", () => {

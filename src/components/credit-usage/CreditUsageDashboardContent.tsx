@@ -22,7 +22,7 @@ import { AnomalyPanel, KpiCard, UncostedRunsNote, UserUsagePanel } from "./Credi
 import { NodeRowsTable, ProjectStatsTable, RecentJobsTable, SelectedRunBreakdown, WorkflowStatsTable } from "./CreditUsageTables";
 
 const chartGroups: Array<{ value: ChartGroupBy; label: string }> = [
-  { value: "total", label: "Total" },
+  { value: "total", label: "Source" },
   { value: "project", label: "Project" },
   { value: "user", label: "User" },
   { value: "model", label: "Model" },
@@ -172,11 +172,7 @@ export function CreditUsageDashboardContent({
         <div className="flex h-44 items-end gap-1 overflow-hidden rounded-md bg-stone-50 px-2 pb-2 pt-4">
           {chart.rows.length ? (
             chart.rows.map((bucket, bucketIndex) => (
-              <div
-                key={bucket.key}
-                className="flex min-w-0 flex-1 flex-col items-center gap-1"
-                title={chartBarTitle(bucket)}
-              >
+              <div key={bucket.key} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={chartBarTitle(bucket)}>
                 <div className="flex h-36 w-full items-end">
                   <div
                     className="flex w-full flex-col justify-end overflow-hidden rounded-t"
