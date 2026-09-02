@@ -117,6 +117,7 @@ export function buildCreditTrackerRows(
   const userName = user?.displayName || user?.name || user?.username || job.userId;
   const promptId = `runpod:${job.runpodJobId ?? job.id}`;
   const projectName = projectFolderName(project.folderPath || project.name);
+  const quality = stringFrom(job.workflowOptions?.stillImage?.settings.quality);
   const inputSummary = JSON.stringify({
     source: "runpod_serverless",
     job_id: job.id,
@@ -127,6 +128,7 @@ export function buildCreditTrackerRows(
     input_images: summarizeInputImages(job.inputImages),
     output_files: outputFiles,
     credit_usage_source: creditUsage.source,
+    ...(quality ? { quality } : {}),
   });
 
   return rows.map((row, index) => {

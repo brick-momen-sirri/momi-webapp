@@ -46,6 +46,26 @@ test("credit_usage rows are mapped for Credit Tracker display", () => {
   ]);
 });
 
+test("GPT Image quality survives the serverless Credit Tracker sync", () => {
+  const project = makeProject();
+  const model = makeModel();
+  const job = makeJob(project, model);
+  job.workflowOptions = {
+    stillImage: {
+      categoryId: "image-editing",
+      settings: { engine: "gpt-image", quality: "high" },
+    },
+  };
+
+  const [row] = buildCreditTrackerRows(project, job, model, {
+    total_estimated_credits: 18.95,
+    total_estimated_usd: 0.0898,
+    source: "runpod_worker",
+  });
+
+  assert.equal(JSON.parse(row.input_summary).quality, "high");
+});
+
 test("serverless credit usage posts to the first available Credit Tracker endpoint", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
