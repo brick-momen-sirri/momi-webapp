@@ -1,8 +1,9 @@
-import { AlertTriangle, FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatCredits, formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project, ProjectMember, ProjectRole, User } from "../types";
+import { projectSortOptions, sortProjects, type ProjectSortMode } from "../features/projects/projectSort";
 import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { ProjectList } from "./ProjectList";
@@ -48,28 +49,19 @@ export function RightProjectPanel({
   onDeleteProjectFolder,
 }: RightProjectPanelProps) {
   const [query, setQuery] = useState("");
+  const [sortMode, setSortMode] = useState<ProjectSortMode>("default");
   const [modalOpen, setModalOpen] = useState(false);
   const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const settingsProject = settingsProjectId ? projects.find((project) => project.id === settingsProjectId) : undefined;
 
   const filteredProjects = useMemo(() => {
-    const pinnedRank = new Map(pinnedProjectIds.map((projectId, index) => [projectId, index]));
-    return projects
-      .map((project, index) => ({ project, index }))
-      .filter(({ project }) => {
-        const text = `${project.name} ${project.shortName} ${project.description ?? ""}`.toLowerCase();
-        return text.includes(query.toLowerCase());
-      })
-      .sort((a, b) => {
-        const aPinned = pinnedRank.has(a.project.id);
-        const bPinned = pinnedRank.has(b.project.id);
-        if (aPinned && bPinned) return (pinnedRank.get(a.project.id) ?? 0) - (pinnedRank.get(b.project.id) ?? 0);
-        if (aPinned !== bPinned) return aPinned ? -1 : 1;
-        return a.index - b.index;
-      })
-      .map(({ project }) => project);
-  }, [pinnedProjectIds, projects, query]);
+    const matching = projects.filter((project) => {
+      const text = `${project.name} ${project.shortName} ${project.description ?? ""}`.toLowerCase();
+      return text.includes(query.toLowerCase());
+    });
+    return sortProjects(matching, sortMode, pinnedProjectIds);
+  }, [pinnedProjectIds, projects, query, sortMode]);
 
   function createProject(project: Project) {
     onCreateProject(project);
@@ -112,8 +104,25 @@ export function RightProjectPanel({
         </label>
 
         <div className="mt-3">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Projects</p>
+            {/* Same shape as the job feed's sort control, sized for the sidebar. */}
+            <label className="relative min-w-0 shrink">
+              <span className="sr-only">Sort projects</span>
+              <select
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as ProjectSortMode)}
+                className="h-8 w-full appearance-none rounded-md border border-line bg-white pl-2 pr-7 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                aria-label="Sort projects"
+              >
+                {projectSortOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+            </label>
           </div>
           <ProjectList
             projects={filteredProjects}
