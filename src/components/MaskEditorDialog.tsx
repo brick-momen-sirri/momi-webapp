@@ -1637,7 +1637,15 @@ export function MaskEditorDialog({
             ) : null}
           </div>
 
-          {floatingPanel ? <div className="absolute bottom-4 right-4 z-20">{floatingPanel}</div> : null}
+          {floatingPanel ? (
+            // Bounded to the space between the header and the footer, not just
+            // anchored at the bottom and left to grow upward -- a preset with
+            // enough settings can otherwise push its own top past the canvas
+            // viewport's overflow-hidden edge and get silently clipped, or crowd
+            // the footer's selection readout on a shorter window. The panel
+            // itself scrolls internally past this point instead.
+            <div className="absolute inset-y-4 right-4 z-20 flex flex-col justify-end">{floatingPanel}</div>
+          ) : null}
         </div>
       </div>
 

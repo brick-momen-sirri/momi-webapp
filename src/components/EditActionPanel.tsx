@@ -168,7 +168,7 @@ export function EditActionPanel({
 
   return (
     <section
-      className="w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-white/70 bg-white/95 p-3 text-stone-900 shadow-2xl shadow-stone-950/20 backdrop-blur"
+      className="flex w-[min(24rem,calc(100vw-2rem))] max-h-full flex-col overflow-y-auto rounded-xl border border-white/70 bg-white/95 p-3 text-stone-900 shadow-2xl shadow-stone-950/20 backdrop-blur"
       aria-label="Edit prompt and generation"
       aria-busy={submitting}
       onPointerDown={(event) => event.stopPropagation()}
