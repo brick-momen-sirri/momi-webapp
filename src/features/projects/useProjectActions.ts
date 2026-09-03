@@ -13,6 +13,7 @@ import {
 import type { Project, ProjectRole } from "../../types";
 import { createClientId } from "../../utils/id";
 import { slugify } from "../workspace/workspaceUtils";
+import { withKnownProjectStats } from "./projectStats";
 
 export type ConfirmDialogState = {
   title: string;
@@ -81,7 +82,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
     }
     try {
       const updated = await addBackendProjectMember(projectId, userId, role);
-      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProjects((current) => current.map((item) => (item.id === updated.id ? withKnownProjectStats(item, updated) : item)));
       return true;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not add project member.", "error");
@@ -96,7 +97,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
     }
     try {
       const updated = await removeBackendProjectMember(projectId, userId);
-      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProjects((current) => current.map((item) => (item.id === updated.id ? withKnownProjectStats(item, updated) : item)));
       return true;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not remove project member.", "error");
@@ -107,7 +108,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
   async function handleUpdateProject(project: Project) {
     try {
       const updated = backendAvailable ? await updateBackendProject(project) : project;
-      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProjects((current) => current.map((item) => (item.id === updated.id ? withKnownProjectStats(item, updated) : item)));
       showToast("Project saved.");
       return true;
     } catch (error) {
@@ -121,7 +122,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
       if (backendAvailable) {
         const result = await createBackendProjectFolder(projectId, name, parentId);
         if (result.project) {
-          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? withKnownProjectStats(item, result.project) : item)));
         }
         setSelectedFolderId(result.folder.folderId);
         setTargetFolderId(result.folder.folderId);
@@ -161,7 +162,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
       if (backendAvailable) {
         const result = await renameBackendProjectFolder(projectId, folderId, name);
         if (result.project) {
-          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? withKnownProjectStats(item, result.project) : item)));
         }
         showToast("Folder renamed.");
         return;
@@ -210,7 +211,7 @@ export function useProjectActions(options: ProjectActionsOptions) {
       if (backendAvailable) {
         const result = await deleteBackendProjectFolder(projectId, folderId);
         if (result.project) {
-          setProjects((current) => current.map((item) => (item.id === result.project?.id ? result.project : item)));
+          setProjects((current) => current.map((item) => (item.id === result.project?.id ? withKnownProjectStats(item, result.project) : item)));
         }
       } else {
         setProjects((current) =>
