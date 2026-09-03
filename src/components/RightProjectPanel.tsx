@@ -1,8 +1,9 @@
 import { AlertTriangle, FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
+import { formatCredits, formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project, ProjectMember, ProjectRole, User } from "../types";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { ProjectList } from "./ProjectList";
 import { SpendLimitBar } from "./SpendLimitBar";
@@ -370,9 +371,12 @@ function ManageMembersModal({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  useEffect(() => {
+  // Reset during render rather than in an effect: the input is state we own,
+  // seeded from a project we do not. An effect would paint one frame showing the
+  // previous project's limit before correcting itself.
+  useResetWhenChanged(`${project.id}:${project.spendLimitUsd ?? ""}`, () => {
     setSpendLimitInput(project.spendLimitUsd != null ? String(project.spendLimitUsd) : "");
-  }, [project.id, project.spendLimitUsd]);
+  });
 
   // No effect needed: "first available user unless one was picked" is derivable.
   // Storing it meant an extra render once the user list arrived, and a stale id if
@@ -795,12 +799,6 @@ function visibilityLabel(project: Project) {
 
 function projectFolderName(project: Project) {
   return `${project.shortName}_${project.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-}
-
-function formatCredits(value: number) {
-  if (!Number.isFinite(value)) return "0";
-  if (Number.isInteger(value)) return String(value);
-  return value.toFixed(2);
 }
 
 function canRemoveMember(project: Project, currentRole: ProjectRole | undefined, member: ProjectMember, isAdmin = false) {

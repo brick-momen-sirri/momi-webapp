@@ -1,6 +1,6 @@
-import { Coins, DollarSign, Folder, FolderPlus, Pencil, Pin, Settings2, Trash2, UsersRound } from "lucide-react";
+import { Folder, FolderPlus, Pencil, Pin, Settings2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
+import { formatCredits, formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project } from "../types";
 import { SpendLimitBar } from "./SpendLimitBar";
 
@@ -69,21 +69,18 @@ export function ProjectCard({
                 </span>
               ) : null}
             </span>
-            <span className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
-              <span>{project.shortName}</span>
-              <span>{project.jobCount} jobs</span>
-              <span className="flex items-center gap-1">
-                <UsersRound className="h-3 w-3" />
-                {project.memberCount}
+            {/* Two tiers rather than one run of five numbers: what the project is
+                and how busy it is, then what it has cost. The spend is the figure
+                people come here for, so it gets its own line and the only emphasis. */}
+            <span className="mt-1 block truncate text-[11px] tabular-nums text-stone-500">
+              {project.shortName} &middot; {project.jobCount === 1 ? "1 job" : `${project.jobCount} jobs`} &middot;{" "}
+              {project.memberCount === 1 ? "1 member" : `${project.memberCount} members`}
+            </span>
+            <span className="mt-0.5 flex items-baseline justify-between gap-2 text-[11px]">
+              <span className="truncate tabular-nums text-stone-500">
+                {formatCredits(project.creditsUsed ?? 0)} credits
               </span>
-              <span className="flex items-center gap-1">
-                <Coins className="h-3 w-3" />
-                {formatCredits(project.creditsUsed ?? 0)}
-              </span>
-              <span className="flex items-center gap-1">
-                <DollarSign className="h-3 w-3" />
-                {formatUsdTotal(project.usdUsed ?? 0)}
-              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-ink">{formatUsdTotal(project.usdUsed ?? 0)}</span>
             </span>
           </span>
         </button>
@@ -180,8 +177,3 @@ function menuIcon(icon: MenuItem["icon"]) {
   return Settings2;
 }
 
-function formatCredits(value: number) {
-  if (!Number.isFinite(value)) return "0";
-  if (Number.isInteger(value)) return String(value);
-  return value.toFixed(2);
-}

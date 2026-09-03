@@ -18,14 +18,21 @@ export function SpendLimitBar({
   const barColor = overLimit ? "bg-red-500" : nearLimit ? "bg-amber-500" : "bg-accent";
 
   if (variant === "compact") {
+    // The percentage rides along with the bar: a bare stripe on a card says
+    // something is being measured without saying how close it is.
     return (
-      <div className="flex items-center gap-1.5">
-        <div className="h-1.5 w-full min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
+      <div className="flex items-center gap-2">
+        <div className="h-1 w-full min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
           <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
         </div>
         {overLimit ? (
           <AlertTriangle className="h-3 w-3 shrink-0 text-red-600" aria-label="Spend limit reached" />
         ) : null}
+        <span
+          className={`shrink-0 text-[10px] font-semibold tabular-nums ${overLimit ? "text-red-600" : "text-stone-500"}`}
+        >
+          {Math.round(pct)}%
+        </span>
       </div>
     );
   }
