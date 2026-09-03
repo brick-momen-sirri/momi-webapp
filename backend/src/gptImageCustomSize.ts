@@ -12,27 +12,33 @@
 // clamping, so every rule has to be satisfied before the job is sent:
 //
 //   - both edges a multiple of 16
-//   - longest edge no greater than 3840
+//   - both edges between 1024 and 3840
 //   - aspect ratio no wider than 3:1
-//   - total pixels between 655,360 and 8,294,400
+//   - total pixels no more than 8,294,400
 //
-// The pixel floor is the surprising one. A small painted region cannot be sent
-// at its own size -- it is scaled up to meet the floor, which is why a tiny
-// touch-up costs the same as a large one.
+// The per-edge minimum is the surprising one, and it is enforced by ComfyUI's
+// schema validation before the node's own code runs -- so it fails the whole
+// prompt, not the render. A small painted region cannot be sent at its own
+// size: it is scaled up to at least 1024 on both edges, which is why a tiny
+// touch-up costs what a large one does.
+//
+// It also dominates the provider's own 655,360 pixel floor, which is why that
+// floor is not tracked here: the smallest shape this can return is 1024x1024,
+// or 1,048,576 pixels, already above it.
 
 /** Both edges must be a multiple of this, or the node refuses the prompt. */
 const STEP = 16;
+/** The shortest edge the node accepts. Schema-enforced, so it fails validation. */
+const MIN_EDGE = 1024;
 /** The longest edge the node accepts. */
 const MAX_EDGE = 3840;
 /** The widest ratio the node accepts, long edge over short. */
 const MAX_ASPECT = 3;
-const MIN_PIXELS = 655_360;
 const MAX_PIXELS = 8_294_400;
 
 /**
- * Held back from the pixel bounds so rounding to a multiple of 16 cannot cross
- * them. Rounding moves an edge by at most 8px, so on the smallest legal image
- * this is roughly an order of magnitude more slack than it needs.
+ * Held back from the pixel ceiling so rounding to a multiple of 16 cannot cross
+ * it. Rounding moves an edge by at most 8px, far less than this allows for.
  */
 const MARGIN = 1.02;
 
@@ -59,22 +65,34 @@ export function gptImageCustomSize(sourceWidth: number, sourceHeight: number): G
   if (width / height > MAX_ASPECT) width = height * MAX_ASPECT;
   if (height / width > MAX_ASPECT) height = width * MAX_ASPECT;
 
-  // Scale as one, so the aspect just fixed above survives.
-  const pixels = width * height;
-  const target = clamp(pixels, MIN_PIXELS * MARGIN, MAX_PIXELS / MARGIN);
-  const scale = Math.sqrt(target / pixels);
-  width *= scale;
-  height *= scale;
+  // Up to the per-edge minimum first, scaling as one so the aspect just fixed
+  // above survives. This is what a small painted region runs into.
+  const shortest = Math.min(width, height);
+  if (shortest < MIN_EDGE) {
+    const grow = MIN_EDGE / shortest;
+    width *= grow;
+    height *= grow;
+  }
 
+  // Then down, if either ceiling is breached. Neither can push an edge back
+  // under the minimum: at 3:1 the widest legal shape is 3072x1024, inside both.
   const longest = Math.max(width, height);
   if (longest > MAX_EDGE) {
     const shrink = MAX_EDGE / longest;
     width *= shrink;
     height *= shrink;
   }
+  const pixels = width * height;
+  if (pixels > MAX_PIXELS / MARGIN) {
+    const shrink = Math.sqrt(MAX_PIXELS / MARGIN / pixels);
+    width *= shrink;
+    height *= shrink;
+  }
 
-  width = round16(width);
-  height = round16(height);
+  // Up to the next multiple of 16 rather than the nearest, so a value sitting
+  // exactly on the minimum cannot be rounded back under it.
+  width = ceil16(width);
+  height = ceil16(height);
 
   // Rounding is the last thing to move the numbers, so the rules are checked
   // against what will actually be sent rather than against the ideal. MARGIN
@@ -85,16 +103,12 @@ export function gptImageCustomSize(sourceWidth: number, sourceHeight: number): G
 
 /** A positive, finite edge to start from. */
 function usableEdge(value: number) {
-  return Number.isFinite(value) && value > 0 ? value : STEP;
+  return Number.isFinite(value) && value > 0 ? value : MIN_EDGE;
 }
 
-function clamp(value: number, low: number, high: number) {
-  return Math.min(Math.max(value, low), high);
-}
-
-/** Nearest multiple of 16, never zero. */
-function round16(value: number) {
-  return Math.max(STEP, Math.round(value / STEP) * STEP);
+/** Next multiple of 16 at or above the value, never below the minimum edge. */
+function ceil16(value: number) {
+  return Math.max(MIN_EDGE, Math.ceil(value / STEP) * STEP);
 }
 
 /**
@@ -111,6 +125,11 @@ function repair(width: number, height: number): GptImageCustomSize {
     const shortest = Math.min(width, height);
     const pixels = width * height;
 
+    if (shortest < MIN_EDGE) {
+      if (width === shortest) width += STEP;
+      else height += STEP;
+      continue;
+    }
     if (longest > MAX_EDGE) {
       if (width === longest) width -= STEP;
       else height -= STEP;
@@ -124,11 +143,6 @@ function repair(width: number, height: number): GptImageCustomSize {
     if (pixels > MAX_PIXELS) {
       if (width === longest) width -= STEP;
       else height -= STEP;
-      continue;
-    }
-    if (pixels < MIN_PIXELS) {
-      if (width === shortest) width += STEP;
-      else height += STEP;
       continue;
     }
     break;

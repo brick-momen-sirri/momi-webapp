@@ -3,16 +3,25 @@ import test from "node:test";
 
 import { gptImageCustomSize } from "./gptImageCustomSize.js";
 
-/** The rules the node enforces. A size that breaks one fails the whole prompt. */
+/**
+ * The rules the node enforces. A size that breaks one fails the whole prompt.
+ *
+ * These are the input schema's own numbers -- min/max/step on custom_width and
+ * custom_height, read from /object_info -- not the looser set in the node's
+ * runtime body. The first version of this file asserted only the runtime set
+ * and so agreed with a function that shipped 816x816, which ComfyUI rejects at
+ * validation before the node ever runs. Both sides were wrong together, which
+ * is exactly what a test written from the same premise as the code cannot catch.
+ */
 function assertLegal(size: { width: number; height: number }) {
   const { width, height } = size;
   const longest = Math.max(width, height);
   const shortest = Math.min(width, height);
   assert.equal(width % 16, 0, `width ${width} is not a multiple of 16`);
   assert.equal(height % 16, 0, `height ${height} is not a multiple of 16`);
+  assert.ok(shortest >= 1024, `shortest edge ${shortest} is under the 1024 minimum`);
   assert.ok(longest <= 3840, `longest edge ${longest} exceeds 3840`);
   assert.ok(longest / shortest <= 3, `aspect ${longest / shortest} exceeds 3:1`);
-  assert.ok(width * height >= 655_360, `${width}x${height} is under the pixel floor`);
   assert.ok(width * height <= 8_294_400, `${width}x${height} is over the pixel ceiling`);
 }
 
@@ -30,12 +39,21 @@ test("the source aspect survives, which is the whole point of Custom", () => {
   assert.ok(Math.abs(size.width / size.height - 1.5) < 0.02, `${size.width}x${size.height} is not 3:2`);
 });
 
-test("a small region is scaled up to the pixel floor rather than refused", () => {
-  // 400x400 is 160,000 pixels, well under the 655,360 floor. This is why a tiny
-  // touch-up costs the same as a large one.
+test("a small square region is scaled up to the per-edge minimum", () => {
+  // The case that shipped broken: scaling only to the provider's 655,360 pixel
+  // floor gives 816x816, which clears the floor and still fails validation
+  // against the schema's min of 1024. This is also why a tiny touch-up costs
+  // what a large one does.
   const size = gptImageCustomSize(400, 400);
   assertLegal(size);
-  assert.ok(size.width > 400, "a sub-floor crop should have been scaled up");
+  assert.equal(size.width, 1024);
+  assert.equal(size.height, 1024);
+});
+
+test("a small non-square region keeps its shape while clearing the minimum", () => {
+  const size = gptImageCustomSize(600, 450);
+  assertLegal(size);
+  assert.ok(Math.abs(size.width / size.height - 4 / 3) < 0.03, `${size.width}x${size.height} lost its 4:3 shape`);
 });
 
 test("an oversized source is brought down by the pixel ceiling", () => {
@@ -87,8 +105,8 @@ test("every size in a wide sweep of real crop shapes is legal", () => {
   // The rules interact -- the aspect clamp changes the pixel count, the pixel
   // scale changes the longest edge, and rounding to 16 moves both again. One
   // worked example proves nothing about that, so this sweeps the space.
-  for (let width = 64; width <= 6000; width += 137) {
-    for (let height = 64; height <= 6000; height += 149) {
+  for (let width = 16; width <= 6000; width += 71) {
+    for (let height = 16; height <= 6000; height += 83) {
       assertLegal(gptImageCustomSize(width, height));
     }
   }

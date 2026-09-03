@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeStillImageOptions } from "./stillImageRequest.js";
+import { stillImageSeedSequence } from "./stillImageSeed.js";
 import {
   buildStillImageWorkflow,
   stillImageInputTransport,
@@ -852,4 +853,43 @@ test("the GPT graph keeps the plumbing that makes the edit an inpaint", async ()
 test("Nano Banana stays the default, so an existing request is unaffected", async () => {
   const graph = await build("image-editing", {}, ["a", "b", "c"], "p");
   assert.equal(graph["1"].class_type, "GeminiNanoBanana2");
+});
+
+test("a GPT edit's seed stays inside the int32 range its node declares", async () => {
+  // The seed sequence draws 32 bits, which every other node here accepts --
+  // GeminiNanoBanana2 declares a ceiling of 2^64-1. OpenAIGPTImage1 declares
+  // 2^31-1, so half of all draws used to fail ComfyUI's validation before the
+  // node ran, presenting as an intermittent failure with no pattern to it.
+  const seen = new Set<number>();
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    seedCounter = attempt * 7919;
+    const graph = await buildStillImageWorkflow({
+      options: normalizeStillImageOptions({
+        categoryId: "image-editing",
+        settings: { engine: "gpt-image" },
+        edit: editFixture({ size: 1024 }),
+      }),
+      images: ["src.png", "mask.png", "guide.png"],
+      prompt: "p",
+      // The real generator, not the test counter: its range is the thing at issue.
+      nextSeed: stillImageSeedSequence(attempt * 104_729),
+    });
+    const seed = Number(value(graph, "1", "seed"));
+    assert.ok(Number.isInteger(seed) && seed >= 0, `seed ${seed} is not a natural number`);
+    assert.ok(seed <= 2_147_483_647, `seed ${seed} exceeds the node's declared maximum`);
+    seen.add(seed);
+  }
+  // Folded, not clamped -- clamping every high draw onto the ceiling would
+  // quietly reproduce one render for half the seed space.
+  assert.ok(seen.size > 30, `only ${seen.size} distinct seeds in 40 draws; the fold is collapsing them`);
+});
+
+test("Nano Banana keeps the full 32-bit seed its node accepts", async () => {
+  const graph = await buildStillImageWorkflow({
+    options: normalizeStillImageOptions({ categoryId: "image-editing", settings: {}, edit: editFixture({ size: 1024 }) }),
+    images: ["src.png", "mask.png", "guide.png"],
+    prompt: "p",
+    nextSeed: () => 4_000_000_000,
+  });
+  assert.equal(value(graph, "1", "seed"), 4_000_000_000);
 });

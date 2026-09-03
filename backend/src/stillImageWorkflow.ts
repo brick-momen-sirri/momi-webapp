@@ -767,11 +767,16 @@ const IMAGE_EDIT = {
  * whole-image drift would quietly re-render the parts nobody asked about.
  */
 function applyImageEditing(graph: StillImageGraph, input: ResolvedBuildInput) {
-  set(graph, IMAGE_EDIT.gemini, "seed", input.nextSeed());
+  // Drawn once either way: the seed sequence ties a draw to a node by call
+  // order, so branching the number of draws would re-render old seeds
+  // differently on whichever engine drew second.
+  const seed = input.nextSeed();
 
   if (choice(input.settings, "engine", NANO_BANANA_ENGINE) === GPT_IMAGE_ENGINE) {
+    set(graph, IMAGE_EDIT.gemini, "seed", gptImageSeed(seed));
     applyGptImageCall(graph, input);
   } else {
+    set(graph, IMAGE_EDIT.gemini, "seed", seed);
     set(graph, IMAGE_EDIT.gemini, "prompt", input.prompt);
     set(graph, IMAGE_EDIT.gemini, "resolution", choice(input.settings, "resolution", "1K"));
     set(graph, IMAGE_EDIT.gemini, "thinking_level", choice(input.settings, "thinking", "MINIMAL"));
@@ -822,6 +827,24 @@ const EDIT_INSTRUCTION =
   "appearance, material, colour, or style without copying their framing. Apply the user's instruction inside " +
   "the marked region and leave everything outside it identical to the source. Always return an image with the " +
   "same framing and aspect ratio as the source. You must ALWAYS produce an image.";
+
+/**
+ * The seed sequence draws 32 bits; this node accepts 31.
+ *
+ * STILL_IMAGE_MAX_SEED is 2^32-1, which every other node in the system takes --
+ * GeminiNanoBanana2 declares a ceiling of 2^64-1. OpenAIGPTImage1 declares
+ * 2^31-1, so roughly half of all draws land above it and ComfyUI rejects the
+ * whole prompt at validation, before the node runs. It reads as an intermittent
+ * failure with no pattern, because the only thing that varies is the dice.
+ *
+ * Folded rather than clamped: clamping would pile every high draw onto one seed
+ * and quietly reproduce the same render. Keeping the low 31 bits stays
+ * deterministic -- the same master seed still gives the same graph -- and keeps
+ * the spread the generator was built for.
+ */
+function gptImageSeed(seed: number) {
+  return seed % 2_147_483_648;
+}
 
 /**
  * The GPT Image half of the editing graph.
