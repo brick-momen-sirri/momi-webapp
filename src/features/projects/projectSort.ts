@@ -32,11 +32,13 @@ function spend(project: Project) {
 }
 
 /**
- * Projects in display order: pinned first, then by the chosen sort.
+ * Projects in display order.
  *
- * Pins stay above the sort rather than being folded into it. A pin is a standing
- * instruction to keep something in reach, so a spend sort that buried a pinned
- * project would quietly override a choice the user made on purpose.
+ * Pins float to the top in the default view only. Picking a sort is a request to
+ * rank *everything* by it: there are eight pinned projects here, so a spend sort
+ * that kept them above the ranking would answer "which project costs the most"
+ * with two separate blocks, the real answer buried in the second one. In the
+ * default view there is no ranking to compete with, so pins take the top.
  *
  * Every comparison falls back to the incoming order, which is the caller's
  * original array order. That keeps the list stable: projects that tie -- and
@@ -48,10 +50,13 @@ export function sortProjects(projects: Project[], mode: ProjectSortMode, pinnedP
   return projects
     .map((project, index) => ({ project, index }))
     .sort((a, b) => {
-      const aPinned = pinnedRank.has(a.project.id);
-      const bPinned = pinnedRank.has(b.project.id);
-      if (aPinned && bPinned) return (pinnedRank.get(a.project.id) ?? 0) - (pinnedRank.get(b.project.id) ?? 0);
-      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      if (mode === "default") {
+        const aPinned = pinnedRank.has(a.project.id);
+        const bPinned = pinnedRank.has(b.project.id);
+        if (aPinned && bPinned) return (pinnedRank.get(a.project.id) ?? 0) - (pinnedRank.get(b.project.id) ?? 0);
+        if (aPinned !== bPinned) return aPinned ? -1 : 1;
+        return a.index - b.index;
+      }
 
       if (mode === "number") {
         const delta = projectNumber(a.project) - projectNumber(b.project);

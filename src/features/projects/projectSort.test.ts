@@ -59,16 +59,21 @@ describe("sortProjects", () => {
     expect(names(sortProjects(withUnknown, "spend_desc", []))).toContain("Fresh");
   });
 
-  it("keeps pinned projects on top of any sort", () => {
-    // Aramco is the cheapest of the three real spenders, so a highest-spend sort
-    // would bury it -- the pin has to win.
-    const sorted = sortProjects(projects, "spend_desc", ["prj_aramco"]);
-    expect(names(sorted)[0]).toBe("Aramco");
+  it("floats pins to the top in the default view", () => {
+    const sorted = sortProjects(projects, "default", ["prj_aramco", "prj_shark"]);
+    expect(names(sorted).slice(0, 2)).toEqual(["Aramco", "Shark"]);
   });
 
-  it("orders several pins by pin order, not by the sort", () => {
-    const sorted = sortProjects(projects, "name", ["prj_shark", "prj_aramco"]);
-    expect(names(sorted).slice(0, 2)).toEqual(["Shark", "Aramco"]);
+  it("ignores pins once a sort is chosen, so the ranking is the whole list", () => {
+    // Pinning the cheapest project must not put it above the most expensive one
+    // when the question asked is "which costs most".
+    const sorted = sortProjects(projects, "spend_desc", ["prj_playground"]);
+    expect(names(sorted)).toEqual(["Urban Design", "Shark", "Aramco", "Playground"]);
+  });
+
+  it("ignores pins for a name sort too", () => {
+    const sorted = sortProjects(projects, "name", ["prj_urban_design"]);
+    expect(names(sorted)).toEqual(["Aramco", "Playground", "Shark", "Urban Design"]);
   });
 
   it("sorts unparseable project numbers to the end, not to the front", () => {
