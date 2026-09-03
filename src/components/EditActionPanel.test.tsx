@@ -159,4 +159,39 @@ describe("EditActionPanel", () => {
       expect(screen.getByTestId("edit-references-strip")).toBeInTheDocument();
     });
   });
+
+  describe("inpaint mode", () => {
+    it("shows the preset's own settings -- this is the only place they can appear", () => {
+      // Image Editing Studio gets no generic settings card and no Enhance-tab
+      // controls in inpaint mode, so this render prop is the only way an engine
+      // or resolution choice ever reaches the screen.
+      render(
+        <EditActionPanel
+          {...props()}
+          mode="inpaint"
+          inpaintControls={
+            <label>
+              Model
+              <select aria-label="Model">
+                <option>Nano Banana</option>
+                <option>GPT Image</option>
+              </select>
+            </label>
+          }
+        />,
+      );
+      expect(screen.getByRole("combobox", { name: "Model" })).toBeInTheDocument();
+    });
+
+    it("keeps the preset's settings out of enhance, where a different preset runs", () => {
+      render(
+        <EditActionPanel
+          {...props()}
+          mode="enhance"
+          inpaintControls={<input aria-label="Region marking" type="checkbox" />}
+        />,
+      );
+      expect(screen.queryByRole("checkbox", { name: "Region marking" })).not.toBeInTheDocument();
+    });
+  });
 });

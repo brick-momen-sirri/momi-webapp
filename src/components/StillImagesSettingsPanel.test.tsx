@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendMaskStroke, createMaskDrawing } from "../features/still-images/maskDrawing";
@@ -7,6 +7,21 @@ import { useStillImagesForm } from "../features/still-images/useStillImagesForm"
 import type { Project, UploadedImage } from "../types";
 import { StillImagesSettingsPanel } from "./StillImagesSettingsPanel";
 import { StillImagesWorkspace } from "./StillImagesWorkspace";
+
+// Lets the editor's full-screen dialog actually open in a test: the real
+// loadImageElement waits on a blob URL to decode, which jsdom never does.
+vi.mock("../features/still-images/maskRaster", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../features/still-images/maskRaster")>();
+  return {
+    ...actual,
+    loadImageElement: vi.fn(async () => {
+      const image = document.createElement("img");
+      Object.defineProperty(image, "naturalWidth", { value: 800 });
+      Object.defineProperty(image, "naturalHeight", { value: 600 });
+      return image;
+    }),
+  };
+});
 
 const generateCalls: number[] = [];
 
@@ -171,7 +186,93 @@ describe("StillImagesSettingsPanel", () => {
     expect(screen.queryByRole("button", { name: "Generate" })).not.toBeInTheDocument();
   });
 
-  it("holds a seed per preset and refuses what the server would reject", async () => {
+it("puts the engine choice on screen once a region is painted -- the gap that hid it", async () => {
+    // Image Editing Studio never gets the generic settings card (paintsItsOwnSlots
+    // suppresses it) and Enhance's controls come from a different preset entirely,
+    // so this floating panel -- inside the full-screen editor the region button
+    // opens -- is the only path an engine/quality/resolution choice has to the
+    // screen at all. Before it existed, every edit ran silently on whatever
+    // normalizeStillImageOptions defaulted to.
+    const user = userEvent.setup();
+    const category = getStillImageCategory("image-editing");
+    const base = createInitialStillImagesState()["image-editing"];
+    const image: UploadedImage = { id: "img_1", name: "shot.png", url: "blob:shot" };
+    const painted = {
+      ...base,
+      images: [image],
+      mask: appendMaskStroke(createMaskDrawing(800, 600), { tool: "brush" as const, radius: 20, points: [{ x: 10, y: 10 }] }),
+    };
+
+    render(
+      <StillImagesSettingsPanel
+        selectedCategoryId="image-editing"
+        category={category}
+        selectedProject={{ id: "proj_1", name: "Tower", folders: [] } as unknown as Project}
+        state={painted}
+        targetFolderId=""
+        saveNumber="0012"
+        onCategoryChange={() => undefined}
+        onImagesChange={() => undefined}
+        onMaskChange={() => undefined}
+        onPromptChange={() => undefined}
+        onSeedChange={() => undefined}
+        onSettingChange={() => undefined}
+        onTargetFolderChange={() => undefined}
+        onSaveNumberChange={() => undefined}
+        onGenerate={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Edit region" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /model/i })).toBeInTheDocument());
+// Nano Banana is the default engine, so its own setting is what shows first.
+    expect(screen.getByRole("combobox", { name: /output resolution/i })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /quality/i })).not.toBeInTheDocument();
+    // The preset's own Variations setting is excluded from these controls, so
+    // there is exactly one variations slider -- the panel's own dedicated one --
+    // not two fighting over the same number.
+    expect(screen.getAllByRole("slider", { name: /variations/i })).toHaveLength(1);
+  });
+
+  it("switches which of the engine's own settings show when GPT Image is chosen", async () => {
+    const user = userEvent.setup();
+    const category = getStillImageCategory("image-editing");
+    const base = createInitialStillImagesState()["image-editing"];
+    const image: UploadedImage = { id: "img_1", name: "shot.png", url: "blob:shot" };
+    const painted = {
+      ...base,
+      images: [image],
+      mask: appendMaskStroke(createMaskDrawing(800, 600), { tool: "brush" as const, radius: 20, points: [{ x: 10, y: 10 }] }),
+      settings: { ...base.settings, engine: "gpt-image" },
+    };
+
+    render(
+      <StillImagesSettingsPanel
+        selectedCategoryId="image-editing"
+        category={category}
+        selectedProject={{ id: "proj_1", name: "Tower", folders: [] } as unknown as Project}
+        state={painted}
+        targetFolderId=""
+        saveNumber="0012"
+        onCategoryChange={() => undefined}
+        onImagesChange={() => undefined}
+        onMaskChange={() => undefined}
+        onPromptChange={() => undefined}
+        onSeedChange={() => undefined}
+        onSettingChange={() => undefined}
+        onTargetFolderChange={() => undefined}
+        onSaveNumberChange={() => undefined}
+        onGenerate={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Edit region" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /quality/i })).toBeInTheDocument());
+    expect(screen.queryByRole("combobox", { name: /output resolution/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /reasoning/i })).not.toBeInTheDocument();
+  });
+
+    it("holds a seed per preset and refuses what the server would reject", async () => {
     const user = userEvent.setup();
     render(<StillImagesHarness />);
 

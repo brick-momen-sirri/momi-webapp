@@ -33,6 +33,13 @@ type EditActionPanelProps = {
    * one place that already defines them.
    */
   enhanceControls?: ReactNode;
+  /**
+   * The preset's own inpaint-time settings -- engine choice, its resolution or
+   * quality control, and the region/pre-blend toggles -- built by the settings
+   * panel the same way enhanceControls is, so this panel does not need to know
+   * what a preset is either.
+   */
+  inpaintControls?: ReactNode;
   onModeChange: (mode: StillImageEditMode) => void;
   onPromptChange: (prompt: string) => void;
   onReferencesChange: (references: UploadedImage[]) => void;
@@ -53,6 +60,7 @@ export function EditActionPanel({
   canGenerate,
   disabledReason,
   enhanceControls,
+  inpaintControls,
   onModeChange,
   onPromptChange,
   onReferencesChange,
@@ -216,6 +224,16 @@ export function EditActionPanel({
             Enhancement
           </p>
           <div className="space-y-2.5">{enhanceControls}</div>
+        </div>
+      ) : null}
+
+      {inpaintControls && promptRequired ? (
+        <div className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-2.5">
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">
+            <SlidersHorizontal className="h-3 w-3" />
+            Model &amp; settings
+          </p>
+          <div className="space-y-2.5">{inpaintControls}</div>
         </div>
       ) : null}
 

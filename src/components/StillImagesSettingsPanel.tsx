@@ -189,6 +189,35 @@ export function StillImagesSettingsPanel({
           />
         ))
       : undefined;
+  /**
+   * Image Editing Studio's own settings -- engine, its quality or resolution
+   * control, and the region-marking and pre-blend toggles -- for the Inpaint
+   * tab of the editor.
+   *
+   * This preset never gets the generic settingsCard below (paintsItsOwnSlots
+   * suppresses it, further down), and enhanceControls is built from a
+   * different category entirely (general-enhancement, for the Enhance tab).
+   * Without this, engine/quality/resolution/thinking/markRegion/
+   * preserveUnmasked had no way to reach the screen at all: every edit ran on
+   * whatever normalizeStillImageOptions defaults to, invisibly.
+   *
+   * variations is left out -- EditActionPanel already has its own dedicated
+   * slider bound to this same state.settings.variations, and showing both
+   * would be two controls fighting over one number.
+   */
+  const inpaintControls =
+    paintsItsOwnSlots && editMode === "inpaint"
+      ? visibleStillImageSettings(category, state)
+          .filter((setting) => setting.id !== "variations")
+          .map((setting) => (
+            <StillImageSettingField
+              key={setting.id}
+              setting={setting}
+              value={state.settings[setting.id] ?? setting.defaultValue}
+              onChange={(value) => onSettingChange(setting.id, value)}
+            />
+          ))
+      : undefined;
   const compositeLayers = paintsItsOwnSlots ? visibleEditLayers(state) : [];
   // Edits on different regions are independent -- the compositor pastes each
   // through its own mask at its own crop -- so a running one no longer freezes
@@ -420,6 +449,7 @@ export function StillImagesSettingsPanel({
               <EditActionPanel
                 mode={editMode}
                 enhanceControls={enhanceControls}
+                inpaintControls={inpaintControls}
                 prompt={state.prompt}
                 references={state.editReferences ?? []}
                 variations={Math.max(1, Math.min(4, Number(state.settings.variations) || 1))}
@@ -684,22 +714,34 @@ function StillImageSettingField({ setting, value, onChange }: StillImageSettingF
   }
 
   if (setting.kind === "select") {
+    const hintId = setting.hint ? `${setting.id}-hint` : undefined;
     return (
-      <label className="block">
-        <span className="text-xs font-semibold text-stone-600">{setting.label}</span>
-        <select
-          value={String(value)}
-          onChange={(event) => onChange(event.target.value)}
-          className="mt-1.5 h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-        >
-          {setting.options?.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        {setting.hint ? <span className="mt-1 block text-[11px] text-stone-500">{setting.hint}</span> : null}
-      </label>
+      <div>
+        <label className="block">
+          <span className="text-xs font-semibold text-stone-600">{setting.label}</span>
+          <select
+            value={String(value)}
+            onChange={(event) => onChange(event.target.value)}
+            aria-describedby={hintId}
+            className="mt-1.5 h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+          >
+            {setting.options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* Outside the label: nested inside it, this text became part of the
+            select's accessible name, so a screen reader read the whole hint
+            paragraph -- and every option label -- on every visit to the field.
+            aria-describedby says the same thing without that. */}
+        {hintId ? (
+          <p id={hintId} className="mt-1 text-[11px] text-stone-500">
+            {setting.hint}
+          </p>
+        ) : null}
+      </div>
     );
   }
 
