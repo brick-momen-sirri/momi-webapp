@@ -393,6 +393,24 @@ html[data-theme="dark"] :is(.bg-red-50) {
   background-color: rgba(127, 29, 29, 0.18) !important;
 }
 
+/*
+ * Cyan is the app's accent family -- folder chips, the Realistic preset card, the
+ * editor's active-layer callouts -- and it was the one tinted family this sheet
+ * never mapped. Unmapped, `bg-cyan-50` keeps its light-theme near-white while the
+ * text on it is force-inverted to #ddd6ca by the rules below, which is how the
+ * Realistic prompt card ended up as pale text on a pale panel: unreadable, and
+ * reported as such. Same treatment as teal above: keep the hue, drop it to a
+ * translucent wash so the surface underneath still reads as dark.
+ */
+html[data-theme="dark"] :is(.bg-cyan-50, .bg-cyan-50\/70, .bg-cyan-50\/50, .hover\:bg-cyan-50:hover, .hover\:bg-cyan-50\/50:hover) {
+  background-color: rgba(34, 211, 238, 0.12) !important;
+}
+
+/* The chip weight of the same family, so it stays a step above the panel wash. */
+html[data-theme="dark"] :is(.bg-cyan-100, .hover\:bg-cyan-100:hover) {
+  background-color: rgba(34, 211, 238, 0.2) !important;
+}
+
 html[data-theme="dark"] :is(.border-line, .border-stone-100, .border-stone-200, .border-stone-300, .border-stone-400) {
   border-color: #3a3732 !important;
 }
@@ -416,6 +434,10 @@ html[data-theme="dark"] :is(.border-teal-100, .border-emerald-100) {
 
 html[data-theme="dark"] :is(.border-red-100, .border-red-200) {
   border-color: rgba(248, 113, 113, 0.28) !important;
+}
+
+html[data-theme="dark"] :is(.border-cyan-100, .border-cyan-200, .border-cyan-200\/80, .border-cyan-200\/70) {
+  border-color: rgba(34, 211, 238, 0.28) !important;
 }
 
 html[data-theme="dark"] .text-ink {
@@ -445,6 +467,14 @@ html[data-theme="dark"] :is(.text-teal-800, .text-teal-700, .text-emerald-700) {
 
 html[data-theme="dark"] :is(.text-red-700, .text-red-600) {
   color: #f58c8c !important;
+}
+
+/* cyan-900 through cyan-600 are all "accent text on a pale accent panel" in the
+   light theme; on a dark wash they have to come up, not down. Stops at 600: the
+   300/400/500 steps are used on the editor's dark canvas, where they already sit
+   on the right side of the contrast. */
+html[data-theme="dark"] :is(.text-cyan-900, .text-cyan-800, .text-cyan-700, .text-cyan-600, .hover\:text-cyan-700:hover, .hover\:text-cyan-600:hover) {
+  color: #67d9ee !important;
 }
 
 html[data-theme="dark"] :is(input, textarea, select) {
