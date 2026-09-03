@@ -115,7 +115,8 @@ describe("useStillImagesSubmission", () => {
       "enhancement",
       "upscale",
     ]);
-    expect(onJobCreated).toHaveBeenCalledWith(expect.objectContaining({ id: "job_1" }));
+    // Second argument is the overlap context, undefined when nothing was painted over.
+    expect(onJobCreated).toHaveBeenCalledWith(expect.objectContaining({ id: "job_1" }), undefined);
   });
 
   it("drops settings the preset currently hides", async () => {
@@ -746,19 +747,40 @@ describe("edits that run at the same time", () => {
       saveNumber: "0001",
     });
 
-  it("refuses a second edit that overlaps one already running, and says why", async () => {
-    const { hook, onError } = setup();
-    // Left in flight deliberately: the point is what happens while it runs.
+  it("sends an edit that paints over a running one, and marks what it was missing", async () => {
+    // This used to be refused. It is not independent -- the base was built before
+    // the running layer finished, so where they meet the model answered the image
+    // without it -- but that is often fine or even wanted, and the artist is the
+    // one who can tell. So it goes, and the layer records what it could not see.
+    const { hook, onJobCreated } = setup();
     const first = submitRegion(hook, regionAt(100, 100));
-
-    const overlapping = await submitRegion(hook, regionAt(140, 140));
-    expect(overlapping).toMatchObject({ ok: false, error: expect.stringMatching(/overlaps an edit still running/i) });
-    // And the artist is told, rather than pressing Generate and seeing nothing.
-    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/overlaps an edit still running/i));
+    const overlapping = submitRegion(hook, regionAt(110, 110));
 
     await act(async () => {
-      await first;
+      await Promise.all([first, overlapping]);
     });
+
+    expect(onJobCreated).toHaveBeenCalledTimes(2);
+    const contexts = onJobCreated.mock.calls.map(([, context]) => context);
+    expect(contexts.some((context) => (context?.paintedOver?.length ?? 0) > 0)).toBe(true);
+  });
+
+  it("marks nothing when the regions only share a crop, not a painted pixel", async () => {
+    // A crop is squared to an aspect and padded with margin, so two small dabs
+    // well apart used to collide on crops alone and be refused. They share no
+    // pixel, so neither can affect the other and there is nothing to warn about.
+    const { hook, onJobCreated } = setup();
+    const first = submitRegion(hook, regionAt(100, 100));
+    const elsewhere = submitRegion(hook, regionAt(700, 500));
+
+    await act(async () => {
+      await Promise.all([first, elsewhere]);
+    });
+
+    expect(onJobCreated).toHaveBeenCalledTimes(2);
+    for (const [, context] of onJobCreated.mock.calls) {
+      expect(context?.paintedOver ?? []).toEqual([]);
+    }
   });
 
   it("lets an edit somewhere else go straight out", async () => {

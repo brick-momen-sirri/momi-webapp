@@ -1,52 +1,54 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  IDENTITY_TRANSFORM,
+  MAX_ZOOM,
+  MIN_ZOOM,
   appendMaskStroke,
+  boxCorners,
   brushRadiusInImagePixels,
   brushRadiusOnScreen,
   brushSettingsFromDrag,
   clearMaskStrokes,
+  composeTransforms,
+  conjugateTransform,
   createMaskDrawing,
   fitMaskView,
   hasPaintedRegion,
   imagePointFromViewport,
-  MAX_ZOOM,
-  MIN_ZOOM,
+  invertMaskDrawing,
+  invertTransform,
+  isIdentityTransform,
+  marqueeSelection,
   maskBlurPixels,
   maskCropAspect,
   maskCropMargin,
+  maskGeometryBounds,
+  maskInverted,
   maskRectangleFromPoints,
+  maskTransform,
+  masksOverlap,
   panMaskView,
+  resetMaskTransform,
   retargetMaskDrawing,
+  rotationTransform,
+  scaleTransform,
   setMaskCropAspect,
   setMaskCropMargin,
   setMaskRectangleSelection,
   setMaskSoftness,
-  simplifyStrokePoints,
-  undoMaskStroke,
-  viewportPointFromImage,
-  zoomMaskView,
-  type MaskStroke,
-  marqueeSelection,
-  translateMaskDrawing,
-  invertMaskDrawing,
-  maskInverted,
-  boxCorners,
-  composeTransforms,
-  conjugateTransform,
-  IDENTITY_TRANSFORM,
-  invertTransform,
-  isIdentityTransform,
-  maskGeometryBounds,
-  maskTransform,
-  resetMaskTransform,
-  rotationTransform,
-  scaleTransform,
   setMaskTransform,
+  simplifyStrokePoints,
   transformFromHandleDrag,
   transformPoint,
   transformReadout,
+  translateMaskDrawing,
   translationTransform,
+  type MaskPoint,
+  type MaskStroke,
+  undoMaskStroke,
+  viewportPointFromImage,
+  zoomMaskView,
 } from "./maskDrawing";
 
 const brush = (points: Array<[number, number]>, radius = 10): MaskStroke => ({
@@ -554,5 +556,67 @@ describe("the free transform", () => {
       expect(Math.abs(next.d)).toBeGreaterThan(0);
       expect(invertTransform(next)).toBeDefined();
     });
+  });
+});
+
+describe("whether two edits touch the same pixels", () => {
+  const brush = (points: MaskPoint[], radius = 10) => ({ tool: "brush" as const, radius, points });
+  const painted = (strokes: ReturnType<typeof brush>[]) =>
+    strokes.reduce((drawing, stroke) => appendMaskStroke(drawing, stroke), createMaskDrawing(2000, 2000));
+
+  it("clears two small edits far apart, which the crop test used to refuse", () => {
+    // The real complaint: crops are squared to an aspect and padded with margin,
+    // so two small dabs on opposite sides of a picture produce overlapping crops
+    // while sharing no painted pixel at all.
+    const left = painted([brush([{ x: 100, y: 1000 }])]);
+    const right = painted([brush([{ x: 1900, y: 1000 }])]);
+    expect(masksOverlap(left, right)).toBe(false);
+  });
+
+  it("catches two dabs that genuinely sit on each other", () => {
+    const first = painted([brush([{ x: 500, y: 500 }], 40)]);
+    const second = painted([brush([{ x: 520, y: 510 }], 40)]);
+    expect(masksOverlap(first, second)).toBe(true);
+  });
+
+  it("does not join a stroke's ends into one block", () => {
+    // A single bounding box over this stroke would cover the whole diagonal and
+    // swallow anything near it. Boxing each segment keeps it the thin line it is.
+    const diagonal = painted([brush([{ x: 0, y: 0 }, { x: 2000, y: 2000 }], 5)]);
+    const offDiagonal = painted([brush([{ x: 1800, y: 200 }], 20)]);
+    expect(masksOverlap(diagonal, offDiagonal)).toBe(false);
+    expect(masksOverlap(diagonal, painted([brush([{ x: 1000, y: 1000 }], 20)]))).toBe(true);
+  });
+
+  it("counts a rectangle selection as its rectangle", () => {
+    const boxed = setMaskRectangleSelection(createMaskDrawing(2000, 2000), { x: 100, y: 100, width: 200, height: 200 });
+    expect(masksOverlap(boxed, painted([brush([{ x: 250, y: 250 }], 5)]))).toBe(true);
+    expect(masksOverlap(boxed, painted([brush([{ x: 900, y: 900 }], 5)]))).toBe(false);
+  });
+
+  it("ignores erased area rather than trusting it, which errs toward refusing", () => {
+    // An eraser only shrinks what a mask covers. Skipping it can say "these
+    // overlap" when they no longer do -- never the reverse, which would let a
+    // genuine conflict through.
+    const erased = appendMaskStroke(painted([brush([{ x: 500, y: 500 }], 50)]), {
+      tool: "eraser",
+      radius: 80,
+      points: [{ x: 500, y: 500 }],
+    });
+    expect(masksOverlap(erased, painted([brush([{ x: 520, y: 500 }], 20)]))).toBe(true);
+  });
+
+  it("grows the painted area by the feather it will be blurred with", () => {
+    const first = painted([brush([{ x: 500, y: 500 }], 10)]);
+    const second = painted([brush([{ x: 560, y: 500 }], 10)]);
+    expect(masksOverlap(first, second)).toBe(false);
+    expect(masksOverlap(first, second, 30)).toBe(true);
+  });
+
+  it("follows a mask that has been moved, so a shifted mask is judged where it now sits", () => {
+    const still = painted([brush([{ x: 100, y: 100 }], 20)]);
+    const other = painted([brush([{ x: 900, y: 100 }], 20)]);
+    expect(masksOverlap(still, other)).toBe(false);
+    expect(masksOverlap(still, translateMaskDrawing(other, -800, 0))).toBe(true);
   });
 });

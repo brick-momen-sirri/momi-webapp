@@ -418,6 +418,150 @@ export function maskGeometryBounds(drawing: MaskDrawing): MaskBox | undefined {
 
 export type MaskBox = { left: number; top: number; right: number; bottom: number };
 
+/**
+ * What a mask actually paints: round-ended strokes, plus any hard rectangle.
+ *
+ * maskGeometryBounds collapses a whole drawing to a single rectangle, which is
+ * right for framing a crop and wrong for asking whether two edits touch -- a
+ * dab top-left and another bottom-right produce one box covering everything
+ * between them. A brush is a capsule (a segment with a radius), which is what
+ * it draws, so a stroke stays the thin line it is however it runs. Boxing the
+ * segments instead would fail on a single fast diagonal drag, whose box is the
+ * whole image.
+ *
+ * Generous only in the safe direction. Eraser strokes are skipped, so coverage
+ * is over-stated rather than under-stated, and a lasso is taken as its bounding
+ * box rather than its polygon. Both can only produce a false "these overlap",
+ * never a false "these are clear".
+ */
+export type MaskCoverage = { capsules: Array<{ from: MaskPoint; to: MaskPoint; radius: number }>; rects: MaskBox[] };
+
+export function maskCoverage(drawing: MaskDrawing, feather = 0): MaskCoverage {
+  const coverage: MaskCoverage = { capsules: [], rects: [] };
+  const transform = maskTransform(drawing);
+  // A rotation or scale moves the geometry; the radius grows with the largest
+  // direction the transform stretches.
+  const stretch = Math.max(Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d), 0);
+  const pad = Math.max(0, feather);
+
+  if (drawing.selection) {
+    const corners = boxCorners({
+      left: drawing.selection.x,
+      top: drawing.selection.y,
+      right: drawing.selection.x + drawing.selection.width,
+      bottom: drawing.selection.y + drawing.selection.height,
+    }).map((point) => transformPoint(transform, point));
+    coverage.rects.push(inflate(boundsOf(corners), pad));
+  }
+
+  for (const stroke of drawing.strokes) {
+    if (stroke.tool === "eraser" || !stroke.points.length) continue;
+    const points = stroke.points.map((point) => transformPoint(transform, point));
+
+    if (stroke.tool === "lasso") {
+      coverage.rects.push(inflate(boundsOf(points), pad));
+      continue;
+    }
+
+    const radius = Math.max(0, stroke.radius) * stretch + pad;
+    if (points.length === 1) {
+      coverage.capsules.push({ from: points[0], to: points[0], radius });
+      continue;
+    }
+    for (let index = 0; index < points.length - 1; index += 1) {
+      coverage.capsules.push({ from: points[index], to: points[index + 1], radius });
+    }
+  }
+
+  return coverage;
+}
+
+/**
+ * Do two masks paint any of the same pixels?
+ *
+ * This is what decides whether two edits are independent. The compositor pastes
+ * every layer through its own mask, so two edits whose masks never meet cannot
+ * touch each other's pixels however their crops are arranged -- and a crop is
+ * far larger than what was painted, being squared to an aspect and padded with
+ * margin. Comparing crops refuses edits that were never in conflict.
+ *
+ * Where masks do meet the edits are not independent, because each was given a
+ * base without the other's result. What to do about that is the caller's
+ * judgement, not a geometry question.
+ */
+export function masksOverlap(left: MaskDrawing, right: MaskDrawing, feather = 0): boolean {
+  const a = maskCoverage(left, feather);
+  const b = maskCoverage(right, feather);
+
+  for (const one of a.capsules) {
+    for (const other of b.capsules) {
+      if (segmentDistance(one.from, one.to, other.from, other.to) < one.radius + other.radius) return true;
+    }
+    for (const rect of b.rects) if (segmentToBoxDistance(one.from, one.to, rect) < one.radius) return true;
+  }
+  for (const rect of a.rects) {
+    for (const other of b.capsules) {
+      if (segmentToBoxDistance(other.from, other.to, rect) < other.radius) return true;
+    }
+    for (const otherRect of b.rects) if (boxesIntersect(rect, otherRect)) return true;
+  }
+  return false;
+}
+
+function boundsOf(points: MaskPoint[]): MaskBox {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) };
+}
+
+function inflate(box: MaskBox, by: number): MaskBox {
+  return { left: box.left - by, top: box.top - by, right: box.right + by, bottom: box.bottom + by };
+}
+
+/** Touching edges do not count, matching how the crop test read. */
+function boxesIntersect(left: MaskBox, right: MaskBox) {
+  return left.left < right.right && right.left < left.right && left.top < right.bottom && right.top < left.bottom;
+}
+
+/** Shortest distance between two line segments, the closed-ended part of a capsule test. */
+function segmentDistance(a1: MaskPoint, a2: MaskPoint, b1: MaskPoint, b2: MaskPoint) {
+  return Math.min(
+    pointToSegment(a1, b1, b2),
+    pointToSegment(a2, b1, b2),
+    pointToSegment(b1, a1, a2),
+    pointToSegment(b2, a1, a2),
+    segmentsCross(a1, a2, b1, b2) ? 0 : Number.POSITIVE_INFINITY,
+  );
+}
+
+function pointToSegment(point: MaskPoint, from: MaskPoint, to: MaskPoint) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+  const t = Math.min(1, Math.max(0, ((point.x - from.x) * dx + (point.y - from.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
+}
+
+function segmentsCross(a1: MaskPoint, a2: MaskPoint, b1: MaskPoint, b2: MaskPoint) {
+  const side = (p: MaskPoint, q: MaskPoint, r: MaskPoint) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  return side(a1, a2, b1) !== side(a1, a2, b2) && side(b1, b2, a1) !== side(b1, b2, a2);
+}
+
+/** Shortest distance from a segment to an axis-aligned box, zero when it enters. */
+function segmentToBoxDistance(from: MaskPoint, to: MaskPoint, box: MaskBox) {
+  const inside = (p: MaskPoint) => p.x >= box.left && p.x <= box.right && p.y >= box.top && p.y <= box.bottom;
+  if (inside(from) || inside(to)) return 0;
+  const corners = boxCorners(box);
+  let best = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < 4; index += 1) {
+    const edgeFrom = corners[index];
+    const edgeTo = corners[(index + 1) % 4];
+    best = Math.min(best, segmentDistance(from, to, edgeFrom, edgeTo));
+  }
+  return best;
+}
+
 /** The four corners of a box, clockwise from the top left. */
 export function boxCorners(box: MaskBox): [MaskPoint, MaskPoint, MaskPoint, MaskPoint] {
   return [

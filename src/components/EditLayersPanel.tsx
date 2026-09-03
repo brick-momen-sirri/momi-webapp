@@ -176,6 +176,12 @@ export function EditLayersPanel({
             key={layer.id}
             layer={layer}
             displayedIndex={displayedIndex}
+            // Resolved here, where the sibling layers are in scope. Named rather
+            // than id'd because the note is read by someone deciding whether to
+            // regenerate; a layer since deleted drops out instead of dangling.
+            paintedOverNames={(layer.paintedOver ?? [])
+              .map((layerId) => layers.find((candidate) => candidate.id === layerId)?.name)
+              .filter((name): name is string => Boolean(name))}
             active={layer.id === activeLayerId}
             activeTarget={activeTarget}
             atTop={layer.order >= layers.length - 1}
@@ -277,6 +283,8 @@ function SessionCost({ cost }: { cost: EditSessionCost }) {
 type LayerRowProps = {
   layer: StillImageEditLayer;
   displayedIndex: number;
+  /** Names of the layers that were still running when this one's base was built. */
+  paintedOverNames: string[];
   active: boolean;
   activeTarget: StillImageEditTarget;
   atTop: boolean;
@@ -306,6 +314,7 @@ type LayerRowProps = {
 function LayerRow({
   layer,
   displayedIndex,
+  paintedOverNames,
   active,
   activeTarget,
   atTop,
@@ -345,6 +354,10 @@ function LayerRow({
   const transform = maskTransform(layer.mask);
   const transformed = !isIdentityTransform(transform);
   const adjustments = adjustmentSummary(opacity, feather, maskOn, inverted, moved, transformed);
+  // Named, not id'd: the amber note is read by someone deciding whether to
+  // regenerate, and a layer id tells them nothing. A layer that has since been
+  // deleted simply drops out rather than showing a dangling id.
+
 
   return (
     <div
@@ -550,6 +563,15 @@ function LayerRow({
               ) : null}
             </div>
           </div>
+
+          {paintedOverNames.length ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] leading-4 text-amber-900">
+              Generated while {paintedOverNames.join(" and ")} {paintedOverNames.length === 1 ? "was" : "were"} still
+              running, so where they meet this layer, the model was working from the picture without{" "}
+              {paintedOverNames.length === 1 ? "that edit" : "those edits"}. Regenerate to build it on the finished
+              composite.
+            </p>
+          ) : null}
 
           <div>
             <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-stone-400">Layer actions</p>

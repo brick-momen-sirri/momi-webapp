@@ -15,7 +15,7 @@ import {
   editGenerationBaseLayers,
   type EditLayerCompositeDescriptor,
 } from "./imageEditLayers";
-import { hasPaintedRegion, maskCropAspect, maskCropMargin, type MaskDrawing } from "./maskDrawing";
+import { hasPaintedRegion, maskCropAspect, maskCropMargin, masksOverlap, type MaskDrawing } from "./maskDrawing";
 import {
   canvasToPngFile,
   currentMaskEditCrop,
@@ -43,8 +43,10 @@ import { stillImageModelId } from "./stillImageModelId";
 export type StillImageSubmissionInFlight = {
   key: string;
   phase: "preparing" | "processing";
-  /** The crop this edit will paste back, so a second edit can avoid it. */
+  /** The crop this edit will paste back. */
   crop?: StillImageEditCrop;
+  /** What it actually paints, which is what decides whether two edits collide. */
+  mask?: MaskDrawing;
   layerId?: string;
 };
 
@@ -76,7 +78,12 @@ export type StillImagesSubmissionState = {
  * replays the existing one instead of paying for a second render.
  */
 export function useStillImagesSubmission(options: {
-  onJobCreated: (job: Job) => void;
+  /**
+   * `paintedOver` names the running layers this edit paints across. Its base was
+   * built before they finished, so in the shared pixels the model answered the
+   * image as it was without them.
+   */
+  onJobCreated: (job: Job, context?: { paintedOver?: string[] }) => void;
   onJobUpdated?: (job: Job) => void;
   onEditJobCompleted?: (job: Job) => void;
   onError?: (message: string) => void;
@@ -154,14 +161,24 @@ export function useStillImagesSubmission(options: {
       // base without the other's result, and whichever lands on top wins. Edits
       // that do not overlap compose the same way whatever order they finish in, so
       // only the overlap is refused.
-      const conflict = claim && [...inFlightRef.current.values()].find((entry) => entry.crop && cropsOverlap(entry.crop, claim));
-      if (conflict) {
-        // Through fail(), unlike the double-click guard above: that one is a UI
-        // race the artist did not mean, while this is a decision they need told
-        // about -- they painted a region and pressed Generate, and nothing else
-        // on screen would explain why no job appeared.
-        return fail("That region overlaps an edit still running. Wait for it, or choose a region somewhere else.");
-      }
+      // Which running edits this one paints over, judged on the masks rather than
+      // the crops: a crop is squared to an aspect and padded with margin, so two
+      // small dabs far apart produce overlapping crops while sharing no pixel.
+      // Comparing crops refused edits that were never in conflict.
+      //
+      // A genuine overlap is no longer refused. It is sent, and the layer records
+      // that its base was built before these finished -- because the model was
+      // handed a base without their results, so in the shared pixels it answers
+      // the original image rather than their edits. Often that is fine or even
+      // wanted; when it is not, the layer says so and one click regenerates it
+      // against the finished composite.
+      const paintedOver =
+        paintsItsOwnSlots && input.categoryState.mask
+          ? [...inFlightRef.current.values()]
+              .filter((entry) => entry.mask && masksOverlap(entry.mask, input.categoryState.mask as MaskDrawing, overlapFeather(input.categoryState)))
+              .map((entry) => entry.layerId)
+              .filter((layerId): layerId is string => Boolean(layerId))
+          : [];
       const editMode = input.categoryState.editMode ?? "inpaint";
       // General Enhancement has no reference-conditioning branch. Keep the
       // selection in editor state when modes are switched, but only send it to
@@ -174,17 +191,25 @@ export function useStillImagesSubmission(options: {
       // Set by the catch and published once by the finally, so there is exactly
       // one place that decides what the panel says when this submission ends.
       let failure: string | undefined;
+      // Regeneration replaces one layer. Extra variations would silently create
+      // sibling layers, contradicting the explicit regenerate action.
+      const variations = stillImageSubmissionCount(input.categoryId, input.categoryState);
+      // Drawn before the claim is recorded, because the claim has to carry the
+      // layer this edit will become. A new edit has no layer yet -- the row
+      // appears when the job is created -- but its id is derived from the first
+      // request id, which is settled here, so a later edit painting across this
+      // one can name it rather than pointing at nothing.
+      const clientRequestIds = takeRequestIds(pendingRequestIdsRef.current, submissionKey, variations);
+      const claimedLayerId = input.categoryState.activeEditLayerId ?? `edit_${clientRequestIds[0]}`;
+
       inFlightRef.current.set(submissionKey, {
         key: submissionKey,
         phase: "preparing",
         crop: claim,
-        layerId: input.categoryState.activeEditLayerId,
+        mask: paintsItsOwnSlots ? input.categoryState.mask : undefined,
+        layerId: claimedLayerId,
       });
       publishInFlight();
-      // Regeneration replaces one layer. Extra variations would silently create
-      // sibling layers, contradicting the explicit regenerate action.
-      const variations = stillImageSubmissionCount(input.categoryId, input.categoryState);
-      const clientRequestIds = takeRequestIds(pendingRequestIdsRef.current, submissionKey, variations);
 
       try {
         // Blob and data URLs have to become saved project media first: the backend
@@ -288,7 +313,7 @@ export function useStillImagesSubmission(options: {
           });
           createdJobs.push(creation.job);
           if (requestedEdit) requestedEdits.set(creation.job.id, requestedEdit);
-          options.onJobCreated(creation.job);
+          options.onJobCreated(creation.job, paintedOver.length ? { paintedOver } : undefined);
         }
         if (!creation) return fail("Nothing was submitted.");
 
@@ -492,14 +517,16 @@ function editSubmissionKey(state: StillImageCategoryState, crop: StillImageEditC
   return `${document}:crop:${crop.x},${crop.y},${editCropWidth(crop)},${editCropHeight(crop)}`;
 }
 
-/** Do two crops share any pixel? Touching edges do not count as overlapping. */
-function cropsOverlap(left: StillImageEditCrop, right: StillImageEditCrop) {
-  return (
-    left.x < right.x + editCropWidth(right) &&
-    right.x < left.x + editCropWidth(left) &&
-    left.y < right.y + editCropHeight(right) &&
-    right.y < left.y + editCropHeight(left)
-  );
+/**
+ * How far past its strokes a mask can still affect pixels.
+ *
+ * The blur applied when the mask is rasterised, so two edits whose painted areas
+ * merely come close are still treated as touching. A rectangle selection is a
+ * hard boundary and gets none, matching how the rasteriser treats it.
+ */
+function overlapFeather(state: StillImageCategoryState) {
+  if (state.mask?.selection) return 0;
+  return Math.max(0, state.mask?.blurPixels ?? 0);
 }
 
 /**

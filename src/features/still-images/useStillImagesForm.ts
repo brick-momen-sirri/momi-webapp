@@ -412,7 +412,7 @@ export function useStillImagesForm() {
   }
 
   /** Save a completed edit layer, then leave a clean draft above the updated composite. */
-  function commitEditLayer(job: Job) {
+  function commitEditLayer(job: Job, context?: { paintedOver?: string[] }) {
     const edit = job.workflowOptions?.stillImage?.edit;
     if (!edit) return;
     setStateByCategory((current) => {
@@ -439,6 +439,10 @@ export function useStillImagesForm() {
         createdAt: existing?.createdAt ?? job.createdAt,
         updatedAt,
         visible: existing?.visible ?? true,
+        // Set from this submission rather than carried over: a regeneration is
+        // built against the composite as it stands now, so whatever was running
+        // when the previous take was made no longer says anything about this one.
+        paintedOver: context?.paintedOver,
         // Opacity, the mask switch and any move the artist made are properties of
         // the layer, not of the take in it. A regeneration replaces the pixels and
         // leaves all three exactly as they were set.

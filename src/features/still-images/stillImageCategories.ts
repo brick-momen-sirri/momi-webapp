@@ -156,6 +156,16 @@ export type StillImageEditLayer = {
   revision: number;
   status: JobStatus;
   errorMessage?: string;
+  /**
+   * Layers that were still running when this one's base was built.
+   *
+   * Its model was handed a composite without their results, so wherever the
+   * masks meet it answered the image as it was without them, and this layer
+   * sitting on top wins those pixels. Session state, like `visible`: it says
+   * something about how this take was made, not about the picture, and a
+   * regeneration against the finished composite clears it.
+   */
+  paintedOver?: string[];
   resultUrl?: string;
   /** Durable backend value, safe to persist in another job's metadata. */
   generatedCropSourceUrl?: string;

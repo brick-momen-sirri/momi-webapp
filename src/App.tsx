@@ -281,7 +281,7 @@ function App() {
     [jobs, stillImagesForm.selectedCategoryId, stillImagesForm.selectedState],
   );
   const stillImagesSubmission = useStillImagesSubmission({
-    onJobCreated: (job) => {
+    onJobCreated: (job, context) => {
       setJobs((current) => mergeJobs([job], current));
       setBackendJobsTotal((current) => current + 1);
       setBackendJobsOffset((current) => current + 1);
@@ -290,7 +290,7 @@ function App() {
       // Layers panel showing "queued", so the draft can be cleared and the next
       // region painted while this one runs. commitEditLayer ignores anything that
       // is not an edit, so every other preset is unaffected.
-      stillImagesForm.commitEditLayer(job);
+      stillImagesForm.commitEditLayer(job, context);
       showToast("Still image job queued.", "success");
     },
     onJobUpdated: (job) => setJobs((current) => mergeJobs([job], current)),
