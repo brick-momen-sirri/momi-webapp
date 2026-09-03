@@ -358,6 +358,26 @@ export function formatUsd(value: number | undefined) {
   return `$${Number(value).toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
+/**
+ * A dollar total at the scale a project or a month reaches, rather than one run.
+ *
+ * formatUsd keeps four decimals because a single run can cost a fraction of a
+ * cent, and a project total rendered that way -- $601.7152 -- buries the figure
+ * in digits nobody decides anything with. Two decimals and a thousands
+ * separator here.
+ *
+ * The exception is a real but sub-cent total, which is reported as "<$0.01"
+ * rather than rounded down to "$0.00": spend that reads as free is the one
+ * failure this app has already had (see isUnpricedCreditUsage), and a project
+ * with a handful of cheap runs on it should not look untouched.
+ */
+export function formatUsdTotal(value: number | undefined) {
+  if (!Number.isFinite(value) || Number(value) <= 0) return "$0.00";
+  const amount = Number(value);
+  if (amount < 0.01) return "<$0.01";
+  return `$${new Intl.NumberFormat("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
+}
+
 export function formatPercent(value: number | undefined) {
   if (!Number.isFinite(value)) return "0%";
   return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;

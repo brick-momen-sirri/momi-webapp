@@ -413,6 +413,7 @@ function updatedProject(current: Project, input: Partial<Project>): Project {
     visibility: normalizeProjectVisibility(input.visibility ?? current.visibility),
     members: normalizeMembers(input.members ?? current.members, ownerId),
     groupMembers: input.groupMembers ?? current.groupMembers ?? [],
+    spendLimitUsd: input.spendLimitUsd,
     updatedAt: now(),
   };
 }

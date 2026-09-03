@@ -1,9 +1,11 @@
-import { FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
+import { AlertTriangle, FolderPlus, Globe, Pencil, Search, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project, ProjectMember, ProjectRole, User } from "../types";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { ProjectList } from "./ProjectList";
+import { SpendLimitBar } from "./SpendLimitBar";
 
 type RightProjectPanelProps = {
   projects: Project[];
@@ -247,9 +249,15 @@ function ProjectDetails({
         </div>
         <div className="rounded-md bg-mist/80 px-2 py-2">
           <p className="font-bold text-ink">{formatCredits(project.creditsUsed ?? 0)}</p>
-          <p className="text-stone-500">credits</p>
+          <p className="text-stone-500">credits &middot; {formatUsdTotal(project.usdUsed ?? 0)}</p>
         </div>
       </div>
+
+      {project.spendLimitUsd ? (
+        <div className="mt-3">
+          <SpendLimitBar usdUsed={project.usdUsed ?? 0} spendLimitUsd={project.spendLimitUsd} variant="full" />
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-md border border-line bg-mist/60 p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Storage</p>
@@ -334,6 +342,7 @@ function ManageMembersModal({
   const [userRole, setUserRole] = useState<Exclude<ProjectRole, "owner">>("editor");
   const [feedback, setFeedback] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [spendLimitInput, setSpendLimitInput] = useState(project.spendLimitUsd != null ? String(project.spendLimitUsd) : "");
   const currentRole = getProjectRole(project, currentUserId);
   const isAdmin = currentUserRole === "admin";
   const isOwner = currentRole === "owner";
@@ -360,6 +369,10 @@ function ManageMembersModal({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    setSpendLimitInput(project.spendLimitUsd != null ? String(project.spendLimitUsd) : "");
+  }, [project.id, project.spendLimitUsd]);
 
   // No effect needed: "first available user unless one was picked" is derivable.
   // Storing it meant an extra render once the user list arrived, and a stale id if
@@ -459,6 +472,37 @@ function ManageMembersModal({
     });
   }
 
+  function saveSpendLimit(event: FormEvent) {
+    event.preventDefault();
+    if (!isAdmin) {
+      setFeedback({ tone: "bad", text: "Only admins can change the spend limit." });
+      return;
+    }
+    const trimmed = spendLimitInput.trim();
+    if (!trimmed) {
+      onUpdateProject({ ...project, spendLimitUsd: null });
+      setFeedback({ tone: "ok", text: "Spend limit removed." });
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setFeedback({ tone: "bad", text: "Enter a non-negative dollar amount." });
+      return;
+    }
+    onUpdateProject({ ...project, spendLimitUsd: parsed });
+    setFeedback({ tone: "ok", text: `Spend limit set to ${formatUsdTotal(parsed)}.` });
+  }
+
+  function clearSpendLimit() {
+    if (!isAdmin) {
+      setFeedback({ tone: "bad", text: "Only admins can change the spend limit." });
+      return;
+    }
+    setSpendLimitInput("");
+    onUpdateProject({ ...project, spendLimitUsd: null });
+    setFeedback({ tone: "ok", text: "Spend limit removed." });
+  }
+
   return createPortal(
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-sm"
@@ -502,7 +546,7 @@ function ManageMembersModal({
                 {visibilityLabel(project)}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-center text-xs md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 text-center text-xs md:grid-cols-6">
               <div className="rounded-md bg-mist/80 px-2 py-2">
                 <p className="font-bold text-ink">{project.jobCount}</p>
                 <p className="text-stone-500">jobs</p>
@@ -522,6 +566,10 @@ function ManageMembersModal({
               <div className="rounded-md bg-mist/80 px-2 py-2">
                 <p className="font-bold text-ink">{formatCredits(project.monthCreditsUsed ?? 0)}</p>
                 <p className="text-stone-500">this month</p>
+              </div>
+              <div className="rounded-md bg-mist/80 px-2 py-2">
+                <p className="font-bold text-ink">{formatUsdTotal(project.usdUsed ?? 0)}</p>
+                <p className="text-stone-500">spent (USD)</p>
               </div>
             </div>
             <div className="mt-3 rounded-md border border-line bg-mist/60 p-3">
@@ -556,6 +604,58 @@ function ManageMembersModal({
                 ? "Everyone signed in can open this project and generate into its folder. You only need the list below to add another owner, or to hold someone to view-only."
                 : "Only the people listed below can open this project. Editors can generate, viewers can only look."}
             </p>
+          </section>
+
+          <section className="rounded-lg border border-line bg-white p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Spend limit
+            </div>
+            {isAdmin ? (
+              <form onSubmit={saveSpendLimit} className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={spendLimitInput}
+                    onChange={(event) => setSpendLimitInput(event.target.value)}
+                    placeholder="No limit"
+                    disabled={busy}
+                    aria-label="Spend limit in USD"
+                    className="h-9 w-40 rounded-md border border-line bg-white pl-6 pr-3 text-sm outline-none disabled:opacity-60"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="h-9 rounded-md border border-line px-3 text-xs font-semibold text-stone-600 transition hover:bg-stone-50 disabled:opacity-60"
+                >
+                  Save
+                </button>
+                {project.spendLimitUsd ? (
+                  <button
+                    type="button"
+                    onClick={clearSpendLimit}
+                    disabled={busy}
+                    className="h-9 rounded-md px-3 text-xs font-semibold text-stone-500 transition hover:bg-stone-50 disabled:opacity-60"
+                  >
+                    Remove limit
+                  </button>
+                ) : null}
+              </form>
+            ) : (
+              <p className="text-xs leading-5 text-stone-500">
+                {project.spendLimitUsd
+                  ? `Capped at ${formatUsdTotal(project.spendLimitUsd)}. Only admins can change this.`
+                  : "No spend limit set. Only admins can set one."}
+              </p>
+            )}
+            <div className="mt-3">
+              <SpendLimitBar usdUsed={project.usdUsed ?? 0} spendLimitUsd={project.spendLimitUsd} variant="full" />
+            </div>
           </section>
 
           <section className="rounded-lg border border-line bg-mist/40 p-3">

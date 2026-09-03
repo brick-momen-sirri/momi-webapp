@@ -1,6 +1,8 @@
-import { Coins, Folder, FolderPlus, Pencil, Pin, Settings2, Trash2, UsersRound } from "lucide-react";
+import { Coins, DollarSign, Folder, FolderPlus, Pencil, Pin, Settings2, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project } from "../types";
+import { SpendLimitBar } from "./SpendLimitBar";
 
 type MenuItem = {
   label: string;
@@ -44,54 +46,65 @@ export function ProjectCard({
 
   return (
     <div
-      className={`relative flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition ${
+      className={`relative flex w-full flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition ${
         selected ? "border-accent bg-accent/10" : "border-transparent bg-white hover:border-line hover:bg-stone-50"
       }`}
     >
-      <button
-        type="button"
-        aria-label={`Select project ${project.name}`}
-        onClick={() => onSelect(project.id)}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-      >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-mist text-stone-600">
-          <Folder className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold">{project.name}</span>
-            {project.unreadCount ? (
-              <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-700">
-                {project.unreadCount}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-label={`Select project ${project.name}`}
+          onClick={() => onSelect(project.id)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-mist text-stone-600">
+            <Folder className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold">{project.name}</span>
+              {project.unreadCount ? (
+                <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-700">
+                  {project.unreadCount}
+                </span>
+              ) : null}
+            </span>
+            <span className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
+              <span>{project.shortName}</span>
+              <span>{project.jobCount} jobs</span>
+              <span className="flex items-center gap-1">
+                <UsersRound className="h-3 w-3" />
+                {project.memberCount}
               </span>
-            ) : null}
-          </span>
-          <span className="mt-1 flex items-center gap-2 text-[11px] text-stone-500">
-            <span>{project.shortName}</span>
-            <span>{project.jobCount} jobs</span>
-            <span className="flex items-center gap-1">
-              <UsersRound className="h-3 w-3" />
-              {project.memberCount}
-            </span>
-            <span className="flex items-center gap-1">
-              <Coins className="h-3 w-3" />
-              {formatCredits(project.creditsUsed ?? 0)}
+              <span className="flex items-center gap-1">
+                <Coins className="h-3 w-3" />
+                {formatCredits(project.creditsUsed ?? 0)}
+              </span>
+              <span className="flex items-center gap-1">
+                <DollarSign className="h-3 w-3" />
+                {formatUsdTotal(project.usdUsed ?? 0)}
+              </span>
             </span>
           </span>
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onTogglePin(project.id)}
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-transparent transition hover:border-line hover:bg-white ${
-          pinned ? "text-accent" : "text-stone-400 hover:text-accent"
-        }`}
-        title={pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
-        aria-label={pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
-      >
-        <Pin className={`h-3.5 w-3.5 ${pinned ? "fill-current" : ""}`} />
-      </button>
-      <ProjectRowMenuButton label={project.name} items={menuItems} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onTogglePin(project.id)}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-transparent transition hover:border-line hover:bg-white ${
+            pinned ? "text-accent" : "text-stone-400 hover:text-accent"
+          }`}
+          title={pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
+          aria-label={pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
+        >
+          <Pin className={`h-3.5 w-3.5 ${pinned ? "fill-current" : ""}`} />
+        </button>
+        <ProjectRowMenuButton label={project.name} items={menuItems} />
+      </div>
+      {project.spendLimitUsd ? (
+        <div className="pl-12">
+          <SpendLimitBar usdUsed={project.usdUsed ?? 0} spendLimitUsd={project.spendLimitUsd} variant="compact" />
+        </div>
+      ) : null}
     </div>
   );
 }

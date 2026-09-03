@@ -145,6 +145,8 @@ export type Project = {
   jobCount: number;
   creditsUsed?: number;
   monthCreditsUsed?: number;
+  usdUsed?: number;
+  spendLimitUsd?: number | null;
   createdAt: string;
   updatedAt: string;
 };

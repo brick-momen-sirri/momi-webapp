@@ -3,7 +3,7 @@
 import express from "express";
 import { getRequestUser, requireAdmin } from "../authMiddleware.js";
 import { getUserById } from "../authService.js";
-import { creditsSpentForJob, findCreditTrackerProjectStats, roundCredits } from "../creditDashboardService.js";
+import { creditsSpentForJob, findCreditTrackerProjectStats, roundCredits, roundUsd, usdSpentForJob } from "../creditDashboardService.js";
 import { getCreditTrackerProjectStats } from "../creditUsageService.js";
 import { currentMonthRange } from "../httpQuery.js";
 import { canAccessJob, canManageJob, canManageProject, canViewProject, filterJobsForUser } from "../jobPermissions.js";
@@ -35,17 +35,22 @@ projectRouter.get("/api/projects", async (req, res) => {
     const visibleProjectIds = new Set(visibleProjects.map((project) => project.id));
     const jobs = filterJobsForUser(await getJobsWithExistingMedia(), user);
     const { startAt, endAt } = currentMonthRange();
-    const jobStatsByProjectId = new Map<string, { jobCount: number; creditsUsed: number; monthCreditsUsed: number }>();
+    const jobStatsByProjectId = new Map<
+      string,
+      { jobCount: number; creditsUsed: number; monthCreditsUsed: number; usdUsed: number }
+    >();
     const trackerStatsByProjectName = await getCreditTrackerProjectStats();
 
     for (const job of jobs) {
       if (!visibleProjectIds.has(job.projectId)) continue;
-      const stats = jobStatsByProjectId.get(job.projectId) ?? { jobCount: 0, creditsUsed: 0, monthCreditsUsed: 0 };
+      const stats = jobStatsByProjectId.get(job.projectId) ?? { jobCount: 0, creditsUsed: 0, monthCreditsUsed: 0, usdUsed: 0 };
       const creditsUsed = creditsSpentForJob(job);
+      const usdUsed = usdSpentForJob(job);
       const createdAt = new Date(job.completedAt ?? job.createdAt).getTime();
 
       stats.jobCount += 1;
       stats.creditsUsed = roundCredits(stats.creditsUsed + creditsUsed);
+      stats.usdUsed = roundUsd(stats.usdUsed + usdUsed);
 
       if (creditsUsed && Number.isFinite(createdAt) && createdAt >= startAt.getTime() && createdAt < endAt.getTime()) {
         stats.monthCreditsUsed = roundCredits(stats.monthCreditsUsed + creditsUsed);
@@ -63,6 +68,8 @@ projectRouter.get("/api/projects", async (req, res) => {
           jobCount: jobStats?.jobCount ?? 0,
           creditsUsed: jobStats?.creditsUsed ?? trackerStats?.creditsUsed ?? 0,
           monthCreditsUsed: jobStats?.monthCreditsUsed ?? trackerStats?.monthCreditsUsed ?? 0,
+          usdUsed: jobStats?.usdUsed ?? trackerStats?.usdUsed ?? 0,
+          spendLimitUsd: project.spendLimitUsd,
         };
       }),
     });
@@ -151,11 +158,30 @@ projectRouter.patch("/api/projects/:projectId", async (req, res) => {
       members = memberInput.members;
     }
 
+    // The frontend PATCHes the whole project object on every save, so a spend-limit
+    // value that merely rides along unchanged (e.g. while toggling visibility) must
+    // not require admin -- only an actual change to the limit does.
+    let nextSpendLimitUsd = project.spendLimitUsd;
+    if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "spendLimitUsd")) {
+      const raw = req.body.spendLimitUsd;
+      if (raw === null) {
+        nextSpendLimitUsd = undefined;
+      } else if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+        nextSpendLimitUsd = raw;
+      } else {
+        return res.status(400).json({ error: "Spend limit must be a non-negative number or null." });
+      }
+      if (nextSpendLimitUsd !== (project.spendLimitUsd ?? undefined) && user.role !== "admin") {
+        return res.status(403).json({ error: "Admin permission required to change the spend limit." });
+      }
+    }
+
     const updated = await updateProject(project.id, {
       description: typeof req.body?.description === "string" ? req.body.description : undefined,
       visibility: isProjectVisibility(req.body?.visibility) ? req.body.visibility : undefined,
       members,
       groupMembers: Array.isArray(req.body?.groupMembers) ? req.body.groupMembers : undefined,
+      spendLimitUsd: nextSpendLimitUsd,
     });
     if (!updated) return res.status(404).json({ error: "Project not found" });
     res.json({ project: updated });
