@@ -485,7 +485,7 @@ export function StillImagesSettingsPanel({
             <div className="mb-3 rounded-md border border-cyan-100 bg-cyan-50/70 p-3">
               <p className="text-xs font-bold text-cyan-900">Realistic prompt presets</p>
               <p className="mt-1 text-[11px] leading-5 text-cyan-800">
-                Start from the same lighting and weather recipes available in Momi Forge, then edit the prompt below.
+                Start from a lighting or weather recipe written for photorealistic output, then edit the prompt below.
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="block">
@@ -523,6 +523,13 @@ export function StillImagesSettingsPanel({
               {selectedRealisticPromptPreset ? (
                 <p className="mt-2 text-[11px] leading-5 text-stone-600">{selectedRealisticPromptPreset.description}</p>
               ) : null}
+              {/* Every preset is a starting point, not a finished recipe: the
+                  prompt below stays editable, and a preset that lands close but
+                  not right is meant to be reworded rather than re-picked. */}
+              <p className="mt-2 border-t border-cyan-100 pt-2 text-[11px] leading-5 text-stone-600">
+                These prompts are templates and are meant to be used as a starting point. If you are not happy with the
+                result, feel free to modify the prompt using GPT or your own wording to better match the look you want.
+              </p>
             </div>
           ) : null}
           <textarea
