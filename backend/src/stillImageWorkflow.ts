@@ -476,6 +476,49 @@ function applyProUpscaler(graph: StillImageGraph, input: ResolvedBuildInput) {
   connect(graph, UPSCALER.finalResize, "image", UPSCALER.seedVr);
 }
 
+// -- flux klein upscaler -----------------------------------------------------
+
+// The second upscaler, added beside Pro Upscaler rather than replacing it. Same
+// job, different stack: FLUX.2 Klein 9B with the arch_restore LoRA, tiled, with
+// a per-tile Qwen3-VL caption feeding the restoration prompt. It runs on its own
+// pod (RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER) because none of those weights are
+// on the Pro Upscaler endpoint.
+const KLEIN = {
+  mainScale: "187",
+  tiles: "186",
+  seedVr: "270",
+  fluxIn: "264",
+  fluxNoise: "158",
+} as const;
+
+function applyFluxKleinUpscaler(graph: StillImageGraph, input: ResolvedBuildInput) {
+  const { settings } = input;
+
+  // Drawn before the SeedVR seed so the Flux noise is the same whichever mode
+  // ran: toggling SeedVR should change what the tile looks like going in, not
+  // re-roll the render on top of it.
+  set(graph, KLEIN.fluxNoise, "noise_seed", input.nextSeed());
+  set(graph, KLEIN.seedVr, "seed", input.nextSeed());
+  // The Qwen3-VL captioner (152) is deliberately left fixed, matching
+  // general-enhancement and reference-generator: a new seed should vary the
+  // render, not the sentence describing the tile.
+
+  // Applied before tiling, so the tile grid and the merge canvas both follow
+  // from it. Node 276 has already lifted an undersized input to 1280 and 274
+  // has capped an oversized one.
+  set(graph, KLEIN.mainScale, "scale_by", choice(settings, "upscale", "x2") === "x2" ? 2 : 4);
+
+  // The only structural choice in this graph: whether each tile passes through
+  // SeedVR before Flux sees it. Everything downstream -- the caption, the tile
+  // geometry, the colour reference -- reads the raw tile off 186 regardless, so
+  // routing 264's image input is the entire switch.
+  if (choice(settings, "mode", "with-seedvr") === "without-seedvr") {
+    connect(graph, KLEIN.fluxIn, "image", KLEIN.tiles);
+    return;
+  }
+  connect(graph, KLEIN.fluxIn, "image", KLEIN.seedVr);
+}
+
 // -- reference generator -----------------------------------------------------
 
 const REFERENCE = {
@@ -944,6 +987,29 @@ const NODE_STATUS_LABELS: Partial<Record<StillImageCategoryId, Readonly<Record<s
     "102": "Upscaling the image",
     "97": "Saving final image",
   },
+  // Flat graph, so these are plain node ids -- no subgraph prefixes like the
+  // Pro Upscaler map above.
+  "flux-klein-upscaler": {
+    "261": "Loading the input image",
+    "276": "Resizing the image",
+    "187": "Upscaling the image",
+    "186": "Splitting into tiles",
+    "152": "Reading each tile",
+    "272": "Loading SeedVR",
+    "273": "Loading SeedVR",
+    "270": "Upscaling with SeedVR",
+    "165": "Loading the model",
+    "174": "Loading the LoRA",
+    "166": "Loading the text encoder",
+    "162": "Loading the VAE",
+    "163": "Reading the prompt",
+    "172": "Encoding tiles",
+    "156": "Sampling tiles",
+    "157": "Decoding tiles",
+    "195": "Matching tile colors",
+    "192": "Reassembling the image",
+    "262": "Saving final image",
+  },
   "qwen-edit": {
     "76": "Loading image 1",
     "121": "Loading image 2",
@@ -1071,6 +1137,14 @@ const PRESETS: Record<StillImageCategoryId, StillImagePreset> = {
     inputTransport: "load_image_name",
     inputBindings: [{ slot: 1, mode: "load-image", nodeId: "99", inputName: "image", filename: stillImageSlotFilename(1) }],
     apply: applyProUpscaler,
+  },
+  "flux-klein-upscaler": {
+    categoryId: "flux-klein-upscaler",
+    workflowFile: "flux-klein-upscaler.json",
+    endpoint: "dedicated",
+    inputTransport: "load_image_name",
+    inputBindings: [{ slot: 1, mode: "load-image", nodeId: "261", inputName: "image", filename: stillImageSlotFilename(1) }],
+    apply: applyFluxKleinUpscaler,
   },
   "reference-generator": {
     categoryId: "reference-generator",

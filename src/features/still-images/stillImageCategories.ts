@@ -14,7 +14,7 @@
 // the bottom are mirrored (and asserted against their counterparts in
 // backend/src/stillImageCategories.test.ts).
 
-import { Brush, ImageIcon, Images, ScanSearch, Sparkles } from "lucide-react";
+import { Brush, ImageIcon, Images, ScanSearch, Sparkles, Wand2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import presets from "../../../backend/src/data/stillImagePresets.json";
 import type {
@@ -27,7 +27,13 @@ import type {
 } from "../../types";
 import type { MaskDrawing } from "./maskDrawing";
 
-export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit" | "image-editing";
+export type StillImageCategoryId =
+  | "general-enhancement"
+  | "pro-upscaler"
+  | "flux-klein-upscaler"
+  | "reference-generator"
+  | "qwen-edit"
+  | "image-editing";
 
 export type StillImageSettingValue = string | number | boolean;
 
@@ -240,6 +246,16 @@ const PRESENTATION: Record<StillImageCategoryId, CategoryPresentation> = {
       creativity: { label: "Creativity" },
     },
   },
+  "flux-klein-upscaler": {
+    label: "Flux Klein Upscaler",
+    shortDescription: "Tiled FLUX.2 Klein restoration tuned for architectural images.",
+    instructions: "Upload one source image, choose the upscale amount, and whether SeedVR cleans each tile first.",
+    icon: Wand2,
+    settings: {
+      mode: { label: "Mode", optionLabels: { "with-seedvr": "With SeedVR", "without-seedvr": "Without SeedVR" } },
+      upscale: { label: "Upscale value", optionLabels: { x2: "2x", x4: "4x" } },
+    },
+  },
   "reference-generator": {
     label: "Reference Generator",
     shortDescription: "Transfer visual qualities from a reference image.",
@@ -432,6 +448,7 @@ export function createInitialStillImagesState(): StillImagesState {
   return {
     "general-enhancement": createInitialCategoryState(getStillImageCategory("general-enhancement")),
     "pro-upscaler": createInitialCategoryState(getStillImageCategory("pro-upscaler")),
+    "flux-klein-upscaler": createInitialCategoryState(getStillImageCategory("flux-klein-upscaler")),
     "reference-generator": createInitialCategoryState(getStillImageCategory("reference-generator")),
     "qwen-edit": createInitialCategoryState(getStillImageCategory("qwen-edit")),
     "image-editing": createInitialCategoryState(getStillImageCategory("image-editing")),

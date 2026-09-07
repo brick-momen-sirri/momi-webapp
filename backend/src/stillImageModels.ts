@@ -75,6 +75,15 @@ const MODEL_METADATA: Record<StillImageCategoryId, StillImageModelMetadata> = {
     estimatedCredits: 24,
     estimatedTime: "3-8 min",
   },
+  "flux-klein-upscaler": {
+    name: "Flux Klein Upscaler",
+    category: "image_upscaling",
+    // Comparable to Pro Upscaler: SeedVR plus a tiled Klein pass, and a Qwen3-VL
+    // caption per tile on top. Estimated a little higher because the caption runs
+    // once per tile and the tile count grows with the source.
+    estimatedCredits: 28,
+    estimatedTime: "3-10 min",
+  },
   "reference-generator": {
     name: "Reference Generator",
     category: "image_editing",

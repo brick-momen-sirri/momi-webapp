@@ -38,6 +38,7 @@ const value = (graph: StillImageGraph, nodeId: string, input: string) => graph[n
 const PRESET_SHAPE: Record<string, { images: string[]; minNodes: number }> = {
   "general-enhancement": { images: ["a"], minNodes: 30 },
   "pro-upscaler": { images: ["a"], minNodes: 30 },
+  "flux-klein-upscaler": { images: ["a"], minNodes: 30 },
   "reference-generator": { images: ["a", "b"], minNodes: 30 },
   "qwen-edit": { images: ["a"], minNodes: 30 },
   // Ten nodes, and eight of them are plumbing around one remote call. A floor in
@@ -90,6 +91,7 @@ test("every configured binding is satisfied by the real exported graph", async (
   const counts: Record<string, number> = {
     "general-enhancement": 1,
     "pro-upscaler": 1,
+    "flux-klein-upscaler": 1,
     "reference-generator": 2,
     "qwen-edit": 3,
     "image-editing": 3,
@@ -506,6 +508,67 @@ test("super fast ignores the enhancement toggle", async () => {
   assert.deepEqual(link(off, "97", "images"), ["104", 0]);
 });
 
+// -- flux klein upscaler -----------------------------------------------------
+
+test("flux klein upscaler sets the filename and the seeds it is allowed to move", async () => {
+  const graph = await build("flux-klein-upscaler", {}, ["source.png"]);
+  assert.equal(value(graph, "261", "image"), "source.png");
+  assert.equal(value(graph, "158", "noise_seed"), 1, "Flux noise is drawn first");
+  assert.equal(value(graph, "270", "seed"), 2, "SeedVR is drawn second");
+  // The tile captioner keeps whatever the export shipped. A new seed should vary
+  // the render, not the sentence describing the tile.
+  assert.equal(value(graph, "152", "seed"), 4190677365);
+});
+
+test("flux klein upscaler routing matrix", async () => {
+  const cases: Array<{ name: string; settings: Record<string, unknown>; fluxIn: string; scale: number }> = [
+    { name: "with seedvr x2", settings: { mode: "with-seedvr", upscale: "x2" }, fluxIn: "270", scale: 2 },
+    { name: "with seedvr x4", settings: { mode: "with-seedvr", upscale: "x4" }, fluxIn: "270", scale: 4 },
+    { name: "without seedvr x2", settings: { mode: "without-seedvr", upscale: "x2" }, fluxIn: "186", scale: 2 },
+    { name: "without seedvr x4", settings: { mode: "without-seedvr", upscale: "x4" }, fluxIn: "186", scale: 4 },
+  ];
+
+  for (const entry of cases) {
+    const graph = await build("flux-klein-upscaler", entry.settings, ["source.png"]);
+    assert.deepEqual(link(graph, "264", "image"), [entry.fluxIn, 0], `${entry.name}: Flux input`);
+    assert.equal(value(graph, "187", "scale_by"), entry.scale, `${entry.name}: scale`);
+    assert.deepEqual(link(graph, "262", "images"), ["192", 0], `${entry.name}: save source`);
+  }
+});
+
+test("the mode toggle moves the Flux input and nothing else", async () => {
+  // Four other consumers read the raw tile list off 186, in both modes: the
+  // caption, the tile size the result is scaled back to, the colour reference and
+  // SeedVR's own input. Rerouting any of them would change the merge geometry.
+  for (const mode of ["with-seedvr", "without-seedvr"]) {
+    const graph = await build("flux-klein-upscaler", { mode }, ["source.png"]);
+    assert.deepEqual(link(graph, "152", "image"), ["186", 0], `${mode}: caption reads the raw tile`);
+    assert.deepEqual(link(graph, "201", "image"), ["186", 0], `${mode}: tile size reads the raw tile`);
+    assert.deepEqual(link(graph, "195", "image_ref"), ["186", 0], `${mode}: colour reference reads the raw tile`);
+    assert.deepEqual(link(graph, "271", "image"), ["186", 0], `${mode}: SeedVR reads the raw tile`);
+  }
+});
+
+test("toggling SeedVR does not re-roll the Flux noise", async () => {
+  const on = await build("flux-klein-upscaler", { mode: "with-seedvr" }, ["source.png"]);
+  const off = await build("flux-klein-upscaler", { mode: "without-seedvr" }, ["source.png"]);
+  assert.equal(value(on, "158", "noise_seed"), value(off, "158", "noise_seed"));
+});
+
+test("the two upscalers stay separate presets on separate graphs", async () => {
+  // The Klein upscaler was added beside Pro Upscaler, not over it. If a future
+  // change points them at one graph or one pod, the models will not be there.
+  const klein = stillImageWorkflowPath("flux-klein-upscaler");
+  const pro = stillImageWorkflowPath("pro-upscaler");
+  assert.notEqual(klein, pro);
+  assert.ok(klein.endsWith("flux-klein-upscaler.json"));
+  assert.ok(pro.endsWith("pro-upscaler.json"));
+
+  // And Pro Upscaler still answers to its own settings, untouched.
+  const original = await build("pro-upscaler", { engine: "super-fast" }, ["source.png"]);
+  assert.deepEqual(link(original, "97", "images"), ["104", 0], "super fast still routes to the model upscale");
+});
+
 // -- reference generator -----------------------------------------------------
 
 test("reference generator maps its three sliders to the documented nodes", async () => {
@@ -702,7 +765,7 @@ test("image editing runs on the shared endpoint and the GPU presets do not", asy
   const { stillImageRunsOnSharedEndpoint } = await import("./stillImageWorkflow.js");
 
   assert.equal(stillImageRunsOnSharedEndpoint("image-editing"), true);
-  for (const categoryId of ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"] as const) {
+  for (const categoryId of ["general-enhancement", "pro-upscaler", "flux-klein-upscaler", "reference-generator", "qwen-edit"] as const) {
     assert.equal(stillImageRunsOnSharedEndpoint(categoryId), false, categoryId);
   }
 });
@@ -716,7 +779,7 @@ test("every progress label points at a node the real graph contains", async () =
   const { stillImageLabelledNodeIds, stillImageNodeStatusLabel } = await import("./stillImageWorkflow.js");
   const fs = await import("node:fs/promises");
 
-  for (const categoryId of ["general-enhancement", "pro-upscaler", "reference-generator", "qwen-edit"] as const) {
+  for (const categoryId of ["general-enhancement", "pro-upscaler", "flux-klein-upscaler", "reference-generator", "qwen-edit"] as const) {
     const graph = JSON.parse(await fs.readFile(stillImageWorkflowPath(categoryId), "utf8"));
     const labelled = stillImageLabelledNodeIds(categoryId);
     assert.ok(labelled.length > 0, `${categoryId} should label at least some nodes`);

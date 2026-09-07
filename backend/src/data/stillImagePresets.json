@@ -95,6 +95,15 @@
       ]
     },
     {
+      "id": "flux-klein-upscaler",
+      "imageSlots": 1,
+      "acceptsPrompt": false,
+      "settings": [
+        { "id": "mode", "kind": "select", "defaultValue": "with-seedvr", "options": ["with-seedvr", "without-seedvr"] },
+        { "id": "upscale", "kind": "select", "defaultValue": "x2", "options": ["x2", "x4"] }
+      ]
+    },
+    {
       "id": "reference-generator",
       "imageSlots": 2,
       "acceptsPrompt": false,

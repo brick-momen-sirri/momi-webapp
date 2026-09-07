@@ -1,0 +1,656 @@
+{
+  "152": {
+    "inputs": {
+      "model_name": "Qwen3VL-4B-Instruct-Q8_0.gguf",
+      "preset_prompt": "🖼️ Simple Description",
+      "custom_prompt": "AVOID USNING BLURRY IN THE DESCRPTION",
+      "max_tokens": 512,
+      "keep_model_loaded": true,
+      "seed": 4190677365,
+      "image": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "AILab_QwenVL_GGUF",
+    "_meta": {
+      "title": "Describe the tile"
+    }
+  },
+  "153": {
+    "inputs": {
+      "f_string": "ARCHRESTORE, A low-resolution tile from an architectural outdoor photograph showing mostly, {a}, remove compression artifacts while preserving the original color and lighting.",
+      "values.a": [
+        "152",
+        0
+      ]
+    },
+    "class_type": "StringFormat",
+    "_meta": {
+      "title": "Core: build restoration prompt"
+    }
+  },
+  "156": {
+    "inputs": {
+      "noise": [
+        "158",
+        0
+      ],
+      "guider": [
+        "168",
+        0
+      ],
+      "sampler": [
+        "173",
+        0
+      ],
+      "sigmas": [
+        "169",
+        0
+      ],
+      "latent_image": [
+        "159",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "157": {
+    "inputs": {
+      "samples": [
+        "156",
+        0
+      ],
+      "vae": [
+        "162",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "158": {
+    "inputs": {
+      "noise_seed": 680388124638328
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "159": {
+    "inputs": {
+      "width": [
+        "160",
+        0
+      ],
+      "height": [
+        "160",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "EmptyFlux2LatentImage"
+    }
+  },
+  "160": {
+    "inputs": {
+      "image": [
+        "264",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "GetImageSize"
+    }
+  },
+  "162": {
+    "inputs": {
+      "vae_name": "full_encoder_small_decoder.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAELoader"
+    }
+  },
+  "163": {
+    "inputs": {
+      "text": [
+        "153",
+        0
+      ],
+      "clip": [
+        "166",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "165": {
+    "inputs": {
+      "unet_name": "flux-2-klein-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNETLoader"
+    }
+  },
+  "166": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "167": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "166",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "168": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "174",
+        0
+      ],
+      "positive": [
+        "170",
+        0
+      ],
+      "negative": [
+        "171",
+        0
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFGGuider"
+    }
+  },
+  "169": {
+    "inputs": {
+      "steps": 5,
+      "width": [
+        "160",
+        0
+      ],
+      "height": [
+        "160",
+        1
+      ]
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2Scheduler"
+    }
+  },
+  "170": {
+    "inputs": {
+      "conditioning": [
+        "163",
+        0
+      ],
+      "latent": [
+        "172",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "171": {
+    "inputs": {
+      "conditioning": [
+        "167",
+        0
+      ],
+      "latent": [
+        "172",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent"
+    }
+  },
+  "172": {
+    "inputs": {
+      "pixels": [
+        "264",
+        0
+      ],
+      "vae": [
+        "162",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAEEncode"
+    }
+  },
+  "173": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "174": {
+    "inputs": {
+      "lora_name": "arch_restore_flux2_klein9b_lora_v3_000002500.safetensors",
+      "strength_model": 0.95,
+      "model": [
+        "165",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "181": {
+    "inputs": {
+      "image": [
+        "187",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Core: full-image size"
+    }
+  },
+  "182": {
+    "inputs": {
+      "expression": "int(a / max(1, int(a / 900))) + int(min(a / max(1, int(a / 900)), b / max(1, int(b / 900))) * 0.05)",
+      "values.a": [
+        "181",
+        0
+      ],
+      "values.b": [
+        "181",
+        1
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Core math: tile width"
+    }
+  },
+  "183": {
+    "inputs": {
+      "expression": "int(b / max(1, int(b / 900))) + int(min(a / max(1, int(a / 900)), b / max(1, int(b / 900))) * 0.05)",
+      "values.a": [
+        "181",
+        0
+      ],
+      "values.b": [
+        "181",
+        1
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Core math: tile height"
+    }
+  },
+  "186": {
+    "inputs": {
+      "tile_width": [
+        "182",
+        1
+      ],
+      "tile_height": [
+        "183",
+        1
+      ],
+      "overlap": [
+        "263",
+        1
+      ],
+      "image": [
+        "187",
+        0
+      ]
+    },
+    "class_type": "SplitImageToTileList",
+    "_meta": {
+      "title": "Core: split into overlapping tiles"
+    }
+  },
+  "187": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 2,
+      "image": [
+        "274",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Main upscale"
+    }
+  },
+  "192": {
+    "inputs": {
+      "final_width": [
+        "181",
+        0
+      ],
+      "final_height": [
+        "181",
+        1
+      ],
+      "overlap": [
+        "263",
+        1
+      ],
+      "image_list": [
+        "195",
+        0
+      ]
+    },
+    "class_type": "ImageMergeTileList",
+    "_meta": {
+      "title": "Core: merge overlapping tile list"
+    }
+  },
+  "195": {
+    "inputs": {
+      "method": "mkl_lab",
+      "source_stats": "per_frame",
+      "strength": 1,
+      "image_target": [
+        "198",
+        0
+      ],
+      "image_ref": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "ColorTransfer",
+    "_meta": {
+      "title": "Core: match restored tile colors"
+    }
+  },
+  "198": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": [
+        "201",
+        0
+      ],
+      "height": [
+        "201",
+        1
+      ],
+      "crop": "center",
+      "image": [
+        "157",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "Core: restore original tile size"
+    }
+  },
+  "201": {
+    "inputs": {
+      "image": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "GetImageSize"
+    }
+  },
+  "261": {
+    "inputs": {
+      "image": "momi_still_01.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "LoadImage"
+    }
+  },
+  "262": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "192",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "SaveImage"
+    }
+  },
+  "263": {
+    "inputs": {
+      "expression": "int(min(a / max(1, int(a / 900)), b / max(1, int(b / 900))) * 0.05)",
+      "values.a": [
+        "181",
+        0
+      ],
+      "values.b": [
+        "181",
+        1
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Core math: tile overlap"
+    }
+  },
+  "264": {
+    "inputs": {
+      "width": [
+        "265",
+        0
+      ],
+      "height": [
+        "265",
+        1
+      ],
+      "interpolation": "lanczos",
+      "method": "pad",
+      "condition": "always",
+      "multiple_of": 32,
+      "image": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "Fit tile to the sampling size"
+    }
+  },
+  "265": {
+    "inputs": {
+      "image": [
+        "267",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "GetImageSize"
+    }
+  },
+  "267": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "ImageScaleToTotalPixels"
+    }
+  },
+  "270": {
+    "inputs": {
+      "seed": 463780644,
+      "resolution": 1024,
+      "max_resolution": 0,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "lab",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "271",
+        0
+      ],
+      "dit": [
+        "272",
+        0
+      ],
+      "vae": [
+        "273",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "SeedVR2VideoUpscaler"
+    }
+  },
+  "271": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 0,
+      "device": "cpu",
+      "image": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "ImageResizeKJv2"
+    }
+  },
+  "272": {
+    "inputs": {
+      "model": "seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors",
+      "device": "cuda:0",
+      "blocks_to_swap": 36,
+      "swap_io_components": true,
+      "offload_device": "cpu",
+      "cache_model": true,
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "SeedVR2LoadDiTModel"
+    }
+  },
+  "273": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "none",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2LoadVAEModel"
+    }
+  },
+  "274": {
+    "inputs": {
+      "width": 12800,
+      "height": 12800,
+      "interpolation": "lanczos",
+      "method": "keep proportion",
+      "condition": "downscale if bigger",
+      "multiple_of": 0,
+      "image": [
+        "276",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "Cap oversized inputs"
+    }
+  },
+  "276": {
+    "inputs": {
+      "width": 1280,
+      "height": 1280,
+      "interpolation": "lanczos",
+      "method": "keep proportion",
+      "condition": "upscale if smaller",
+      "multiple_of": 0,
+      "image": [
+        "261",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "Lift small inputs to 1280"
+    }
+  }
+}

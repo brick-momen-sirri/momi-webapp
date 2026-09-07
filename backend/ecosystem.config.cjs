@@ -69,6 +69,7 @@ const commonEnv = {
   // These are endpoint identifiers, not credentials.
   RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT: process.env.RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT || "",
   RUNPOD_ENDPOINT_ID_PRO_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER || "",
+  RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER || "",
   RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR: process.env.RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR || "",
   RUNPOD_ENDPOINT_ID_QWEN_EDIT: process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT || "",
   // Optional per-GPU rate overrides for pricing a Still Images run, as

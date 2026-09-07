@@ -38,7 +38,13 @@
 
 import presets from "./data/stillImagePresets.json" with { type: "json" };
 
-export type StillImageCategoryId = "general-enhancement" | "pro-upscaler" | "reference-generator" | "qwen-edit" | "image-editing";
+export type StillImageCategoryId =
+  | "general-enhancement"
+  | "pro-upscaler"
+  | "flux-klein-upscaler"
+  | "reference-generator"
+  | "qwen-edit"
+  | "image-editing";
 
 export type StillImageSettingValue = string | number | boolean;
 
@@ -145,6 +151,7 @@ export type StillImageEditOptions = {
 export const STILL_IMAGE_CATEGORY_IDS: readonly StillImageCategoryId[] = [
   "general-enhancement",
   "pro-upscaler",
+  "flux-klein-upscaler",
   "reference-generator",
   "qwen-edit",
   "image-editing",
