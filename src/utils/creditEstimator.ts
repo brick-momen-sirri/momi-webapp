@@ -8,6 +8,20 @@ import type { ModelType } from "../types";
  */
 export type CreditEstimateOptions = {
   seedanceVersion?: string;
+  /**
+   * The source image's pixel dimensions, for presets priced by output area.
+   *
+   * The tiled upscaler's cost is the source multiplied by the square of its
+   * upscale factor, so without this its quote is a constant. The browser already
+   * knows the number -- it decoded the image to show it -- which is the one place
+   * in the stack where it is free.
+   */
+  sourceWidth?: number;
+  sourceHeight?: number;
+  /** The upscale factor picked for a tiled upscale, "x2" or "x4". */
+  upscale?: string;
+  /** Whether a tiled upscale cleans each tile with SeedVR first. */
+  upscaleMode?: string;
 };
 
 export function estimateModelCredits(
@@ -52,6 +66,12 @@ export function estimateModelCredits(
     return nanoBanana2Credits(resolution) * normalizeOutputCount(outputCount);
   }
 
+  // Mirrors kleinUpscaleCredits in backend/src/creditEstimator.ts. Kept in step
+  // by hand, the way the rest of this file mirrors its backend counterpart.
+  if (key.includes("flux-klein-upscaler")) {
+    return kleinUpscaleCredits(model, options);
+  }
+
   if (key.includes("ref_transfer") || key.includes("ref transfer")) {
     return 4;
   }
@@ -85,7 +105,7 @@ export function estimateModelCreditLabel(
     return normalizeOutputCount(outputCount) === 2 ? "70-282 credits (2 images)" : "35-141 credits";
   }
 
-  const credits = estimateModelCredits(model, durationSeconds, resolution, outputCount);
+  const credits = estimateModelCredits(model, durationSeconds, resolution, outputCount, options);
   if (key.includes("nano") && key.includes("banana") && normalizeOutputCount(outputCount) === 2) {
     return `${credits} credits (2 images)`;
   }
@@ -268,4 +288,74 @@ function normalizeResolution(value: string) {
 
 function formatCredits(value: number) {
   return Math.round(value).toLocaleString("en-US");
+}
+
+/** The endpoint's own execution ceiling. A render projected past this will be killed. */
+export const TILED_UPSCALE_RENDER_WINDOW_SECONDS = 600;
+
+/**
+ * Credits and runtime for one Flux Klein Upscaler run, from its output size.
+ *
+ * The same rates as the backend, and the same reasoning: the graph tiles its
+ * output at roughly 900px and pays per tile, so cost tracks output pixels rather
+ * than being a property of the preset. Fitted to the four runs measured to
+ * 2026-09-07 whose render completed -- 6.3MP->6, 13.3MP->17, 13.3MP->23 and
+ * 25.2MP->22 credits.
+ *
+ * Runtime is its own figure rather than something derived from credits: seconds
+ * belong to the graph, credits are seconds times a rate that changes with
+ * whichever GPU the endpoint hands out. 14.0 s/MP with SeedVR is what a direct
+ * timing (13.85) and a worker log reporting 193.15s for a 13.3MP render (14.5)
+ * independently agree on.
+ */
+const KLEIN_UPSCALE_RATES = {
+  "with-seedvr": { fixedCredits: 6.3, creditsPerMegapixel: 0.74, secondsPerMegapixel: 14.0 },
+  "without-seedvr": { fixedCredits: 5.0, creditsPerMegapixel: 0.5, secondsPerMegapixel: 9.5 },
+} as const;
+
+function kleinUpscaleRates(options: CreditEstimateOptions) {
+  return options.upscaleMode === "without-seedvr"
+    ? KLEIN_UPSCALE_RATES["without-seedvr"]
+    : KLEIN_UPSCALE_RATES["with-seedvr"];
+}
+
+/**
+ * Output megapixels the run will produce, or undefined when the source is unknown.
+ *
+ * Undefined rather than a guess: a quote built from a source size of zero would
+ * be confidently wrong, and the flat model number is at least honestly blunt.
+ */
+export function kleinUpscaleOutputMegapixels(options: CreditEstimateOptions) {
+  const width = Number(options.sourceWidth);
+  const height = Number(options.sourceHeight);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined;
+
+  const factor = options.upscale === "x4" ? 4 : 2;
+  return ((width * height) / 1e6) * factor * factor;
+}
+
+/**
+ * Credits from the source alone, or undefined when it was never measured.
+ *
+ * Split out from the model-shaped path so a caller that has an image but no
+ * ModelType -- the still image panel, which never had a cost display to hang one
+ * on -- can quote the same number the job will be stored with.
+ */
+export function kleinUpscaleCreditsForSource(options: CreditEstimateOptions) {
+  const megapixels = kleinUpscaleOutputMegapixels(options);
+  if (megapixels == null) return undefined;
+
+  const rates = kleinUpscaleRates(options);
+  return roundCredits(rates.fixedCredits + rates.creditsPerMegapixel * megapixels);
+}
+
+function kleinUpscaleCredits(model: ModelType, options: CreditEstimateOptions) {
+  return kleinUpscaleCreditsForSource(options) ?? Math.max(0, Math.round(model.cost));
+}
+
+/** Seconds the render is expected to take, for warning someone before they wait. */
+export function kleinUpscaleProjectedSeconds(options: CreditEstimateOptions) {
+  const megapixels = kleinUpscaleOutputMegapixels(options);
+  if (megapixels == null) return undefined;
+  return Math.round(megapixels * kleinUpscaleRates(options).secondsPerMegapixel);
 }

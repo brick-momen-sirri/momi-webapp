@@ -1,4 +1,4 @@
-import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, Dices, ImageIcon, Info, LockKeyhole, Minus, Play, Plus, SlidersHorizontal, Timer, TriangleAlert, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { Project, StillImageEditMode, UploadedImage } from "../types";
 import {
@@ -23,6 +23,8 @@ import {
   flux2KleinPromptPresetsForCategory,
   getFlux2KleinPromptPreset,
 } from "../features/still-images/flux2KleinPromptLibrary";
+import { formatProjectedWait, kleinUpscaleProjection } from "../features/still-images/kleinUpscaleProjection";
+import { useSourceImageSize } from "../features/still-images/useSourceImageSize";
 import { cn } from "../utils/classNames";
 import { randomStillImageSeedValue, stepStillImageSeed } from "../features/still-images/seed";
 import {
@@ -151,6 +153,16 @@ export function StillImagesSettingsPanel({
   // Image Editing's later slots are drawn from the painted region rather than
   // uploaded, so the uploader shows one slot and the mask card stands in for the
   // rest. Every other preset fills every slot it declares.
+  // Quoted here because the still image panel has never shown a cost. The tiled
+  // upscaler is the preset that needs one most: the same flat 28 credits was
+  // displayed for a run that came back at 6 and for two that were killed at the
+  // endpoint's ceiling after billing 117 and returning nothing.
+  const isTiledUpscaler = category.id === "flux-klein-upscaler";
+  const tiledUpscalerSource = isTiledUpscaler ? (state.images[0]?.croppedUrl ?? state.images[0]?.url) : undefined;
+  const tiledUpscalerSize = useSourceImageSize(tiledUpscalerSource);
+  const tiledUpscalerProjection = isTiledUpscaler
+    ? kleinUpscaleProjection(tiledUpscalerSize, state.settings)
+    : undefined;
   const paintsItsOwnSlots = category.id === "image-editing";
   const uploadSlotCount = paintsItsOwnSlots ? 1 : stillImageSlotCount(category, state);
   const slotLabels = stillImageSlotLabels(category, state);
@@ -628,6 +640,43 @@ export function StillImagesSettingsPanel({
                   : `Add ${missingInput(requiredImagesReady, regionReady)} to generate.`}
             </span>
           </div>
+          {tiledUpscalerProjection ? (
+            <div className="mb-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md bg-mist/80 px-3 py-2">
+                  <span className="flex items-center gap-1 font-semibold text-stone-500">
+                    <WalletCards className="h-3.5 w-3.5" />
+                    Cost
+                  </span>
+                  <p className="mt-1 text-sm font-bold text-ink">{tiledUpscalerProjection.credits} credits</p>
+                </div>
+                <div className="rounded-md bg-mist/80 px-3 py-2">
+                  <span className="flex items-center gap-1 font-semibold text-stone-500">
+                    <Timer className="h-3.5 w-3.5" />
+                    Estimate
+                  </span>
+                  <p className="mt-1 text-sm font-bold text-ink">{formatProjectedWait(tiledUpscalerProjection.seconds)}</p>
+                </div>
+              </div>
+              <p className="px-1 text-[11px] leading-4 text-stone-500">
+                Output {tiledUpscalerProjection.outputWidth} x {tiledUpscalerProjection.outputHeight} (
+                {tiledUpscalerProjection.megapixels.toFixed(1)} MP)
+              </p>
+              {tiledUpscalerProjection.exceedsRenderWindow ? (
+                <div
+                  className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800"
+                  role="status"
+                >
+                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    This is larger than the pod finishes inside 10 minutes, so the render will most likely be cut off
+                    and still be charged. A smaller upscale, or a smaller source, will land.
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <button
             type="button"
             aria-label="Generate"
