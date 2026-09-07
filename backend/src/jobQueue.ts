@@ -62,6 +62,9 @@ import {
   normalizeInterruptedRunpodJob,
 } from "./jobQueue/lifecycleState.js";
 import { buildQueuedJob } from "./jobQueue/jobFactory.js";
+import { localMediaFilePathFromUrl } from "./jobQueue/providerInputs.js";
+import { resolveAllowedExistingMediaPath } from "./mediaPathPolicy.js";
+import { detectMediaResolution } from "./mediaResolutionService.js";
 import { executeLocalComfyJob } from "./jobQueue/localComfyExecution.js";
 import { executeRunpodJob } from "./jobQueue/runpodExecution.js";
 
@@ -608,7 +611,26 @@ function buildNewQueuedJob(request: CreateJobRequest) {
     getProject,
     externalizeInputMedia: externalizeJobInputMedia,
     loadProjectFolders,
+    detectSourceResolution: detectJobSourceResolution,
   });
+}
+
+/**
+ * Reads an input image's dimensions through the same path policy dispatch uses.
+ *
+ * Routed through resolveAllowedExistingMediaPath rather than reading the
+ * reference directly: this runs on a value the client supplied, and the estimate
+ * is not a good enough reason to open a file outside the media roots. Only the
+ * header is parsed, so a 30MB source costs a couple of megabytes of read.
+ */
+async function detectJobSourceResolution(reference: string) {
+  const filePath = localMediaFilePathFromUrl(reference);
+  if (!filePath) return undefined;
+
+  const safePath = await resolveAllowedExistingMediaPath(filePath);
+  if (!safePath) return undefined;
+
+  return detectMediaResolution(safePath, "image");
 }
 
 export async function cancelJob(jobId: string) {

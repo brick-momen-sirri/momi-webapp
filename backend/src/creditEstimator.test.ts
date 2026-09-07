@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateSeedanceCreditRange, estimateWorkflowCredits } from "./creditEstimator.js";
+import { estimateSeedanceCreditRange, estimateWorkflowCredits,
+  kleinUpscaleOutputMegapixels,
+  kleinUpscaleProjectedSeconds,
+  TILED_UPSCALE_RENDER_WINDOW_SECONDS} from "./creditEstimator.js";
 
 const seedanceFirstLast = {
   id: "brick_api_seedance2_0_flf2v",
@@ -188,4 +191,99 @@ test("an Image Editing Studio estimate follows the engine, and GPT follows Quali
       stillImage: { categoryId: "image-editing", settings: { engine: "nano-banana", resolution } },
     } as never);
   assert.ok(nano("1K") < nano("2K") && nano("2K") < nano("4K"));
+});
+
+const KLEIN_UPSCALER = {
+  id: "still_flux-klein-upscaler",
+  name: "Flux Klein Upscaler",
+  category: "image_upscaling",
+  workflowPath: "workflow-still-images/flux-klein-upscaler.json",
+  estimatedCredits: 28,
+} as never;
+
+const kleinOptions = (settings: Record<string, string>) =>
+  ({ stillImage: { categoryId: "flux-klein-upscaler", settings } }) as never;
+
+test("a Klein upscale is priced by its output area, not by a flat number", () => {
+  // The graph tiles the output, so doubling the upscale factor quadruples the
+  // work. A flat quote cannot express that, which is how the same 28 came to be
+  // shown for a run that cost 6 and one that was killed after billing 117.
+  const source = { width: 1086, height: 1448 };
+
+  const x2 = estimateWorkflowCredits(KLEIN_UPSCALER, undefined, source as never, kleinOptions({ upscale: "x2" }));
+  const x4 = estimateWorkflowCredits(KLEIN_UPSCALER, undefined, source as never, kleinOptions({ upscale: "x4" }));
+
+  // 1086x1448 is 1.57MP; x2 outputs 6.3MP and x4 outputs 25.2MP.
+  assert.equal(x2, 11);
+  assert.equal(x4, 25);
+  assert.ok(x4 > x2 * 2, "four times the pixels must cost more than twice the credits");
+});
+
+test("SeedVR is the more expensive mode, and both scale with the source", () => {
+  const small = { width: 815, height: 1019 };
+  const large = { width: 4096, height: 5120 };
+
+  const withSeedVr = estimateWorkflowCredits(
+    KLEIN_UPSCALER,
+    undefined,
+    small as never,
+    kleinOptions({ upscale: "x4", mode: "with-seedvr" }),
+  );
+  const withoutSeedVr = estimateWorkflowCredits(
+    KLEIN_UPSCALER,
+    undefined,
+    small as never,
+    kleinOptions({ upscale: "x4", mode: "without-seedvr" }),
+  );
+  assert.ok(withSeedVr > withoutSeedVr, "cleaning every tile first costs more than not doing it");
+
+  // The 21MP source that was killed at the endpoint's 600s ceiling. Its quote has
+  // to be nothing like the 28 it was actually shown.
+  const real = estimateWorkflowCredits(
+    KLEIN_UPSCALER,
+    undefined,
+    large as never,
+    kleinOptions({ upscale: "x4", mode: "with-seedvr" }),
+  );
+  assert.ok(real > 200, `a 335MP render should quote in the hundreds, got ${real}`);
+});
+
+test("an unmeasured source falls back to the model's flat number", () => {
+  // Not every caller can measure the input, and a confident guess derived from a
+  // source size of zero would be worse than the blunt number.
+  assert.equal(
+    estimateWorkflowCredits(KLEIN_UPSCALER, undefined, undefined, kleinOptions({ upscale: "x4" })),
+    28,
+  );
+  assert.equal(
+    estimateWorkflowCredits(KLEIN_UPSCALER, undefined, { width: 0, height: 0 } as never, kleinOptions({})),
+    28,
+  );
+});
+
+test("the projected runtime is what warns someone before they wait", () => {
+  // 14.0 s/MP with SeedVR, agreed on by a direct timing (13.85) and a worker log
+  // reporting 193.15s for a 13.3MP render (14.5).
+  const thirteenMp = kleinUpscaleProjectedSeconds(
+    { width: 815, height: 1019 } as never,
+    kleinOptions({ upscale: "x4", mode: "with-seedvr" }),
+  );
+  assert.ok(thirteenMp != null && Math.abs(thirteenMp - 186) <= 20, `expected ~186s, got ${thirteenMp}`);
+
+  const realSource = kleinUpscaleProjectedSeconds(
+    { width: 4096, height: 5120 } as never,
+    kleinOptions({ upscale: "x4", mode: "with-seedvr" }),
+  );
+  assert.ok(
+    realSource != null && realSource > TILED_UPSCALE_RENDER_WINDOW_SECONDS,
+    "the 21MP source that timed out must still project past the window",
+  );
+
+  assert.equal(kleinUpscaleProjectedSeconds(undefined, kleinOptions({})), undefined);
+});
+
+test("output megapixels square the upscale factor", () => {
+  const source = { width: 1000, height: 1000 } as never;
+  assert.equal(kleinUpscaleOutputMegapixels(source, kleinOptions({ upscale: "x2" })), 4);
+  assert.equal(kleinUpscaleOutputMegapixels(source, kleinOptions({ upscale: "x4" })), 16);
 });

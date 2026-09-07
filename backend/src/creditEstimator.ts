@@ -47,6 +47,13 @@ export function estimateWorkflowCredits(
     return nanoBanana2Credits(resolutionLabel) * nanoBananaOutputCount(workflowOptions);
   }
 
+  // Scoped to the Klein preset alone. Pro Upscaler tiles differently and has no
+  // measured runs behind a rate, so it keeps its flat number rather than
+  // borrowing a model fitted to another graph.
+  if (key.includes("flux-klein-upscaler")) {
+    return kleinUpscaleCredits(model, resolution, workflowOptions);
+  }
+
   if (key.includes("still_image-editing")) {
     return imageEditingStudioCredits(workflowOptions);
   }
@@ -290,6 +297,88 @@ function openAiGptImage2UpperCredits(quality: "low" | "medium" | "high") {
 
 function exteriorGridGeneratorCredits() {
   return 6;
+}
+
+/** The endpoint's own execution ceiling. A render projected past this will be killed. */
+export const TILED_UPSCALE_RENDER_WINDOW_SECONDS = 600;
+
+/**
+ * Credits and runtime for one Flux Klein Upscaler run, from its output size.
+ *
+ * The flat `estimatedCredits` on the model cannot answer this. The graph splits
+ * its *output* into roughly 900px tiles and pays per tile, so the charge tracks
+ * output pixels -- the source area times the square of the upscale factor. The
+ * same flat 28 was quoted for a run that came back at 6 credits and for one whose
+ * render was killed after billing 117; a single number cannot straddle that.
+ *
+ * Fitted against the four runs measured to 2026-09-07 whose render completed:
+ * 6.3MP->6, 13.3MP->17, 13.3MP->23 and 25.2MP->22 credits. The scatter at a fixed
+ * size is real and comes from the hardware -- pod runtime is priced per GPU type
+ * and one endpoint serves several, so credits-per-megapixel is not a property of
+ * the graph. This leans on the mean rather than pretending to precision.
+ *
+ * Runtime is held separately rather than derived from credits, because the two
+ * divide by different things: seconds are a property of the graph, credits are
+ * seconds times a per-GPU rate. 14.0 s/MP with SeedVR is the figure two
+ * independent measurements agree on -- 13.85 timed directly against the pod, and
+ * 14.5 from a worker log reporting 193.15s for a 13.3MP render.
+ */
+const KLEIN_UPSCALE_RATES = {
+  "with-seedvr": { fixedCredits: 6.3, creditsPerMegapixel: 0.74, secondsPerMegapixel: 14.0 },
+  // One measured run (3.7MP in 34.7s for ~7 credits) plus the ratio of the two
+  // modes' execution times, 0.68. Thinner evidence than the SeedVR path.
+  "without-seedvr": { fixedCredits: 5.0, creditsPerMegapixel: 0.5, secondsPerMegapixel: 9.5 },
+} as const;
+
+function kleinUpscaleRates(workflowOptions: WorkflowOptions | undefined) {
+  const mode = workflowOptions?.stillImage?.settings?.mode;
+  return mode === "without-seedvr" ? KLEIN_UPSCALE_RATES["without-seedvr"] : KLEIN_UPSCALE_RATES["with-seedvr"];
+}
+
+/**
+ * Output megapixels the run will produce, or undefined when the source is unknown.
+ *
+ * Undefined is the honest answer for a job whose source was never measured: the
+ * flat model number then stands, which is wrong but not confidently wrong.
+ */
+export function kleinUpscaleOutputMegapixels(
+  resolution: Resolution | undefined,
+  workflowOptions: WorkflowOptions | undefined,
+) {
+  const width = Number(resolution?.width);
+  const height = Number(resolution?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined;
+
+  const factor = workflowOptions?.stillImage?.settings?.upscale === "x4" ? 4 : 2;
+  return ((width * height) / 1e6) * factor * factor;
+}
+
+function kleinUpscaleCredits(
+  model: Pick<WorkflowModel, "estimatedCredits">,
+  resolution: Resolution | undefined,
+  workflowOptions: WorkflowOptions | undefined,
+) {
+  const megapixels = kleinUpscaleOutputMegapixels(resolution, workflowOptions);
+  if (megapixels == null) return Math.max(0, Math.round(model.estimatedCredits ?? 0));
+
+  const rates = kleinUpscaleRates(workflowOptions);
+  return roundCredits(rates.fixedCredits + rates.creditsPerMegapixel * megapixels);
+}
+
+/**
+ * Seconds the render is expected to take, for warning someone before they wait.
+ *
+ * Deliberately not a gate. A source large enough to exceed the window is a real
+ * request -- a 21MP render at x4 is 335MP of tiles and around 78 minutes -- and
+ * the artist is better served by being told the number than by a refusal.
+ */
+export function kleinUpscaleProjectedSeconds(
+  resolution: Resolution | undefined,
+  workflowOptions: WorkflowOptions | undefined,
+) {
+  const megapixels = kleinUpscaleOutputMegapixels(resolution, workflowOptions);
+  if (megapixels == null) return undefined;
+  return Math.round(megapixels * kleinUpscaleRates(workflowOptions).secondsPerMegapixel);
 }
 
 /**
