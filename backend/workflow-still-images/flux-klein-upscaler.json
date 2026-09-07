@@ -3,7 +3,7 @@
     "inputs": {
       "model_name": "Qwen3VL-4B-Instruct-Q8_0.gguf",
       "preset_prompt": "🖼️ Simple Description",
-      "custom_prompt": "AVOID USNING BLURRY IN THE DESCRPTION",
+      "custom_prompt": "AVOID USING BLURRY IN THE DESCRIPTION",
       "max_tokens": 512,
       "keep_model_loaded": true,
       "seed": 4190677365,
