@@ -158,10 +158,20 @@ export function StillImagesSettingsPanel({
   // displayed for a run that came back at 6 and for two that were killed at the
   // endpoint's ceiling after billing 117 and returning nothing.
   const isTiledUpscaler = category.id === "flux-klein-upscaler";
-  const tiledUpscalerSource = isTiledUpscaler ? (state.images[0]?.croppedUrl ?? state.images[0]?.url) : undefined;
-  const tiledUpscalerSize = useSourceImageSize(tiledUpscalerSource);
+  const tiledUpscalerImage = isTiledUpscaler ? state.images[0] : undefined;
+  // A picked file already carries its dimensions -- ImageUploader probes it to
+  // decide whether a 16:9 crop is needed. A result chained in from the previous
+  // preset does not, and that is the natural input for an upscaler, so the
+  // measurement below is the fallback rather than the first resort.
+  const tiledUpscalerKnownSize =
+    tiledUpscalerImage?.width && tiledUpscalerImage?.height
+      ? { width: tiledUpscalerImage.width, height: tiledUpscalerImage.height }
+      : undefined;
+  const tiledUpscalerMeasuredSize = useSourceImageSize(
+    tiledUpscalerKnownSize ? undefined : (tiledUpscalerImage?.croppedUrl ?? tiledUpscalerImage?.url),
+  );
   const tiledUpscalerProjection = isTiledUpscaler
-    ? kleinUpscaleProjection(tiledUpscalerSize, state.settings)
+    ? kleinUpscaleProjection(tiledUpscalerKnownSize ?? tiledUpscalerMeasuredSize, state.settings)
     : undefined;
   const paintsItsOwnSlots = category.id === "image-editing";
   const uploadSlotCount = paintsItsOwnSlots ? 1 : stillImageSlotCount(category, state);
