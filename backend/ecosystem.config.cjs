@@ -11,6 +11,22 @@ const sharedStateEnabled =
       .toLowerCase(),
   );
 
+const STILL_IMAGE_PRESET_ENDPOINT_KEYS = [
+  "RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT",
+  "RUNPOD_ENDPOINT_ID_PRO_UPSCALER",
+  "RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER",
+  "RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR",
+  "RUNPOD_ENDPOINT_ID_QWEN_EDIT",
+];
+
+function stillImagePresetEndpointEnv() {
+  return Object.fromEntries(
+    STILL_IMAGE_PRESET_ENDPOINT_KEYS.map((key) => [key, String(process.env[key] || "").trim()]).filter(
+      ([, endpointId]) => endpointId,
+    ),
+  );
+}
+
 const commonEnv = {
   NODE_ENV: "production",
   HOST: "127.0.0.1",
@@ -67,11 +83,16 @@ const commonEnv = {
   // variable set after that never reaches the process, even with --update-env.
   // Listing it makes the pm2 CLI read it from the launching shell instead.
   // These are endpoint identifiers, not credentials.
-  RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT: process.env.RUNPOD_ENDPOINT_ID_GENERAL_ENHANCEMENT || "",
-  RUNPOD_ENDPOINT_ID_PRO_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER || "",
-  RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER: process.env.RUNPOD_ENDPOINT_ID_FLUX_KLEIN_UPSCALER || "",
-  RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR: process.env.RUNPOD_ENDPOINT_ID_REFERENCE_GENERATOR || "",
-  RUNPOD_ENDPOINT_ID_QWEN_EDIT: process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT || "",
+  //
+  // Spread, not written key-by-key, because an explicit `|| ""` here is worse
+  // than saying nothing: src/env.ts only fills keys *absent* from process.env,
+  // so an empty string pinned by pm2 shadows the value in .env and the preset
+  // is refused at dispatch as if no pod existed. That is exactly what happened
+  // to flux-klein-upscaler on 2026-09-08 -- the id was live at User scope and in
+  // .env, the pod had three idle workers, and the dispatcher had been reloaded
+  // from a shell that predated the variable, so it dispatched nothing. Omitting
+  // an unset key leaves the .env fallback intact.
+  ...stillImagePresetEndpointEnv(),
   // Optional per-GPU rate overrides for pricing a Still Images run, as
   // `gpuTypeId=usdPerSecond` pairs separated by semicolons (see podRuntimeCost.ts).
   //
