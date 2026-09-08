@@ -213,9 +213,11 @@ test("a Klein upscale is priced by its output area, not by a flat number", () =>
   const x2 = estimateWorkflowCredits(KLEIN_UPSCALER, undefined, source as never, kleinOptions({ upscale: "x2" }));
   const x4 = estimateWorkflowCredits(KLEIN_UPSCALER, undefined, source as never, kleinOptions({ upscale: "x4" }));
 
-  // 1086x1448 is 1.57MP; x2 outputs 6.3MP and x4 outputs 25.2MP.
-  assert.equal(x2, 11);
-  assert.equal(x4, 25);
+  // 1086x1448 is 1.57MP; x2 outputs 6.3MP and x4 outputs 25.2MP. Both figures
+  // are what the two measured runs at exactly these settings actually cost --
+  // $0.029 and $0.123, or 6 and 26 credits.
+  assert.equal(x2, 7);
+  assert.equal(x4, 26);
   assert.ok(x4 > x2 * 2, "four times the pixels must cost more than twice the credits");
 });
 
@@ -262,13 +264,13 @@ test("an unmeasured source falls back to the model's flat number", () => {
 });
 
 test("the projected runtime is what warns someone before they wait", () => {
-  // 14.0 s/MP with SeedVR, agreed on by a direct timing (13.85) and a worker log
-  // reporting 193.15s for a 13.3MP render (14.5).
+  // 12.0 s/MP with SeedVR: the two clean runs measured 11.1 and 11.8 across a
+  // fourfold change in output size.
   const thirteenMp = kleinUpscaleProjectedSeconds(
     { width: 815, height: 1019 } as never,
     kleinOptions({ upscale: "x4", mode: "with-seedvr" }),
   );
-  assert.ok(thirteenMp != null && Math.abs(thirteenMp - 186) <= 20, `expected ~186s, got ${thirteenMp}`);
+  assert.ok(thirteenMp != null && Math.abs(thirteenMp - 159) <= 15, `expected ~159s, got ${thirteenMp}`);
 
   const realSource = kleinUpscaleProjectedSeconds(
     { width: 4096, height: 5120 } as never,

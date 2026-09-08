@@ -6,7 +6,8 @@ describe("kleinUpscaleProjection", () => {
   it("quotes the run from its output area, not from a flat number", () => {
     // 1086x1448 is the source behind the one Klein run that has succeeded.
     const x2 = kleinUpscaleProjection({ width: 1086, height: 1448 }, { upscale: "x2", mode: "with-seedvr" });
-    expect(x2).toMatchObject({ outputWidth: 2172, outputHeight: 2896, credits: 11 });
+    // The x4 of this same source quoted 25 and the run came back at $0.123 -- 26.
+    expect(x2).toMatchObject({ outputWidth: 2172, outputHeight: 2896, credits: 7 });
     expect(x2?.megapixels).toBeCloseTo(6.29, 1);
     expect(x2?.exceedsRenderWindow).toBe(false);
   });
@@ -20,11 +21,13 @@ describe("kleinUpscaleProjection", () => {
     expect(x2?.megapixels).toBe(4);
     expect(x4?.megapixels).toBe(16);
 
-    expect(x4!.credits).toBeGreaterThan(x2!.credits);
-    // But not four times: a run pays a fixed cost to stage its models before it
-    // touches a tile, so the quote flattens out rather than scaling with area
-    // all the way down to nothing.
-    expect(x4!.credits).toBeLessThan(x2!.credits * 4);
+    // And close to four times over, because the rate is proportional. An earlier
+    // fit carried a fixed staging cost, but a line through the two measured runs
+    // put that intercept within noise of zero, and it over-quoted the smaller of
+    // them by 1.8x -- it had been absorbing the 2.2x spread between GPU rates
+    // rather than describing any real per-run overhead.
+    expect(x4!.credits).toBeGreaterThan(x2!.credits * 3.5);
+    expect(x4!.credits).toBeLessThan(x2!.credits * 4.5);
   });
 
   it("flags the source that actually timed out", () => {

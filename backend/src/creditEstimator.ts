@@ -305,29 +305,40 @@ export const TILED_UPSCALE_RENDER_WINDOW_SECONDS = 600;
 /**
  * Credits and runtime for one Flux Klein Upscaler run, from its output size.
  *
- * The flat `estimatedCredits` on the model cannot answer this. The graph splits
- * its *output* into roughly 900px tiles and pays per tile, so the charge tracks
- * output pixels -- the source area times the square of the upscale factor. The
- * same flat 28 was quoted for a run that came back at 6 credits and for one whose
- * render was killed after billing 117; a single number cannot straddle that.
+ * The graph splits its *output* into roughly 900px tiles and pays per tile, so
+ * cost tracks output pixels -- the source multiplied by the square of the
+ * upscale factor. The flat 28 this replaced was quoted alike for a run that
+ * cost 6 credits and for one killed after billing 117.
  *
- * Fitted against the four runs measured to 2026-09-07 whose render completed:
- * 6.3MP->6, 13.3MP->17, 13.3MP->23 and 25.2MP->22 credits. The scatter at a fixed
- * size is real and comes from the hardware -- pod runtime is priced per GPU type
- * and one endpoint serves several, so credits-per-megapixel is not a property of
- * the graph. This leans on the mean rather than pretending to precision.
+ * Refitted 2026-09-07 against the two runs that completed cleanly, both on an
+ * RTX 5090, using the cost and pod time recorded on the result itself:
+ * 6.29MP in 70s for $0.029, and 25.16MP in 296s for $0.123. Those give 11.1 and
+ * 11.8 s/MP, and 0.97 and 1.03 credits/MP -- close enough across a fourfold
+ * change in size to treat as one rate.
  *
- * Runtime is held separately rather than derived from credits, because the two
- * divide by different things: seconds are a property of the graph, credits are
- * seconds times a per-GPU rate. 14.0 s/MP with SeedVR is the figure two
- * independent measurements agree on -- 13.85 timed directly against the pod, and
- * 14.5 from a worker log reporting 193.15s for a 13.3MP render.
+ * Deliberately proportional, with no fixed term. A line through both points puts
+ * the intercept at -5.3s and -0.49 credits, which is noise around zero, and an
+ * earlier fit that carried a 6.3-credit fixed cost over-quoted the smaller run
+ * by 1.8x. That fixed term was never really overhead: it was absorbing the fact
+ * that the fit mixed GPUs, and pod runtime is priced per GPU type -- the 5090
+ * bills $0.000414/s where the hardware behind the September 4 runs implied
+ * $0.000922/s, a 2.2x spread that no single credits-per-megapixel figure spans.
+ * So this rate is only as good as the assumption that the endpoint keeps handing
+ * out 5090s, which is what every measured run has landed on.
+ *
+ * The two 13.3MP runs are excluded on purpose. Both rendered fully and then
+ * failed returning the result, so their billed time includes a failed upload
+ * rather than only the work.
+ *
+ * Runtime is held separately rather than derived from credits, because seconds
+ * belong to the graph while credits are seconds times whichever rate applies.
  */
 const KLEIN_UPSCALE_RATES = {
-  "with-seedvr": { fixedCredits: 6.3, creditsPerMegapixel: 0.74, secondsPerMegapixel: 14.0 },
-  // One measured run (3.7MP in 34.7s for ~7 credits) plus the ratio of the two
-  // modes' execution times, 0.68. Thinner evidence than the SeedVR path.
-  "without-seedvr": { fixedCredits: 5.0, creditsPerMegapixel: 0.5, secondsPerMegapixel: 9.5 },
+  "with-seedvr": { creditsPerMegapixel: 1.05, secondsPerMegapixel: 12.0 },
+  // Scaled from the SeedVR rate by 0.679, the ratio of the two modes' execution
+  // times measured back to back on one source: 34.7s against 51.1s. A ratio
+  // survives the change of hardware that the absolute rates do not.
+  "without-seedvr": { creditsPerMegapixel: 0.71, secondsPerMegapixel: 8.15 },
 } as const;
 
 function kleinUpscaleRates(workflowOptions: WorkflowOptions | undefined) {
@@ -362,7 +373,7 @@ function kleinUpscaleCredits(
   if (megapixels == null) return Math.max(0, Math.round(model.estimatedCredits ?? 0));
 
   const rates = kleinUpscaleRates(workflowOptions);
-  return roundCredits(rates.fixedCredits + rates.creditsPerMegapixel * megapixels);
+  return roundCredits(rates.creditsPerMegapixel * megapixels);
 }
 
 /**
