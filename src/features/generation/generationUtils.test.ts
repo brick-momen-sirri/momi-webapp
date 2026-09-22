@@ -99,12 +99,14 @@ describe("seedance ratio", () => {
     seedanceRatio: "9:16",
     seedanceVersionId: "2.0" as const,
     seedanceVideoEditing: false,
+    seedanceGenerateAudio: false,
   };
 
   it("submits the version and ratio only for Seedance models", () => {
     expect(workflowOptionsForJob({ ...submissionOptions, model: seedanceFirstLast }).seedance).toEqual({
       version: "2.0",
       ratio: "9:16",
+      generateAudio: false,
     });
     expect(workflowOptionsForJob({ ...submissionOptions, model: model() }).seedance).toBeUndefined();
   });
@@ -112,7 +114,30 @@ describe("seedance ratio", () => {
   it("omits the ratio on 2.5 first-last-frame, whose node has no such input", () => {
     expect(workflowOptionsForJob({ ...submissionOptions, model: seedanceFirstLast, seedanceVersionId: "2.5" }).seedance).toEqual({
       version: "2.5",
+      generateAudio: false,
     });
+  });
+
+  // Unlike the ratio and the edit switch, this one is never conditional: the node
+  // declares generate_audio on every version and task and defaults it to true, so a
+  // Seedance job that leaves it out comes back with an audio track nobody asked for.
+  it("sends the audio switch on every Seedance version and task", () => {
+    for (const versionId of ["2.0", "2.5"] as const) {
+      for (const seedanceModel of [seedanceFirstLast, seedanceReference]) {
+        expect(
+          workflowOptionsForJob({ ...submissionOptions, model: seedanceModel, seedanceVersionId: versionId }).seedance
+            ?.generateAudio,
+        ).toBe(false);
+        expect(
+          workflowOptionsForJob({
+            ...submissionOptions,
+            model: seedanceModel,
+            seedanceVersionId: versionId,
+            seedanceGenerateAudio: true,
+          }).seedance?.generateAudio,
+        ).toBe(true);
+      }
+    }
   });
 
   it("sends the edit switch only where 2.5 has one", () => {
@@ -129,16 +154,19 @@ describe("seedance ratio", () => {
       version: "2.5",
       ratio: "9:16",
       videoEditing: true,
+      generateAudio: false,
     });
     // 2.0 has no video_editing input, and the reference node with no video has
     // nothing to edit.
     expect(workflowOptionsForJob({ ...asked, model: videoEdit, seedanceVersionId: "2.0" }).seedance).toEqual({
       version: "2.0",
       ratio: "9:16",
+      generateAudio: false,
     });
     expect(workflowOptionsForJob({ ...asked, model: seedanceReference, seedanceVersionId: "2.5" }).seedance).toEqual({
       version: "2.5",
       ratio: "9:16",
+      generateAudio: false,
     });
   });
 });

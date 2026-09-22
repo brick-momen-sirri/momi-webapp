@@ -411,6 +411,9 @@ async function resolveRunpodResponse(
         },
         startedAt,
         shouldCancel,
+        // The one retrying call in this file: a GET that can be repeated for free,
+        // against a job the provider is already running and billing.
+        { retryNetworkErrors: true },
       );
       continue;
     }
@@ -471,7 +474,97 @@ function logTextArtifacts(textArtifacts: RunpodTextArtifact[]) {
   console.info(`[runpod] Found ${textArtifacts.length} text artifact(s)${labels ? `: ${labels}` : "."}`);
 }
 
+/**
+ * How many times a poll may lose the network before the job is given up on.
+ *
+ * The backoff starts at the poll interval because a lost poll is simply a poll
+ * that did not land: the loop was going to wait that long anyway, so the first
+ * retry costs nothing beyond the normal cadence. At the shipped 5s interval the
+ * five attempts span 5+10+20+30s, roughly a minute -- far longer than the blip
+ * that took out seven live jobs on 2026-09-22, when the endpoint was answering in
+ * 30-120ms either side of it, and far short of the 40 minute job timeout.
+ */
+const POLL_NETWORK_RETRY_ATTEMPTS = 5;
+const POLL_NETWORK_RETRY_MAX_MS = 30_000;
+
+/**
+ * Whether this is the transport losing the request, rather than RunPod answering.
+ *
+ * Deliberately narrow. An HTTP status is an answer and is already a
+ * RunpodComfyError; an AbortError is our own timeout or cancellation and retrying
+ * it would ignore a deadline the caller set. What is left is DNS, TCP, TLS and
+ * socket failures, which undici surfaces as TypeError("fetch failed") with the real
+ * reason on `cause`.
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (error instanceof RunpodComfyError || error instanceof RunpodComfyCanceledError) return false;
+  if (!(error instanceof Error) || error.name === "AbortError") return false;
+
+  const codes = new Set([
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ECONNABORTED",
+    "ETIMEDOUT",
+    "ENOTFOUND",
+    "EAI_AGAIN",
+    "EPIPE",
+    "ENETUNREACH",
+    "ENETDOWN",
+    "EHOSTUNREACH",
+    "UND_ERR_SOCKET",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+  ]);
+  for (let cause: unknown = error, depth = 0; cause instanceof Error && depth < 5; cause = cause.cause, depth += 1) {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && codes.has(code)) return true;
+  }
+  return error instanceof TypeError && /fetch failed|network|socket|terminated/i.test(error.message);
+}
+
+/**
+ * Retry a poll that lost the network, because a lost poll is not a failed job.
+ *
+ * The submission has already succeeded by the time polling starts: RunPod is
+ * running the render and billing for it whatever happens on our side. Treating one
+ * failed GET as terminal is what threw away four finished videos on 2026-09-22 --
+ * the app recorded "fetch failed" while the provider went on to COMPLETED.
+ *
+ * Only ever enabled for the idempotent status GET. A retried POST to /run would be
+ * a second render on the provider's bill, which is a worse failure than the one
+ * this fixes.
+ */
 async function runpodFetch(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  startedAt: number,
+  shouldCancel?: () => boolean,
+  options?: { retryNetworkErrors?: boolean },
+) {
+  const attempts = options?.retryNetworkErrors ? POLL_NETWORK_RETRY_ATTEMPTS : 1;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await runpodFetchOnce(fetchImpl, url, init, startedAt, shouldCancel);
+    } catch (error) {
+      if (attempt >= attempts || !isTransientNetworkError(error)) throw error;
+      throwIfCancellationRequested(shouldCancel);
+      // remainingTimeoutMs throws once the job's own deadline has passed, so a
+      // network outage that outlasts the render window still ends the job.
+      const backoff = Math.min(runpodPollIntervalMs * 2 ** (attempt - 1), POLL_NETWORK_RETRY_MAX_MS);
+      const wait = Math.min(backoff, remainingTimeoutMs(startedAt));
+      console.warn(
+        `[runpod] ${new Date().toISOString()} poll lost the network (${
+          error instanceof Error ? error.message : String(error)
+        }); retrying in ${wait}ms, attempt ${attempt + 1}/${attempts}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      throwIfCancellationRequested(shouldCancel);
+    }
+  }
+}
+
+async function runpodFetchOnce(
   fetchImpl: typeof fetch,
   url: string,
   init: RequestInit,

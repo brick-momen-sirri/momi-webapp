@@ -341,6 +341,10 @@ export type WorkflowOptions = {
     ratio?: string;
     /** 2.5 only: edit the connected reference video instead of generating a new one. */
     videoEditing?: boolean;
+    // Whether the model generates an audio track. Every Seedance version and task
+    // has this input and the node defaults it to true, so it is sent on every
+    // Seedance job rather than only when switched on.
+    generateAudio?: boolean;
   };
   save?: {
     cameraNumber?: string;

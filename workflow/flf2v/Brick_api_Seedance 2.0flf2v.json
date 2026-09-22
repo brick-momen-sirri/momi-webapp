@@ -6,7 +6,7 @@
       "model.resolution": "1080p",
       "model.ratio": "16:9",
       "model.duration": 7,
-      "model.generate_audio": true,
+      "model.generate_audio": false,
       "seed": 498214648,
       "watermark": false,
       "first_frame_asset_id": "",

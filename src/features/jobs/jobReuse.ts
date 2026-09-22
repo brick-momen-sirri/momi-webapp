@@ -184,6 +184,15 @@ export function reusableSeedanceVideoEditing(options: WorkflowOptions | undefine
   return typeof options?.seedance?.videoEditing === "boolean" ? options.seedance.videoEditing : undefined;
 }
 
+/**
+ * Undefined for a job from before the switch existed, so reusing one leaves the
+ * current choice alone. Those jobs ran with audio on whether or not anyone wanted
+ * it, and silently turning the switch back on is the behaviour this replaced.
+ */
+export function reusableSeedanceGenerateAudio(options: WorkflowOptions | undefined) {
+  return typeof options?.seedance?.generateAudio === "boolean" ? options.seedance.generateAudio : undefined;
+}
+
 export async function rehydrateJobInputImages(job: Job, slotCount: number) {
   const limit = slotCount > 0 ? slotCount : job.inputImages.length;
   const hydrated = await Promise.all(

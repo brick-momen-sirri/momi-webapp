@@ -12,6 +12,7 @@ import { PromptBox } from "./PromptBox";
 import { ResolutionSelector } from "./ResolutionSelector";
 import { ResultDestinationControl } from "./ResultDestinationControl";
 import { SaveNumberControl } from "./SaveNumberControl";
+import { SeedanceAudioControl } from "./SeedanceAudioControl";
 import { SeedanceVideoEditingControl } from "./SeedanceVideoEditingControl";
 import { VideoUploader } from "./VideoUploader";
 
@@ -27,6 +28,8 @@ type LeftSettingsPanelProps = {
   selectedSeedanceVersion: SeedanceVersionId;
   seedanceVideoEditing: boolean;
   showSeedanceVideoEditing: boolean;
+  seedanceGenerateAudio: boolean;
+  showSeedanceGenerateAudio: boolean;
   selectedDurationSeconds: number;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
@@ -48,6 +51,7 @@ type LeftSettingsPanelProps = {
   onSeedanceRatioChange: (ratio: string) => void;
   onSeedanceVersionChange: (version: SeedanceVersionId) => void;
   onSeedanceVideoEditingChange: (enabled: boolean) => void;
+  onSeedanceGenerateAudioChange: (enabled: boolean) => void;
   onDurationChange: (seconds: number) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
@@ -73,6 +77,8 @@ export function LeftSettingsPanel({
   selectedSeedanceVersion,
   seedanceVideoEditing,
   showSeedanceVideoEditing,
+  seedanceGenerateAudio,
+  showSeedanceGenerateAudio,
   selectedDurationSeconds,
   prompt,
   archVizGridOptions,
@@ -94,6 +100,7 @@ export function LeftSettingsPanel({
   onSeedanceRatioChange,
   onSeedanceVersionChange,
   onSeedanceVideoEditingChange,
+  onSeedanceGenerateAudioChange,
   onDurationChange,
   onPromptChange,
   onArchVizGridOptionsChange,
@@ -176,6 +183,9 @@ export function LeftSettingsPanel({
         {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
         {showSeedanceVideoEditing ? (
           <SeedanceVideoEditingControl value={seedanceVideoEditing} onChange={onSeedanceVideoEditingChange} />
+        ) : null}
+        {showSeedanceGenerateAudio ? (
+          <SeedanceAudioControl value={seedanceGenerateAudio} onChange={onSeedanceGenerateAudioChange} />
         ) : null}
         {showArchVizGridControls ? (
           <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />

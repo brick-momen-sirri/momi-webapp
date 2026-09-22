@@ -225,6 +225,12 @@ export type WorkflowOptions = {
     ratio?: string;
     /** 2.5 only: edit the connected reference video instead of generating a new one. */
     videoEditing?: boolean;
+    // Whether the model generates an audio track. Every version and task has this
+    // input and the node defaults it to true, so it is written on every Seedance
+    // prompt rather than only when asked -- omitting it is what gave silent
+    // architectural renders an audio track nobody wanted, and a provider copyright
+    // match on that track fails the whole job with the video already rendered.
+    generateAudio?: boolean;
   };
   save?: {
     cameraNumber?: string;

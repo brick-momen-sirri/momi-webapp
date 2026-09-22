@@ -166,6 +166,44 @@ test("a 2.5 reference job still sends video_editing when nobody asked for it", (
   assert.equal(inputs["model.video_editing"], false);
 });
 
+test("generate_audio is written off for every version and task unless asked", () => {
+  // The node declares it required on all four model options and defaults it to
+  // true, so an unwritten key is an audio track, not silence -- and a provider
+  // copyright match on that track fails the job with the video already rendered.
+  for (const version of ["2.0", "2.5"] as const) {
+    for (const [category, id] of [
+      ["image_to_video", "brick_api_seedance2_0_i2v"],
+      ["first_last_frame_to_video", "brick_api_seedance_2_0flf2v"],
+      ["video_editing", "brick_api_seedance2_0_r2v"],
+    ] as const) {
+      const silent: ComfyNode = { model: "Seedance 2.0", "model.generate_audio": true };
+      applySeedanceModelInputs(silent, model(category, id), { seedance: { version } });
+      assert.equal(silent["model.generate_audio"], false, `${version} ${category} should default to silent`);
+
+      const withSound: ComfyNode = { model: "Seedance 2.0" };
+      applySeedanceModelInputs(withSound, model(category, id), { seedance: { version, generateAudio: true } });
+      assert.equal(withSound["model.generate_audio"], true, `${version} ${category} should honour the switch`);
+    }
+  }
+});
+
+test("generate_audio is added to a graph that never carried the key", () => {
+  // The reference workflow is saved without it, which is how those jobs generated
+  // audio nobody asked for: no key means the node's own default, not off.
+  const inputs: ComfyNode = { model: "Seedance 2.0", "model.ratio": "16:9" };
+  applySeedanceModelInputs(inputs, model("video_editing", "brick_api_seedance2_0_r2v"), { seedance: { version: "2.0" } });
+
+  assert.equal(inputs["model.generate_audio"], false);
+});
+
+test("generate_audio honours the spelling a hand-built graph already uses", () => {
+  const inputs: ComfyNode = { model: "Seedance 2.0", generate_audio: true };
+  applySeedanceModelInputs(inputs, model("image_to_video"), { seedance: { version: "2.0" } });
+
+  assert.equal(inputs.generate_audio, false);
+  assert.equal(inputs["model.generate_audio"], undefined, "must not leave a second, ignored key behind");
+});
+
 test("switching back to 2.0 removes the keys 2.0 has no input for", () => {
   const inputs: ComfyNode = {
     model: "Seedance 2.5",

@@ -41,6 +41,7 @@ type JobSubmissionOptions = {
   selectedSeedanceRatio: string;
   selectedSeedanceVersion: SeedanceVersionId;
   seedanceVideoEditing: boolean;
+  seedanceGenerateAudio: boolean;
   setJobs: Dispatch<SetStateAction<Job[]>>;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setBackendJobsTotal: Dispatch<SetStateAction<number>>;
@@ -84,6 +85,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
       selectedSeedanceRatio,
       selectedSeedanceVersion,
       seedanceVideoEditing,
+      seedanceGenerateAudio,
       setJobs,
       setProjects,
       setBackendJobsTotal,
@@ -118,6 +120,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
           seedanceRatio: selectedSeedanceRatio,
           seedanceVersionId: selectedSeedanceVersion,
           seedanceVideoEditing,
+          seedanceGenerateAudio,
         });
         const fingerprint = submissionFingerprint({
           accountId: account.id,
@@ -230,6 +233,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
         selectedSeedanceRatio,
         selectedSeedanceVersion,
         seedanceVideoEditing,
+        seedanceGenerateAudio,
         use16By9Cropping,
         requiredImages,
       });
@@ -324,6 +328,7 @@ function fingerprintForCurrentOptions(options: JobSubmissionOptions) {
       seedanceRatio: options.selectedSeedanceRatio,
       seedanceVersionId: options.selectedSeedanceVersion,
       seedanceVideoEditing: options.seedanceVideoEditing,
+      seedanceGenerateAudio: options.seedanceGenerateAudio,
     }),
   });
 }

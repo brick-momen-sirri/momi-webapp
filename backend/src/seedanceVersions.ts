@@ -247,6 +247,20 @@ export function applySeedanceModelInputs(
   } else {
     deleteSeedanceInput(inputs, ["model.video_editing", "video_editing"]);
   }
+
+  // Written unconditionally, and never deleted. `generate_audio` is a required
+  // BOOLEAN on every model option of both ByteDance2 nodes (2.0, 2.5, Fast, Mini)
+  // and its node default is true, so leaving the key out does not mean "no audio" --
+  // it means the provider generates one anyway. That is how the reference task
+  // produced audio despite its saved graph never carrying the key.
+  //
+  // Absent from the request is treated as off. These are silent architectural
+  // renders: nothing downstream wants the track, and when the provider's copyright
+  // check rejects it the whole job fails with the video already rendered and billed.
+  setSeedanceInput(inputs, "model.generate_audio", requested.generateAudio === true, [
+    "model.generate_audio",
+    "generate_audio",
+  ]);
 }
 
 /**

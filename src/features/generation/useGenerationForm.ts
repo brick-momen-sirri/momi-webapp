@@ -23,6 +23,7 @@ import {
   normalizeSeedanceRatio,
   supports16By9CropToggle,
   supportsImageOutputCount,
+  supportsSeedanceGenerateAudio,
 } from "./generationUtils";
 import {
   defaultSeedanceVideoEditing,
@@ -56,6 +57,10 @@ export function useGenerationForm(options: GenerationFormOptions) {
     normalizeSeedanceVersion(initialSettings.selectedSeedanceVersion),
   );
   const [seedanceVideoEditing, setSeedanceVideoEditing] = useState(initialSettings.seedanceVideoEditing ?? false);
+  // Off unless the artist asks. These are silent architectural renders, and an
+  // unwanted track that trips the provider's copyright check fails the whole job
+  // after the video has already rendered and billed.
+  const [seedanceGenerateAudio, setSeedanceGenerateAudio] = useState(initialSettings.seedanceGenerateAudio ?? false);
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
@@ -96,6 +101,9 @@ export function useGenerationForm(options: GenerationFormOptions) {
     [imageOutputCount, selectedDurationSeconds, selectedResolution, selectedSeedanceVersion, versionedModelBase],
   );
   const selectedModelSupportsVideoEditing = seedanceSupportsVideoEditing(selectedModel, seedanceVersion(selectedSeedanceVersion));
+  // Unlike video editing, every Seedance version and task declares generate_audio,
+  // so the switch shows for all of them.
+  const selectedModelSupportsGenerateAudio = supportsSeedanceGenerateAudio(selectedModel);
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
@@ -143,6 +151,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
       selectedSeedanceRatio,
       selectedSeedanceVersion,
       seedanceVideoEditing,
+      seedanceGenerateAudio,
       selectedDurationSeconds,
       selectedProjectId,
       targetFolderId,
@@ -156,6 +165,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     imageOutputCount,
     prompt,
     saveNumber,
+    seedanceGenerateAudio,
     seedanceVideoEditing,
     selectedDurationSeconds,
     selectedModelId,
@@ -200,6 +210,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setSelectedSeedanceVersion,
     seedanceVideoEditing,
     setSeedanceVideoEditing,
+    seedanceGenerateAudio,
+    setSeedanceGenerateAudio,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -219,6 +231,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     selectedModel,
     selectedModelSupportsCropToggle,
     selectedModelSupportsVideoEditing,
+    selectedModelSupportsGenerateAudio,
     requiredImages,
     use16By9Cropping,
     disabledReason,

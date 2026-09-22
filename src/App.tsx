@@ -25,6 +25,7 @@ import {
   normalizeSaveNumber,
   normalizeSeedanceRatio,
   supportsImageOutputCount,
+  supportsSeedanceGenerateAudio,
   supportsSeedanceRatio,
 } from "./features/generation/generationUtils";
 import {
@@ -50,6 +51,7 @@ import {
   reusableSaveNumber,
   reusableSeedanceRatio,
   reusableSeedanceVersion,
+  reusableSeedanceGenerateAudio,
   reusableSeedanceVideoEditing,
 } from "./features/jobs/jobReuse";
 import { useJobActions } from "./features/jobs/useJobActions";
@@ -156,6 +158,8 @@ function App() {
     setSelectedSeedanceVersion,
     seedanceVideoEditing,
     setSeedanceVideoEditing,
+    seedanceGenerateAudio,
+    setSeedanceGenerateAudio,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -175,6 +179,7 @@ function App() {
     selectedModel,
     selectedModelSupportsCropToggle,
     selectedModelSupportsVideoEditing,
+    selectedModelSupportsGenerateAudio,
     requiredImages,
     use16By9Cropping,
     disabledReason,
@@ -267,6 +272,7 @@ function App() {
     selectedSeedanceRatio,
     selectedSeedanceVersion,
     seedanceVideoEditing,
+    seedanceGenerateAudio,
     setJobs,
     setProjects,
     setBackendJobsTotal,
@@ -597,6 +603,14 @@ function App() {
       restored.add("video editing mode");
     }
 
+    // No version or task guard: every Seedance node declares generate_audio, so the
+    // setting always applies where the model is a Seedance one at all.
+    const seedanceAudio = reusableSeedanceGenerateAudio(job.workflowOptions);
+    if (seedanceAudio !== undefined && supportsSeedanceGenerateAudio(versionedTargetModel)) {
+      setSeedanceGenerateAudio(seedanceAudio);
+      restored.add("sound");
+    }
+
     if (hasInputImageMetadata(job)) {
       const slotCount = reusableModel ? imageSlotCountForModel(reusableModel) : job.inputImages.length;
       const nextImages = await rehydrateJobInputImages(job, slotCount);
@@ -660,6 +674,8 @@ function App() {
                 selectedSeedanceVersion={selectedSeedanceVersion}
                 seedanceVideoEditing={seedanceVideoEditing}
                 showSeedanceVideoEditing={selectedModelSupportsVideoEditing}
+                seedanceGenerateAudio={seedanceGenerateAudio}
+                showSeedanceGenerateAudio={selectedModelSupportsGenerateAudio}
                 selectedDurationSeconds={selectedDurationSeconds}
                 prompt={prompt}
                 archVizGridOptions={archVizGridOptions}
@@ -681,6 +697,7 @@ function App() {
                 onSeedanceRatioChange={(value) => setSelectedSeedanceRatio(normalizeSeedanceRatio(value))}
                 onSeedanceVersionChange={(value) => setSelectedSeedanceVersion(normalizeSeedanceVersion(value))}
                 onSeedanceVideoEditingChange={setSeedanceVideoEditing}
+                onSeedanceGenerateAudioChange={setSeedanceGenerateAudio}
                 onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
                 onPromptChange={setPrompt}
                 onArchVizGridOptionsChange={setArchVizGridOptions}

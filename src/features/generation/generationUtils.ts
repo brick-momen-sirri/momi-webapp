@@ -239,6 +239,7 @@ export function workflowOptionsForJob({
   seedanceRatio,
   seedanceVersionId,
   seedanceVideoEditing,
+  seedanceGenerateAudio,
 }: {
   model: SeedanceModelFields;
   archVizGrid: ArchVizGridOptions;
@@ -248,6 +249,7 @@ export function workflowOptionsForJob({
   seedanceRatio: string;
   seedanceVersionId: SeedanceVersionId;
   seedanceVideoEditing: boolean;
+  seedanceGenerateAudio: boolean;
 }): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
@@ -256,7 +258,7 @@ export function workflowOptionsForJob({
       ? { nanoBanana: { aspectRatio: normalizeNanoBananaAspectRatio(nanoBananaAspectRatio), outputCount: imageOutputCount } }
       : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
-    ...seedanceWorkflowOptions(model, seedanceVersionId, seedanceRatio, seedanceVideoEditing),
+    ...seedanceWorkflowOptions(model, seedanceVersionId, seedanceRatio, seedanceVideoEditing, seedanceGenerateAudio),
     save: {
       cameraNumber: normalizedSaveNumber,
       shotNumber: normalizedSaveNumber,
@@ -278,6 +280,7 @@ function seedanceWorkflowOptions(
   versionId: SeedanceVersionId,
   ratio: string,
   videoEditing: boolean,
+  generateAudio: boolean,
 ): Pick<WorkflowOptions, "seedance"> {
   if (!isSeedanceWorkflowModel(model)) return {};
   const version = seedanceVersion(versionId);
@@ -286,6 +289,10 @@ function seedanceWorkflowOptions(
       version: version.id,
       ...(seedanceSupportsRatio(model, version) ? { ratio: normalizeSeedanceRatio(ratio) } : {}),
       ...(seedanceSupportsVideoEditing(model, version) ? { videoEditing } : {}),
+      // Always sent, for every version and task: generate_audio is a required input
+      // on all of them and the node defaults it to true, so leaving it out is what
+      // puts an audio track on a render nobody asked to have one.
+      generateAudio,
     },
   };
 }
@@ -295,6 +302,17 @@ export function supportsSeedanceRatio(
   versionId: unknown = DEFAULT_SEEDANCE_VERSION,
 ) {
   return isSeedanceWorkflowModel(model) && seedanceSupportsRatio(model, seedanceVersion(normalizeSeedanceVersion(versionId)));
+}
+
+/**
+ * No version argument, unlike the ratio above: `generate_audio` is a required input
+ * on every model option of both ByteDance2 nodes, so being a Seedance model at all
+ * is the whole condition.
+ */
+export function supportsSeedanceGenerateAudio(
+  model: Pick<ModelType, "id" | "label" | "category" | "backendCategory" | "workflowPath">,
+) {
+  return isSeedanceWorkflowModel(model);
 }
 
 export function isNanoBananaModel(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">) {
@@ -335,6 +353,7 @@ export function createLocalJob({
   selectedSeedanceRatio,
   selectedSeedanceVersion,
   seedanceVideoEditing,
+  seedanceGenerateAudio,
   use16By9Cropping,
   requiredImages,
 }: {
@@ -353,6 +372,7 @@ export function createLocalJob({
   selectedSeedanceRatio: string;
   selectedSeedanceVersion: SeedanceVersionId;
   seedanceVideoEditing: boolean;
+  seedanceGenerateAudio: boolean;
   use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
@@ -391,6 +411,7 @@ export function createLocalJob({
       seedanceRatio: selectedSeedanceRatio,
       seedanceVersionId: selectedSeedanceVersion,
       seedanceVideoEditing,
+      seedanceGenerateAudio,
     }),
     status: "queued",
     inputImages,

@@ -79,6 +79,7 @@ function useSubmissionHarness(overrides: HarnessOverrides = {}) {
     selectedSeedanceRatio: "16:9",
     selectedSeedanceVersion: "2.0" as const,
     seedanceVideoEditing: false,
+    seedanceGenerateAudio: false,
     setJobs,
     setProjects,
     setBackendJobsTotal: setTotal,

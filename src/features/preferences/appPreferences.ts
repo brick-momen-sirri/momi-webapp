@@ -20,6 +20,7 @@ export type PersistedGenerationSettings = {
   selectedSeedanceRatio?: string;
   selectedSeedanceVersion?: SeedanceVersionId;
   seedanceVideoEditing?: boolean;
+  seedanceGenerateAudio?: boolean;
   imageToVideo16By9Cropping?: boolean;
 };
 
@@ -46,6 +47,10 @@ export function readPersistedGenerationSettings(): PersistedGenerationSettings {
       selectedSeedanceRatio: normalizeSeedanceRatio(parsed.selectedSeedanceRatio),
       selectedSeedanceVersion: normalizeSeedanceVersion(parsed.selectedSeedanceVersion),
       seedanceVideoEditing: parsed.seedanceVideoEditing === true,
+      // Anything other than an explicit true reads as off, so a stored preference
+      // from before this switch existed starts silent rather than inheriting the
+      // node's own default.
+      seedanceGenerateAudio: parsed.seedanceGenerateAudio === true,
       imageToVideo16By9Cropping:
         typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };

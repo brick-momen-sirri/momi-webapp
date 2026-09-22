@@ -580,3 +580,89 @@ test("a pending job's output string is progress; a completed one's is the result
   assert.ok(!observed.some((chunk) => chunk.text.includes(s3Url)), "the result payload must not be read as progress");
   assert.equal(result.media[0]?.url, s3Url, "and it must still be read as the result");
 });
+
+/**
+ * The 2026-09-22 incident, as a test.
+ *
+ * Seven live jobs were recorded as failed because a single status GET threw
+ * TypeError("fetch failed") during a brief network blip. RunPod had already
+ * accepted every one of them and went on to finish four; the videos sat in R2
+ * uncollected while the app told the artists their renders had failed.
+ */
+test("a status poll that loses the network is retried, not treated as a failed job", async () => {
+  let polls = 0;
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url).includes("/status/")) {
+      polls += 1;
+      // Two blips in a row, exactly as the burst looked in the logs.
+      if (polls <= 2) throw new TypeError("fetch failed");
+      return jsonResponse({
+        id: "job-blip",
+        status: "COMPLETED",
+        output: { videos: [{ filename: "a.mp4", type: "s3_url", data: "https://cdn.example/a.mp4" }] },
+      });
+    }
+    return jsonResponse({ id: "job-blip", status: "IN_QUEUE" });
+  };
+
+  const result = await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.media[0]?.url, "https://cdn.example/a.mp4", "the render must survive the blip");
+  assert.equal(polls, 3, "it should have retried twice before succeeding");
+});
+
+test("the submit POST is never retried, however the network fails", async () => {
+  // A retried /run is a second render on the provider's bill. Losing the job is
+  // the better failure, so this must stay a single attempt.
+  let submits = 0;
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url).includes("/run")) {
+      submits += 1;
+      throw new TypeError("fetch failed");
+    }
+    return jsonResponse({ id: "x", status: "COMPLETED" });
+  };
+
+  await assert.rejects(
+    service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch }),
+    /fetch failed/,
+  );
+  assert.equal(submits, 1, "a submission must be attempted exactly once");
+});
+
+test("a poll that keeps losing the network still gives up", async () => {
+  let polls = 0;
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url).includes("/status/")) {
+      polls += 1;
+      throw new TypeError("fetch failed");
+    }
+    return jsonResponse({ id: "job-down", status: "IN_QUEUE" });
+  };
+
+  await assert.rejects(
+    service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch }),
+    (error: unknown) => error instanceof Error && /fetch failed|timed out/i.test(error.message),
+  );
+  assert.ok(polls > 1, "it should have retried at least once");
+});
+
+test("an HTTP error is an answer from RunPod, and is not retried", async () => {
+  // A 400 means the provider replied. Retrying it would just repeat a refusal.
+  let polls = 0;
+  const fetchImpl = async (url: string | URL | Request) => {
+    if (String(url).includes("/status/")) {
+      polls += 1;
+      return jsonResponse({ error: "no such job" }, 404);
+    }
+    return jsonResponse({ id: "job-404", status: "IN_QUEUE" });
+  };
+
+  await assert.rejects(service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch }));
+  assert.equal(polls, 1, "an HTTP failure must not be retried");
+});

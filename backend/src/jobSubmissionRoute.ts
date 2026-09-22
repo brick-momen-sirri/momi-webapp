@@ -371,6 +371,9 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
     if (seedance.videoEditing != null && typeof seedance.videoEditing !== "boolean") {
       throw new JobSubmissionError("Seedance videoEditing must be true or false.");
     }
+    if (seedance.generateAudio != null && typeof seedance.generateAudio !== "boolean") {
+      throw new JobSubmissionError("Seedance generateAudio must be true or false.");
+    }
     if (seedance.videoEditing === true && !version.supportsVideoEditing) {
       throw new JobSubmissionError(`Seedance ${version.id} has no video editing mode.`);
     }

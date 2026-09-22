@@ -6,7 +6,7 @@
       "model.resolution": "1080p",
       "model.ratio": "16:9",
       "model.duration": 5,
-      "model.generate_audio": true,
+      "model.generate_audio": false,
       "model.auto_downscale": false,
       "model.auto_upscale": 0,
       "seed": 98158438,
