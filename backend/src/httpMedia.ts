@@ -173,12 +173,38 @@ export function formatBytes(value: number) {
   return `${mib >= 1 ? mib.toFixed(1) : (value / 1024).toFixed(1)} ${mib >= 1 ? "MiB" : "KiB"}`;
 }
 
+/**
+ * The name a saved result goes by: its own file name on disk, which the save step
+ * built from the render's date, workflow, project, shot and version (see
+ * serverlessArtifactService). `extension` swaps only the suffix, for a rendition
+ * whose container is not the file's own.
+ *
+ * The player's rendition route names videos through this, and so does
+ * downloadFileName, so one render cannot reach the user under two names.
+ */
+export function savedMediaFileName(filePath: string, extension?: string) {
+  const parsed = path.parse(filePath);
+  return `${parsed.name}${extension ?? parsed.ext}`;
+}
+
+// What Node will put in a header value: setHeader throws past U+00FF, and a
+// download that works today must not start failing over its name.
+const HEADER_SAFE_NAME = /^[\x20-\x7e\x80-\xff]+$/;
+
 export function downloadFileName(
   job: Job,
   url: URL,
   contentType: string,
-  options: { index?: number; extension?: string } = {},
+  options: { index?: number; extension?: string; filePath?: string } = {},
 ) {
+  // A saved video goes by its saved name -- the one the player's own download
+  // menu has always given it -- instead of a second name made up here. A result
+  // with no file on this machine, or a name no header can carry, falls through
+  // to the generated name, as images do: their PNG/JPG conversions share it.
+  if (options.filePath && contentType.startsWith("video/")) {
+    const savedName = savedMediaFileName(options.filePath, options.extension);
+    if (HEADER_SAFE_NAME.test(savedName)) return savedName;
+  }
   const urlFileName = url.searchParams.get("filename") || path.basename(url.searchParams.get("path") || url.pathname);
   // An explicit extension wins: a converted download is no longer the source's
   // format, so its name must not claim to be.

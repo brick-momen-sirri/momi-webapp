@@ -24,6 +24,7 @@ const {
   downloadFileName,
   formatBytes,
   parseByteRange,
+  savedMediaFileName,
 } = await import("./httpMedia.js");
 
 type NamedJob = Parameters<typeof downloadFileName>[0];
@@ -208,4 +209,57 @@ test("downloadFileName lets an explicit extension override the source's", () => 
 test("downloadFileName falls back to the content type when the URL carries no extension", () => {
   const bare = new URL("http://127.0.0.1/api/jobs/job_1/result-media");
   assert.equal(downloadFileName(downloadJob(), bare, "video/mp4"), "Veo_3-job_1.mp4");
+});
+
+// Where the save step files a video and the name it gives it -- the name the
+// player's own download menu has always offered for this render.
+const savedVideoPath = path.join(
+  base,
+  "projects",
+  "8499_Project",
+  "videos",
+  "SHOT_4000",
+  "20260921_api-kling-v3-video_8499_SHOT_4000_v002.mp4",
+);
+
+test("downloadFileName gives a saved video the name it was saved under", () => {
+  const job = downloadJob({ id: "job_a8430fc9e89643f78e1316bd", modelName: "Api Kling V3 Video" });
+  const url = new URL(`http://127.0.0.1/api/media?path=${encodeURIComponent(savedVideoPath)}`);
+  assert.equal(
+    downloadFileName(job, url, "video/mp4", { index: 0, filePath: savedVideoPath }),
+    "20260921_api-kling-v3-video_8499_SHOT_4000_v002.mp4",
+  );
+});
+
+test("downloadFileName keeps a saved video's own extension", () => {
+  const movPath = path.join(path.dirname(savedVideoPath), "20260921_api-kling-v3-video_8499_SHOT_4000_v003.mov");
+  assert.equal(
+    downloadFileName(downloadJob(), resultUrl, "video/quicktime", { filePath: movPath }),
+    "20260921_api-kling-v3-video_8499_SHOT_4000_v003.mov",
+  );
+});
+
+test("downloadFileName falls back to the generated name for a video with no file on this machine", () => {
+  // Still on the provider, or recorded before results were saved locally.
+  const job = downloadJob({ id: "job_a8430fc9e89643f78e1316bd", modelName: "Api Kling V3 Video" });
+  const remote = new URL("https://example.com/output/ComfyUI_00012_.mp4");
+  assert.equal(downloadFileName(job, remote, "video/mp4"), "Api_Kling_V3_Video-job_a8430fc9e89643f78e1316bd.mp4");
+});
+
+test("downloadFileName falls back to the generated name when no header could carry the saved one", () => {
+  const unicodePath = path.join(base, "projects", "镜头_4000.mp4");
+  const url = new URL(`http://127.0.0.1/api/media?path=${encodeURIComponent(unicodePath)}`);
+  assert.equal(downloadFileName(downloadJob(), url, "video/mp4", { filePath: unicodePath }), "Veo_3-job_1.mp4");
+});
+
+test("downloadFileName leaves image downloads on the generated name", () => {
+  // Images and their PNG/JPG conversions share one scheme; only videos moved.
+  const imagePath = path.join(base, "projects", "20260911_api-openai-gpt-image-2-i2i_8499_cam-5120_v001.png");
+  assert.equal(downloadFileName(downloadJob(), resultUrl, "image/png", { index: 0, filePath: imagePath }), "Veo_3-job_1.png");
+});
+
+test("savedMediaFileName swaps only the extension when a rendition changes container", () => {
+  assert.equal(savedMediaFileName(savedVideoPath), "20260921_api-kling-v3-video_8499_SHOT_4000_v002.mp4");
+  const movPath = path.join(path.dirname(savedVideoPath), "20260921_seedance_8499_SHOT_4000_v001.mov");
+  assert.equal(savedMediaFileName(movPath, ".mp4"), "20260921_seedance_8499_SHOT_4000_v001.mp4");
 });

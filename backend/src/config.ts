@@ -282,9 +282,11 @@ export const thumbnailMaxConcurrency = Math.max(1, Math.floor(positiveNumber(pro
 // Sources already at or below this size are streamed as-is: no rendition can
 // meaningfully beat them over the wire, and caching a copy would only add IO.
 export const thumbnailPassthroughMaxBytes = positiveNumber(process.env.THUMBNAIL_PASSTHROUGH_MAX_BYTES, 96 * 1024);
-// Cap on the buffer retry used when sharp cannot open a source by path (e.g. a
-// path over the Windows 260-char MAX_PATH limit). Sources larger than this are
-// left to fail so the route falls back to streaming the original, rather than
+// Largest source read into memory for sharp. Download conversions read every
+// source up to this size before decoding it (libvips' own reads are 4 KB round
+// trips to the share), and renditions retry from memory when sharp cannot open a
+// path (e.g. one over the Windows 260-char MAX_PATH limit). Anything larger is
+// decoded by path, or left to fail so the route streams the original, rather than
 // reading a huge file into every concurrent encode slot.
 export const thumbnailBufferRetryMaxBytes = positiveNumber(process.env.THUMBNAIL_BUFFER_RETRY_MAX_BYTES, 256 * 1024 * 1024);
 // Disk budget for the cache. This host has a single volume under real space

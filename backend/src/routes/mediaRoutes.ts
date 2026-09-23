@@ -19,6 +19,7 @@ import {
   requestAbortSignal,
   resolveAllowedExistingMediaPath,
   safeHeaderFileName,
+  savedMediaFileName,
   sendUpstreamBody,
   streamLocalFile,
   uploadedMediaFileName,
@@ -245,7 +246,7 @@ async function streamPlayableVideo(req: express.Request, res: express.Response, 
       }
       await streamLocalFile(req, res, playable.filePath, {
         contentType: playable.contentType,
-        disposition: `inline; filename="${safeHeaderFileName(`${path.parse(resolvedPath).name}.mp4`)}"`,
+        disposition: `inline; filename="${safeHeaderFileName(savedMediaFileName(resolvedPath, ".mp4"))}"`,
         // The cache key covers the source's mtime and size, so a re-rendered
         // result yields a different ETag and a new rendition.
         cacheControl: "private, max-age=604800, immutable",
@@ -255,7 +256,7 @@ async function streamPlayableVideo(req: express.Request, res: express.Response, 
 
     await streamLocalFile(req, res, resolvedPath, {
       contentType: contentTypeFromFilePath(resolvedPath),
-      disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+      disposition: `inline; filename="${safeHeaderFileName(savedMediaFileName(resolvedPath))}"`,
     });
   } catch (error) {
     // Headers are already on the wire once streaming starts; there is nothing
@@ -269,7 +270,7 @@ async function streamPlayableVideo(req: express.Request, res: express.Response, 
       );
       await streamLocalFile(req, res, resolvedPath, {
         contentType: contentTypeFromFilePath(resolvedPath),
-        disposition: `inline; filename="${safeHeaderFileName(path.basename(resolvedPath))}"`,
+        disposition: `inline; filename="${safeHeaderFileName(savedMediaFileName(resolvedPath))}"`,
       });
     } catch {
       res.status(404).json({ error: "Media file not found" });
@@ -315,7 +316,9 @@ mediaRouter.get("/api/jobs/:jobId/result-file", async (req, res) => {
 
         await streamLocalFile(req, res, safeLocalPath, {
           contentType,
-          disposition: `attachment; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType, { index }))}"`,
+          disposition: `attachment; filename="${safeHeaderFileName(
+            downloadFileName(job, absoluteUrl, contentType, { index, filePath: safeLocalPath }),
+          )}"`,
         });
         return;
       } catch (error) {
@@ -397,7 +400,9 @@ mediaRouter.get("/api/jobs/:jobId/result-media", async (req, res) => {
         const contentType = contentTypeFromFilePath(safeLocalPath);
         await streamLocalFile(req, res, safeLocalPath, {
           contentType,
-          disposition: `inline; filename="${safeHeaderFileName(downloadFileName(job, absoluteUrl, contentType))}"`,
+          disposition: `inline; filename="${safeHeaderFileName(
+            downloadFileName(job, absoluteUrl, contentType, { filePath: safeLocalPath }),
+          )}"`,
         });
         return;
       } catch {

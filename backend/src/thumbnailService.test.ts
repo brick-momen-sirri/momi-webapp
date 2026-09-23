@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import test from "node:test";
 import { promisify } from "node:util";
 
@@ -12,6 +14,9 @@ const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "momi-thumbnails-"));
 process.env.THUMBNAIL_CACHE_DIR = path.join(tempRoot, "cache");
 process.env.THUMBNAIL_WIDTHS = "240,480";
 process.env.THUMBNAIL_PASSTHROUGH_MAX_BYTES = "1024";
+// Small enough that one fixture below can sit over it; every other fixture that
+// relies on reading into memory (the MAX_PATH ones) stays well under.
+process.env.THUMBNAIL_BUFFER_RETRY_MAX_BYTES = String(4 * 1024 * 1024);
 
 const sharp = (await import("sharp")).default;
 const {
@@ -20,6 +25,7 @@ const {
   isVideoSource,
   normalizeThumbnailWidth,
   pruneThumbnailCache,
+  streamConvertedImage,
   warmThumbnails,
 } = await import("./thumbnailService.js");
 
@@ -304,6 +310,118 @@ test("warming skips sources small enough to be served as they are", async () => 
 
 test("warming a video is left to the on-demand poster path", async () => {
   assert.deepEqual(await warmThumbnails(path.join(tempRoot, "clip.mp4"), [240]), []);
+});
+
+/** Runs a download conversion into memory, the way the route streams it into the response. */
+async function convert(sourcePath: string, format: "png" | "jpg") {
+  const chunks: Buffer[] = [];
+  const sink = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      chunks.push(chunk);
+      callback();
+    },
+  });
+  await streamConvertedImage(sourcePath, format, sink);
+  return Buffer.concat(chunks);
+}
+
+test("a JPG download is a real JPEG at the source's size, with transparency turned white", async () => {
+  const width = 320;
+  const height = 180;
+  // Left half opaque red, right half fully transparent.
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width / 2; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = 255;
+      pixels[offset + 3] = 255;
+    }
+  }
+  const source = path.join(tempRoot, "convert-alpha.png");
+  await sharp(pixels, { raw: { width, height, channels: 4 } })
+    .png()
+    .toFile(source);
+
+  const output = await convert(source, "jpg");
+
+  // The JPEG signature: a real re-encode, not a PNG under a new name.
+  assert.deepEqual([...output.subarray(0, 3)], [0xff, 0xd8, 0xff]);
+  const metadata = await sharp(output).metadata();
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, width);
+  assert.equal(metadata.height, height);
+  assert.equal(metadata.hasAlpha, false);
+  // Full chroma resolution, which is what the dialog's "100% quality" promises.
+  assert.equal(metadata.chromaSubsampling, "4:4:4");
+
+  const decoded = await sharp(output).raw().toBuffer();
+  const pixelAt = (x: number, y: number) => [...decoded.subarray((y * width + x) * 3, (y * width + x) * 3 + 3)];
+  const near = (actual: number[], expected: number[]) => actual.every((value, index) => Math.abs(value - expected[index]) <= 2);
+  assert.ok(near(pixelAt(width / 4, height / 2), [255, 0, 0]), `opaque half decoded as ${pixelAt(width / 4, height / 2)}`);
+  assert.ok(
+    near(pixelAt((width * 3) / 4, height / 2), [255, 255, 255]),
+    `transparent half decoded as ${pixelAt((width * 3) / 4, height / 2)}`,
+  );
+});
+
+test("a PNG download of a JPEG source is a real PNG at the source's size", async () => {
+  const source = path.join(tempRoot, "convert-source.jpg");
+  await sharp({ create: { width: 300, height: 200, channels: 3, background: "#336699" } })
+    .jpeg()
+    .toFile(source);
+
+  const output = await convert(source, "png");
+
+  assert.deepEqual([...output.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const metadata = await sharp(output).metadata();
+  assert.equal(metadata.format, "png");
+  assert.equal(metadata.width, 300);
+  assert.equal(metadata.height, 200);
+});
+
+test("converts a source whose path exceeds the Windows 260-char MAX_PATH limit", async () => {
+  // sharp cannot open this path at all (see the rendition test above), so a
+  // conversion that succeeds here read the source through Node -- the change
+  // that took JPG downloads from 4 KB libvips reads over SMB to a few large ones.
+  const segment = "c".repeat(60);
+  const deepDir = path.join(tempRoot, segment, segment, segment);
+  await fs.mkdir(deepDir, { recursive: true });
+  const longPath = path.join(deepDir, `${"m".repeat(80)}.png`);
+  assert.ok(longPath.length > 260, `fixture path should exceed MAX_PATH, got ${longPath.length}`);
+  await fs.copyFile(await writeSourceImage("convert-longpath-src.png", 400, 300), longPath);
+
+  const metadata = await sharp(await convert(longPath, "jpg")).metadata();
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 400);
+  assert.equal(metadata.height, 300);
+});
+
+test("a source over the in-memory cap still converts, decoded by path", async () => {
+  // 1600 x 1000 of uncompressed noise is ~4.8 MB, over the 4 MiB cap set above.
+  const source = await writeSourceImage("convert-over-cap.png", 1600, 1000);
+  assert.ok((await fs.stat(source)).size > 4 * 1024 * 1024);
+
+  const metadata = await sharp(await convert(source, "jpg")).metadata();
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 1600);
+  assert.equal(metadata.height, 1000);
+});
+
+test("a download abandoned before its conversion starts gives the encode slot back", { timeout: 20_000 }, async () => {
+  // The client gave up while the conversion queued for a slot or read its source,
+  // so the response closed before the conversion attached to it. Each of these
+  // used to wait forever on a "close" that had already fired; one more than the
+  // slot count then locked every conversion and rendition in the process out.
+  const source = await writeSourceImage("convert-abandoned.png", 200, 200);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const abandoned = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+    abandoned.destroy();
+    await once(abandoned, "close");
+    await streamConvertedImage(source, "jpg", abandoned);
+  }
+
+  const metadata = await sharp(await convert(source, "jpg")).metadata();
+  assert.equal(metadata.format, "jpeg");
 });
 
 test.after(async () => {

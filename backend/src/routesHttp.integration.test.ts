@@ -51,6 +51,7 @@ process.env.BRICK_PROJECTS_ROOT = brickProjectsRoot;
 process.env.UPLOADED_MEDIA_ROOT = path.join(tempDir, "uploads");
 process.env.MEDIA_UPLOAD_MAX_BYTES = "16";
 process.env.THUMBNAIL_CACHE_DIR = path.join(tempDir, "thumbnails");
+process.env.PLAYABLE_VIDEO_CACHE_DIR = path.join(tempDir, "playable-videos");
 process.env.MOMI_ADMIN_EMAIL = adminEmail;
 process.env.MOMI_ADMIN_PASSWORD = adminPassword;
 process.env.LOCAL_COMFY_ENABLED = "false";
@@ -466,6 +467,99 @@ test("local result download and media routes preserve attachment, inline, and ra
   assert.equal(download.bytes.toString(), "0123456789");
   assert.match(download.response.headers.get("content-disposition") ?? "", /^attachment;/);
   assert.equal((download.response.headers.get("content-disposition") ?? "").includes('"one"'), false);
+});
+
+/** Files a result where the save step would, and points the test job at it. */
+function useLocalResult(job: NonNullable<ReturnType<typeof jobQueue.getJob>>, fileName: string, bytes: Uint8Array | string) {
+  const directory = path.join(process.env.UPLOADED_MEDIA_ROOT!, testProjectId, "usr_momen");
+  mkdirSync(directory, { recursive: true });
+  const filePath = path.join(directory, fileName);
+  writeFileSync(filePath, bytes);
+  job.status = "completed";
+  job.resultUrls = [`/api/media?path=${encodeURIComponent(filePath)}`];
+  job.thumbnailUrls = [];
+}
+
+function attachmentName(response: Response) {
+  return /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1];
+}
+
+test("an image result downloads as its original PNG, or re-encoded as a real JPEG", async () => {
+  const job = jobQueue.getJob(createdJobId);
+  assert.ok(job);
+  const sharp = (await import("sharp")).default;
+  const png = await sharp({ create: { width: 64, height: 48, channels: 4, background: { r: 200, g: 40, b: 40, alpha: 0.5 } } })
+    .png()
+    .toBuffer();
+  const previous = { outputType: job.outputType, resultUrls: job.resultUrls, thumbnailUrls: job.thumbnailUrls };
+  job.outputType = "image";
+  useLocalResult(job, "download-format.png", png);
+
+  try {
+    const asPng = await callBinary("GET", `/api/jobs/${job.id}/result-file?format=png`, { token: adminToken });
+    assert.equal(asPng.response.status, 200);
+    assert.equal(asPng.response.headers.get("content-type"), "image/png");
+    assert.match(attachmentName(asPng.response) ?? "", /\.png$/);
+    // Already a PNG: the generator's own bytes, untouched.
+    assert.deepEqual(asPng.bytes, png);
+
+    const asJpg = await callBinary("GET", `/api/jobs/${job.id}/result-file?format=jpg`, { token: adminToken });
+    assert.equal(asJpg.response.status, 200);
+    assert.equal(asJpg.response.headers.get("content-type"), "image/jpeg");
+    assert.match(attachmentName(asJpg.response) ?? "", /\.jpg$/);
+    assert.deepEqual([...asJpg.bytes.subarray(0, 3)], [0xff, 0xd8, 0xff]);
+    const metadata = await sharp(asJpg.bytes).metadata();
+    assert.equal(metadata.format, "jpeg");
+    assert.equal(metadata.width, 64);
+    assert.equal(metadata.height, 48);
+  } finally {
+    Object.assign(job, previous);
+  }
+});
+
+test("a saved video downloads under one name from the Download button and from the player's menu", async () => {
+  const job = jobQueue.getJob(createdJobId);
+  assert.ok(job);
+  const savedName = "20260921_api-kling-v3-video_8499_SHOT_4000_v002.mp4";
+  const previous = {
+    outputType: job.outputType,
+    modelName: job.modelName,
+    resultUrls: job.resultUrls,
+    thumbnailUrls: job.thumbnailUrls,
+  };
+  job.outputType = "video";
+  job.modelName = "Api Kling V3 Video";
+  useLocalResult(job, savedName, "not really a video");
+
+  // The Download button fetches result-file. The player's own menu saves whatever
+  // the <video> element is playing, which is result-media with ?playable=1.
+  const namesFromBothPaths = async () => {
+    const button = await callBinary("GET", `/api/jobs/${job.id}/result-file`, { token: adminToken });
+    const player = await callBinary("GET", `/api/jobs/${job.id}/result-media?index=0&playable=1`, { token: adminToken });
+    assert.equal(button.response.status, 200);
+    assert.equal(player.response.status, 200);
+    return { button: attachmentName(button.response), player: attachmentName(player.response) };
+  };
+
+  const upstream = http.createServer((_req, res) => {
+    res.setHeader("Content-Type", "video/mp4");
+    res.end("remote video");
+  });
+  upstream.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => upstream.once("listening", resolve));
+
+  try {
+    assert.deepEqual(await namesFromBothPaths(), { button: savedName, player: savedName });
+
+    // A result with no file on this machine has no saved name to share; both
+    // paths fall back to the same generated one.
+    job.resultUrls = [`http://127.0.0.1:${(upstream.address() as AddressInfo).port}/result.mp4`];
+    const fallback = `Api_Kling_V3_Video-${job.id}.mp4`;
+    assert.deepEqual(await namesFromBothPaths(), { button: fallback, player: fallback });
+  } finally {
+    Object.assign(job, previous);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
 });
 
 test("remote result media forwards ranges and safe upstream response headers", async () => {

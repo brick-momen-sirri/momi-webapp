@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { Writable } from "node:stream";
 import { promisify } from "node:util";
 import sharp from "sharp";
 import {
@@ -151,37 +152,54 @@ export type DownloadImageFormat = "png" | "jpg";
  * Format conversion for downloads used to happen in the browser, on a canvas.
  * That cannot work for the sizes this app produces: a canvas holds the entire
  * decoded bitmap, which is over 400 MB for a 10K still, on top of the blob it was
- * decoded from. libvips streams the same pipeline instead, so peak memory is a
- * few working tiles rather than the whole image.
+ * decoded from. libvips decodes a few working tiles at a time instead, so what
+ * stays in memory is the source file's own bytes and the encoded result -- never
+ * the decoded bitmap.
  *
  * Callers must only reach this when the requested format actually differs from
  * the source; an untouched original should be streamed byte for byte.
  */
-export async function streamConvertedImage(
-  sourcePath: string,
-  format: DownloadImageFormat,
-  destination: NodeJS.WritableStream,
-) {
-  return withEncodeSlot(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        const decoded = sharp(sourcePath, { limitInputPixels: false }).rotate();
-        const encoder =
-          format === "jpg"
-            ? // JPEG has no alpha, so transparency has to become something.
-              // White matches what the download dialog promises.
-              decoded.flatten({ background: "#ffffff" }).jpeg({ quality: 100, chromaSubsampling: "4:4:4" })
-            : decoded.png();
+export async function streamConvertedImage(sourcePath: string, format: DownloadImageFormat, destination: Writable) {
+  return withEncodeSlot(async () => {
+    const input = await decodeInput(sourcePath);
+    // A download abandoned while it queued for this slot, or while the source was
+    // read, has already fired "close". Waiting for that below would never settle
+    // and would hold the slot for good.
+    if (destination.destroyed) return;
 
-        encoder.on("error", reject);
-        destination.on("error", reject);
-        // "close" as well as "finish": a client that aborts mid-download fires
-        // only the former, and without it the encode slot would never be
-        // released. Resolving twice is a no-op.
-        destination.on("close", () => resolve());
-        encoder.pipe(destination).on("finish", () => resolve());
-      }),
-  );
+    await new Promise<void>((resolve, reject) => {
+      const decoded = sharp(input, { limitInputPixels: false }).rotate();
+      const encoder =
+        format === "jpg"
+          ? // JPEG has no alpha, so transparency has to become something.
+            // White matches what the download dialog promises.
+            decoded.flatten({ background: "#ffffff" }).jpeg({ quality: 100, chromaSubsampling: "4:4:4" })
+          : decoded.png();
+
+      encoder.on("error", reject);
+      destination.on("error", reject);
+      // "close" as well as "finish": a client that aborts mid-download fires
+      // only the former, and without it the encode slot would never be
+      // released. Resolving twice is a no-op.
+      destination.on("close", () => resolve());
+      encoder.pipe(destination).on("finish", () => resolve());
+    });
+  });
+}
+
+/**
+ * What to hand sharp for a full decode: the source's bytes, read by Node, or its
+ * path when the file is too large to hold in memory.
+ *
+ * Given a path, libvips pulls a PNG through in 4 KB reads, and on the ai-data$
+ * share every one of them is a network round trip -- 2,777 reads for an 11 MB
+ * render, where fs.readFile makes 26. That read pattern, not the JPEG encode, is
+ * what held JPG downloads up for tens of seconds while the same file streamed as
+ * PNG straight away. Reading the bytes here also decodes a source whose path is
+ * over MAX_PATH, which sharp cannot open (see encodeRendition).
+ */
+async function decodeInput(sourcePath: string): Promise<string | Buffer> {
+  return (await fitsDecodeBuffer(sourcePath)) ? fs.readFile(sourcePath) : sourcePath;
 }
 
 /**
@@ -279,7 +297,7 @@ async function decodeToRaw(sourcePath: string, width: number) {
   try {
     return await decode(sourcePath);
   } catch (error) {
-    if (!(await canRetryFromBuffer(sourcePath))) throw error;
+    if (!(await fitsDecodeBuffer(sourcePath))) throw error;
     return await decode(await fs.readFile(sourcePath));
   }
 }
@@ -325,7 +343,7 @@ async function encodeRendition(sourcePath: string, cachePath: string, width: num
       // path as "Input file is missing". Node's fs is long-path aware, so read
       // the bytes ourselves and hand sharp a buffer instead. This also covers
       // UNC sources, where prefixing with \\?\ would be awkward.
-      if (!(await canRetryFromBuffer(sourcePath))) throw error;
+      if (!(await fitsDecodeBuffer(sourcePath))) throw error;
       await encode(await fs.readFile(sourcePath));
     }
     await fs.rename(tempPath, cachePath);
@@ -384,10 +402,11 @@ async function extractVideoFrame(sourcePath: string, framePath: string) {
   );
 }
 
-// Guards the buffer retry: only worth attempting for a file that exists and is
-// small enough to hold in memory. Without the size cap a pathological source
-// could be read into every concurrent encode slot at once.
-async function canRetryFromBuffer(sourcePath: string) {
+// Guards every read of a source into memory for sharp -- the conversion's up-front
+// read and the renditions' retry alike: only a file that exists and is small
+// enough to hold qualifies. Without the size cap a pathological source could be
+// read into every concurrent encode slot at once.
+async function fitsDecodeBuffer(sourcePath: string) {
   const stat = await fs.stat(sourcePath).catch(() => undefined);
   return Boolean(stat?.isFile() && stat.size > 0 && stat.size <= thumbnailBufferRetryMaxBytes);
 }
