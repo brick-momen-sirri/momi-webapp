@@ -46,6 +46,7 @@ const mediaTokenPaths = [
   /^\/api\/media$/,
   /^\/api\/media\/thumbnail$/,
   /^\/api\/media\/playable$/,
+  /^\/api\/profile-pictures\/[a-z0-9-]+\/(?:avatar-(?:64|128|256|512)\.webp|original\.png)$/,
   /^\/api\/jobs\/[^/]+\/result-(file|media)$/,
 ];
 

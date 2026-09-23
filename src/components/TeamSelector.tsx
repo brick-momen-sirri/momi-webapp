@@ -1,5 +1,6 @@
 import { UsersRound } from "lucide-react";
 import type { ProjectMember, User } from "../types";
+import { ProfileAvatar } from "./ProfileAvatar";
 
 type TeamSelectorProps = {
   users: User[];
@@ -53,9 +54,7 @@ export function TeamSelector({ users, ownerId, members, onMembersChange }: TeamS
                   className="h-4 w-4 rounded border-line accent-accent"
                   aria-label={`Invite ${user.name}`}
                 />
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-mist text-[11px] font-bold text-stone-600">
-                  {user.avatar ?? user.name.slice(0, 2).toUpperCase()}
-                </span>
+                <ProfileAvatar user={user} size="compact" />
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                   {user.name}
                   {owner ? <span className="ml-1 text-xs font-normal text-stone-500">(owner)</span> : null}

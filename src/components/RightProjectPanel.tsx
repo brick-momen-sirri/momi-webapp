@@ -7,6 +7,7 @@ import { projectSortOptions, sortProjects, type ProjectSortMode } from "../featu
 import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { CreateProjectModal } from "./CreateProjectModal";
 import { ProjectList } from "./ProjectList";
+import { ProfileAvatar } from "./ProfileAvatar";
 import { SpendLimitBar } from "./SpendLimitBar";
 
 type RightProjectPanelProps = {
@@ -830,16 +831,5 @@ function normalizeProjectMemberCount(project: Project): Project {
 }
 
 function UserAvatar({ user }: { user?: User }) {
-  return (
-    <span
-      className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-white"
-      style={{ backgroundColor: user?.avatarColor ?? "#d6d0c4" }}
-    >
-      {user?.profileImageUrl ? (
-        <img src={user.profileImageUrl} alt="" className="h-full w-full object-cover" />
-      ) : (
-        (user?.avatar ?? "US")
-      )}
-    </span>
-  );
+  return <ProfileAvatar user={user ?? { name: "Unknown user", avatar: "US" }} size="compact" />;
 }

@@ -105,6 +105,7 @@ export const archivedItemsSqlitePath =
 export const projectsStorePath = process.env.PROJECTS_STORE_PATH?.trim() || path.join(backendRoot, "data", "projects.json");
 export const usersStorePath = process.env.USERS_STORE_PATH?.trim() || path.join(backendRoot, "data", "users.json");
 export const sessionsStorePath = process.env.SESSIONS_STORE_PATH?.trim() || path.join(backendRoot, "data", "sessions.json");
+export const profilePictureRoot = process.env.PROFILE_PICTURE_ROOT?.trim() || path.join(backendRoot, "data", "profile-pictures");
 // Shared users/sessions store for horizontally scaled API workers. JSON stays
 // the default and migration source until this flag is deliberately enabled.
 export const appStateDriver: "json" | "sqlite" =

@@ -91,6 +91,8 @@ test("the media token path allowlist covers exactly the binary read routes", () 
   for (const allowed of [
     "/api/media",
     "/api/media/thumbnail",
+    "/api/profile-pictures/momen-dsc6470-0123456789/avatar-64.webp",
+    "/api/profile-pictures/momen-dsc6470-0123456789/original.png",
     "/api/jobs/job_123/result-file",
     "/api/jobs/job_123/result-media",
   ]) {
@@ -109,6 +111,8 @@ test("the media token path allowlist covers exactly the binary read routes", () 
     "/api/projects",
     "/api/media/upload",
     "/api/media/thumbnail/extra",
+    "/api/profile-pictures/not_safe/avatar-64.webp",
+    "/api/profile-pictures/valid-id/avatar-1024.webp",
     "/api/mediax",
     "/api/jobs/a/b/result-file",
   ]) {

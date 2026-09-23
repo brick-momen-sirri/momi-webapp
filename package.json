@@ -22,6 +22,7 @@
     "build:e2e": "tsc -b && vite build --outDir .e2e-dist/frontend --emptyOutDir && pnpm --dir backend exec tsc -p tsconfig.json --outDir .e2e-dist",
     "test:e2e:production": "pnpm run build:e2e && playwright test",
     "test:watch": "vitest",
+    "profiles:import": "pnpm --dir backend run profiles:import",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

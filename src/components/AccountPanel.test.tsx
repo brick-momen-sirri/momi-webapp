@@ -254,6 +254,17 @@ describe("profile form", () => {
     expect(email).toBeDisabled();
   });
 
+  it("links a managed profile picture to its full-resolution original", async () => {
+    const profileImageUrl = "/api/profile-pictures/momen-dsc6470-0dda216cca/avatar-256.webp";
+    renderPanel({ account: user({ profileImageUrl }) });
+    const dialog = await openSettings();
+
+    expect(within(dialog).getByRole("link", { name: /view original/i })).toHaveAttribute(
+      "href",
+      "/api/profile-pictures/momen-dsc6470-0dda216cca/original.png",
+    );
+  });
+
   // Avatars are stored as data URLs on the account, so an oversized file would be
   // inlined into every auth response rather than being rejected up front.
   it("rejects an oversized picture instead of inlining it", async () => {

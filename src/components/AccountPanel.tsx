@@ -8,6 +8,7 @@ import {
   Coins,
   Eye,
   EyeOff,
+  ExternalLink,
   Gauge,
   KeyRound,
   Loader2,
@@ -24,7 +25,10 @@ import {
 } from "lucide-react";
 import type { Job } from "../types";
 import type { AuthResult, AuthUser } from "../services/backendApi";
+import { resolveMediaUrl } from "../services/api/mediaAccess";
+import { profilePictureSources } from "../utils/profilePictures";
 import { useResetWhenChanged } from "../utils/useResetWhenChanged";
+import { ProfileAvatar } from "./ProfileAvatar";
 import { ThemeToggle, type ThemeMode } from "./ThemeToggle";
 
 type AccountPanelProps = {
@@ -131,7 +135,7 @@ export function AccountPanel({
   return (
     <section className="rounded-lg border border-line bg-white p-3 shadow-panel">
       <div className="flex items-center gap-3">
-        <Avatar account={account} size="large" />
+        <ProfileAvatar user={account} size="large" />
         <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-bold leading-5">{account.name}</p>
@@ -322,7 +326,7 @@ function ProfileSettingsModal({
       >
         <aside className="flex shrink-0 flex-col border-b border-line bg-mist/40 sm:w-56 sm:border-b-0 sm:border-r">
           <div className="hidden min-w-0 items-center gap-3 border-b border-line px-4 py-4 sm:flex">
-            <Avatar account={account} size="small" />
+            <ProfileAvatar user={account} size="small" />
             <div className="min-w-0">
               <p id="profile-settings-title" className="truncate text-sm font-bold leading-tight">
                 {account.name}
@@ -457,6 +461,7 @@ function ProfileTab({
   const [profileImageUrl, setProfileImageUrl] = useState(account.profileImageUrl);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const originalProfileImageUrl = profilePictureSources(profileImageUrl, resolveMediaUrl)?.originalUrl;
 
   const trimmedName = name.trim();
   const isDirty =
@@ -518,7 +523,7 @@ function ProfileTab({
     <form onSubmit={handleSubmit} className="space-y-4">
       <SectionCard title="Picture" icon={Camera}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar account={{ ...account, name: trimmedName || account.name, avatarColor, profileImageUrl }} size="large" />
+          <ProfileAvatar user={{ ...account, name: trimmedName || account.name, avatarColor, profileImageUrl }} size="large" />
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => fileInputRef.current?.click()} className={secondaryButtonClass}>
@@ -534,6 +539,18 @@ function ProfileTab({
                 <Trash2 className="h-3.5 w-3.5" />
                 Remove picture
               </button>
+              {originalProfileImageUrl ? (
+                <a
+                  href={originalProfileImageUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={secondaryButtonClass}
+                  title="Open the original-resolution profile picture"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View original
+                </a>
+              ) : null}
             </div>
             <p className="text-[11px] text-stone-500">
               PNG, JPG, or WebP up to {formatBytes(maxAvatarUploadBytes)}. Larger images are resized to {avatarPixelSize}px.
@@ -1031,7 +1048,7 @@ function AdminUsersPanel({
               <div key={user.id} className="rounded-md border border-line bg-mist/40 p-2.5">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Avatar account={user} size="small" />
+                    <ProfileAvatar user={user} size="small" />
                     <p className="truncate text-xs font-bold">{user.name}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -1199,31 +1216,6 @@ function Badge({ tone, children }: { tone: "accent" | "neutral" | "positive" | "
   return (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${toneClass}`}>
       {children}
-    </span>
-  );
-}
-
-function Avatar({
-  account,
-  size = "small",
-}: {
-  account: Pick<AuthUser, "name" | "avatar" | "avatarColor" | "profileImageUrl">;
-  size?: "small" | "large";
-}) {
-  const initials =
-    account.name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || account.avatar;
-
-  return (
-    <span
-      className={`${size === "large" ? "h-16 w-16 text-lg" : "h-8 w-8 text-xs"} flex shrink-0 items-center justify-center overflow-hidden rounded-full font-bold text-white`}
-      style={{ backgroundColor: account.avatarColor }}
-    >
-      {account.profileImageUrl ? <img src={account.profileImageUrl} alt="" className="h-full w-full object-cover" /> : initials}
     </span>
   );
 }

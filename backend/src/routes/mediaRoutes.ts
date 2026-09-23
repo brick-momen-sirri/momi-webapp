@@ -5,7 +5,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getRequestUser } from "../authMiddleware.js";
-import { PORT, mediaUploadMaxBytes, uploadedMediaRoot } from "../config.js";
+import { PORT, mediaUploadMaxBytes, profilePictureRoot, uploadedMediaRoot } from "../config.js";
 import {
   cleanMediaExtension,
   contentTypeFromFilePath,
@@ -31,8 +31,9 @@ import { getOrCreatePlayableVideo } from "../playableVideoService.js";
 import { getProject, getProjects } from "../projectService.js";
 import { rmWithRetry } from "../fsRetry.js";
 import { safeSegment } from "../storageService.js";
-import { writeContentAddressedStream, writeStreamAtomically } from "../streamingMediaService.js";
+import { writeContentAddressedStream } from "../streamingMediaService.js";
 import { getOrCreateThumbnail, streamConvertedImage, type DownloadImageFormat } from "../thumbnailService.js";
+import { profilePictureContentType, resolveProfilePicturePath } from "../profilePictures.js";
 
 export const mediaRouter = express.Router();
 
@@ -47,6 +48,23 @@ function matchesFormat(filePath: string, format: DownloadImageFormat) {
   const extension = path.extname(filePath).toLowerCase();
   return format === "png" ? extension === ".png" : extension === ".jpg" || extension === ".jpeg";
 }
+
+mediaRouter.get("/api/profile-pictures/:portraitId/:fileName", async (req, res) => {
+  const filePath = resolveProfilePicturePath(profilePictureRoot, req.params.portraitId, req.params.fileName);
+  const contentType = profilePictureContentType(req.params.fileName);
+  if (!filePath || !contentType) return res.status(404).json({ error: "Profile picture not found" });
+
+  try {
+    await streamLocalFile(req, res, filePath, {
+      contentType,
+      disposition: `inline; filename="${safeHeaderFileName(req.params.fileName)}"`,
+      cacheControl: "private, max-age=31536000, immutable",
+    });
+  } catch {
+    if (res.headersSent) return res.destroy();
+    return res.status(404).json({ error: "Profile picture not found" });
+  }
+});
 
 mediaRouter.post("/api/media/upload", async (req, res) => {
   try {

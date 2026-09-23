@@ -18,6 +18,7 @@
     "test:topology": "pnpm run build && tsx src/topologyLoadTest.ts",
     "warm:previews": "tsx src/warmResultPreviews.ts",
     "warm:playable": "tsx src/warmPlayableVideos.ts",
+    "profiles:import": "node scripts/importProfilePictures.mjs",
     "export:job-store": "tsx src/exportSqliteJobStore.ts",
     "export:app-state": "tsx src/exportSqliteAuthStore.ts",
     "test": "node scripts/runBackendTests.mjs",

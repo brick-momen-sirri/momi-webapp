@@ -28,9 +28,12 @@ import test, { after, before } from "node:test";
 const tempDir = mkdtempSync(path.join(os.tmpdir(), "momi-routes-it-"));
 const localProjectsRoot = path.join(tempDir, "local-projects");
 const brickProjectsRoot = path.join(tempDir, "brick-projects");
+const profilePictureRoot = path.join(tempDir, "profile-pictures");
 
 mkdirSync(localProjectsRoot, { recursive: true });
 mkdirSync(brickProjectsRoot, { recursive: true });
+mkdirSync(path.join(profilePictureRoot, "test-portrait-0123456789"), { recursive: true });
+writeFileSync(path.join(profilePictureRoot, "test-portrait-0123456789", "avatar-64.webp"), "profile-bytes");
 
 const adminEmail = "admin@example.com";
 const adminPassword = "AdminPass123";
@@ -49,6 +52,7 @@ process.env.SESSIONS_STORE_PATH = path.join(tempDir, "sessions.json");
 process.env.LOCAL_PROJECTS_ROOT = localProjectsRoot;
 process.env.BRICK_PROJECTS_ROOT = brickProjectsRoot;
 process.env.UPLOADED_MEDIA_ROOT = path.join(tempDir, "uploads");
+process.env.PROFILE_PICTURE_ROOT = profilePictureRoot;
 process.env.MEDIA_UPLOAD_MAX_BYTES = "16";
 process.env.THUMBNAIL_CACHE_DIR = path.join(tempDir, "thumbnails");
 process.env.PLAYABLE_VIDEO_CACHE_DIR = path.join(tempDir, "playable-videos");
@@ -99,6 +103,7 @@ await new Promise<void>((resolve) => server.once("listening", () => resolve()));
 const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 let adminToken = "";
+let adminMediaToken = "";
 let artistToken = "";
 let artistId = "";
 
@@ -150,7 +155,9 @@ before(async () => {
   const login = await call("POST", "/api/auth/login", { body: { email: adminEmail, password: adminPassword } });
   assert.equal(login.status, 200, `login failed: ${login.text}`);
   adminToken = String((login.body as { token?: string }).token);
+  adminMediaToken = String((login.body as { mediaAccess?: { token?: string } }).mediaAccess?.token);
   assert.ok(adminToken);
+  assert.ok(adminMediaToken);
 });
 
 after(async () => {
@@ -196,6 +203,7 @@ test("every route below requireAuth refuses an unauthenticated request", async (
     ["GET", "/api/credits/dashboard"],
     ["GET", "/api/usage/monthly"],
     ["GET", "/api/users"],
+    ["GET", "/api/profile-pictures/test-portrait-0123456789/avatar-64.webp"],
     ["GET", "/api/pods/status"],
     ["POST", "/api/projects"],
     ["POST", "/api/jobs"],
@@ -272,6 +280,27 @@ test("the creator is recorded as the project owner", async () => {
   assert.equal(response.status, 200, response.text);
   const project = (response.body as { project?: { ownerId?: string } }).project ?? response.body;
   assert.equal(typeof (project as { ownerId?: string }).ownerId, "string");
+});
+
+test("profile pictures serve only authenticated, allowlisted renditions with long-lived caching", async () => {
+  const portrait = await callBinary(
+    "GET",
+    `/api/profile-pictures/test-portrait-0123456789/avatar-64.webp?access_token=${encodeURIComponent(adminMediaToken)}`,
+  );
+  assert.equal(portrait.response.status, 200);
+  assert.equal(portrait.bytes.toString(), "profile-bytes");
+  assert.equal(portrait.response.headers.get("content-type"), "image/webp");
+  assert.equal(portrait.response.headers.get("cache-control"), "private, max-age=31536000, immutable");
+
+  const unknownRendition = await callBinary("GET", "/api/profile-pictures/test-portrait-0123456789/avatar-1024.webp", {
+    token: adminToken,
+  });
+  assert.equal(unknownRendition.response.status, 404);
+
+  const invalidPortrait = await callBinary("GET", "/api/profile-pictures/not_a_safe_id/original.png", {
+    token: adminToken,
+  });
+  assert.equal(invalidPortrait.response.status, 404);
 });
 
 test("media upload enforces MIME, size, body, range, and cache/disposition behavior", async () => {
