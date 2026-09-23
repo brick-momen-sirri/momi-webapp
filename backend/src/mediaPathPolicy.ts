@@ -8,6 +8,12 @@ export function mediaPathRoots(options: { allowTemp?: boolean } = {}) {
     brickProjectsRoot,
     localProjectsRoot,
     uploadedMediaRoot,
+    // Deliberately NOT comfyOutputRoot. ComfyUI's output now sits at the root of
+    // \\...\Momi, whose siblings include \Momi\backups -- 370 app-state SQLite
+    // snapshots. Allowlisting the output root would make the user database
+    // fetchable through /api/media?path=. Project media is already covered by
+    // brickProjectsRoot (\Momi\projects); a bare ComfyUI save outside a project
+    // is not referenced by the app, so it stays unservable on purpose.
     path.join(comfyRoot, "output"),
     path.join(comfyRoot, "input"),
   ];

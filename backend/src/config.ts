@@ -22,6 +22,18 @@ export const comfyServers = (
 export const comfyRoot = process.env.COMFY_ROOT ?? "C:\\ComfyUI_windows_portable_nvidia_cu128\\ComfyUI_windows_portable\\ComfyUI";
 export const comfyPoolRoot = process.env.COMFY_POOL_ROOT ?? "C:\\Comfy_pool";
 
+// ComfyUI's output directory is relocatable with its own --output-directory flag,
+// independently of the rest of comfyRoot, so a /view asset is resolved per type
+// rather than assuming output/, input/ and temp/ are all siblings of comfyRoot.
+// COMFY_OUTPUT_DIR is unset on this host, so output resolves under comfyRoot as
+// before; it exists for the day the output root moves. Pointing it at the SMB
+// share was tried and reverted on 2026-09-08 -- see ecosystem.config.cjs.
+export const comfyOutputRoot = process.env.COMFY_OUTPUT_DIR ?? path.join(comfyRoot, "output");
+
+export function comfyAssetRoot(type: string) {
+  return type === "output" ? comfyOutputRoot : path.join(comfyRoot, type);
+}
+
 export const generationBackend = process.env.GENERATION_BACKEND === "local_comfy" ? "local_comfy" : "runpod";
 export const localComfyEnabled = generationBackend === "local_comfy";
 

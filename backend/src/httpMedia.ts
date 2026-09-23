@@ -6,7 +6,7 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { comfyRoot } from "./config.js";
+import { comfyAssetRoot } from "./config.js";
 import { isAllowedMediaPath as isAllowedMediaPathByPolicy, resolveAllowedExistingMediaPath } from "./mediaPathPolicy.js";
 import { isPathWithinRoot } from "./pathContainment.js";
 import { uploadedMediaBaseName } from "./uploadedMediaName.js";
@@ -230,7 +230,7 @@ export function mediaFilePathFromUrl(url: URL) {
     const port = url.port;
     const filePath = /^82\d\d$/.test(port)
       ? path.join("C:\\Comfy_pool\\instances", `comfy-${port}`, type, subfolder, filename)
-      : path.join(comfyRoot, type, subfolder, filename);
+      : path.join(comfyAssetRoot(type), subfolder, filename);
     return isAllowedMediaPath(filePath, { allowTemp: true }) ? path.resolve(filePath) : undefined;
   }
 

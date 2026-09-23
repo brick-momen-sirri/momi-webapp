@@ -5,7 +5,7 @@ import { acquireIdleServer, releaseServer } from "./comfyPool.js";
 import {
   archivedItemsSqlitePath,
   archivedItemsStorePath,
-  comfyRoot,
+  comfyAssetRoot,
   dispatcherLeaseHeartbeatMs,
   dispatcherLeaseTtlMs,
   dispatcherPollIntervalMs,
@@ -1290,7 +1290,7 @@ function mediaDiskPathFromUrl(value: string) {
       if (!filename) {
         return undefined;
       }
-      return path.resolve(comfyRoot, type, subfolder, filename);
+      return path.resolve(comfyAssetRoot(type), subfolder, filename);
     }
   } catch {
     return undefined;

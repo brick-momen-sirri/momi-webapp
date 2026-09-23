@@ -45,6 +45,21 @@ const commonEnv = {
   // logical 12.65 GB rather than the deduped ~9.6 GB. Nothing depends on that
   // sharing -- the app never calls fs.link, the dedup was a one-off space pass.
   UPLOADED_MEDIA_ROOT: process.env.UPLOADED_MEDIA_ROOT || "\\\\10.101.41.11\\ai-data$\\Momi\\_uploads",
+  // COMFY_OUTPUT_DIR is deliberately NOT set. It exists so that the ComfyUI
+  // output root can be relocated independently of COMFY_ROOT (config.ts falls
+  // back to comfyRoot\output when it is unset, which is today's behaviour).
+  //
+  // It was briefly set to the ai-data$ share on 2026-09-08 to match a
+  // --output-directory on ComfyUI 8188; that was reverted the same day after
+  // the SMB output root caused a >1 hour API outage -- ComfyUI's asset seeder
+  // and comfyui-output-assets-first both walk the output tree recursively, and
+  // over SMB one scan measured 2327s. See the comment block in
+  // run_nvidia_gpu_supervised.bat before considering it again.
+  //
+  // If it is ever set, it MUST match ComfyUI's actual --output-directory: this
+  // is how the backend translates ComfyUI /view URLs back to files, and a
+  // mismatch 404s previews for locally-run jobs. Note it must not be added to
+  // mediaPathPolicy's allowlist -- \Momi\backups holds app-state snapshots.
   JSON_BODY_LIMIT: "15mb",
   RUNPOD_MAX_CONCURRENT_JOBS: process.env.RUNPOD_MAX_CONCURRENT_JOBS || "10",
   MEDIA_SCAN_CACHE_MS: "60000",
