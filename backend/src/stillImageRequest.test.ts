@@ -367,6 +367,43 @@ test("rectangular image edit crops and their controls survive normalization", ()
   );
 });
 
+test("a whole-image edit keeps its choice and has to send the whole picture", () => {
+  const edit = {
+    layerId: "edit_whole_image",
+    operation: "create",
+    crop: { x: 0, y: 0, size: 1200, width: 1200, height: 800, sourceWidth: 1200, sourceHeight: 800 },
+    mask: {
+      width: 1200,
+      height: 800,
+      softness: 0,
+      cropAspect: "whole",
+      selection: { x: 60, y: 40, width: 300, height: 200 },
+      strokes: [],
+    },
+    originalSourceUrl: "/api/media?path=original.png",
+    maskSourceUrl: "/api/media?path=mask.png",
+    baseLayerIds: [],
+    baseLayers: [],
+  };
+  const options = normalizeStillImageOptions({ categoryId: "image-editing", edit });
+  assert.deepEqual(options.edit?.crop, edit.crop);
+  assert.equal(options.edit?.mask.cropAspect, "whole");
+
+  // The choice and the pixels must agree: "whole" with a crop is a lie about what was sent.
+  assert.throws(
+    () =>
+      normalizeStillImageOptions({
+        categoryId: "image-editing",
+        edit: { ...edit, crop: { x: 0, y: 0, size: 800, width: 800, height: 800, sourceWidth: 1200, sourceHeight: 800 } },
+      }),
+    /cover the whole image/,
+  );
+  assert.throws(
+    () => normalizeStillImageOptions({ categoryId: "image-editing", edit: { ...edit, mask: { ...edit.mask, cropAspect: "4:3" } } }),
+    /cropAspect must be 1:1, 16:9, 9:16, or whole/,
+  );
+});
+
 test("image edit metadata rejects mismatched coordinates and mask slots", () => {
   const edit = {
     layerId: "edit_12345678",

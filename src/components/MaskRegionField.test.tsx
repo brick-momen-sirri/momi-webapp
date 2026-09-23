@@ -128,6 +128,82 @@ describe("MaskRegionField", () => {
     expect(widescreen).toHaveTextContent("9:16 Auto");
   });
 
+  it("sends the whole image for a selection covering most of it, or one too big for the crop", async () => {
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded-whole-auto", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        openRequest={1}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const viewport = screen.getByTestId("mask-editor-viewport");
+    const select = (pointerId: number, from: [number, number], to: [number, number]) => {
+      fireEvent.pointerDown(viewport, { button: 0, buttons: 1, pointerId, clientX: from[0], clientY: from[1] });
+      fireEvent.pointerMove(viewport, { buttons: 1, pointerId, clientX: to[0], clientY: to[1] });
+      fireEvent.pointerUp(viewport, { button: 0, pointerId, clientX: to[0], clientY: to[1] });
+    };
+
+    select(31, [100, 100], [300, 300]);
+    expect(await screen.findByTestId("edit-region-summary")).toHaveTextContent("Edit region: 200 × 200px (1:1)");
+
+    // 1000 wide on an 800-tall picture: no square can hold it.
+    select(32, [100, 300], [1100, 500]);
+    await waitFor(() =>
+      expect(screen.getByTestId("edit-region-summary")).toHaveTextContent(
+        "Whole image: 1200 × 800px (the selection is too big for a 1:1 crop)",
+      ),
+    );
+
+    // 1100 x 730 is 83% of 1200 x 800.
+    select(33, [50, 50], [1150, 780]);
+    await waitFor(() =>
+      expect(screen.getByTestId("edit-region-summary")).toHaveTextContent(
+        "Whole image: 1200 × 800px (the selection covers 83% of it)",
+      ),
+    );
+  });
+
+  it("sends the whole image when Whole is chosen, and Ctrl+A selects all of it", async () => {
+    const onDraftChange = vi.fn();
+    render(
+      <MaskRegionField
+        image={{ id: "uploaded-whole-chosen", name: "source.png", url: "blob:source" }}
+        onChange={() => undefined}
+        onEditorDraftChange={onDraftChange}
+        openRequest={1}
+      />,
+    );
+
+    await screen.findByRole("dialog");
+    const whole = screen.getByRole("button", { name: "Whole image" });
+    expect(whole).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(whole);
+    expect(whole).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "1:1 crop" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Adaptive 16:9 or 9:16 crop" })).toHaveAttribute("aria-pressed", "false");
+    // Nothing lies outside the whole picture to add as margin.
+    expect(screen.getByRole("slider", { name: "Crop margin" })).toBeDisabled();
+
+    // A small portrait rectangle neither flips the choice to 9:16 nor shrinks the crop.
+    const viewport = screen.getByTestId("mask-editor-viewport");
+    fireEvent.pointerDown(viewport, { button: 0, buttons: 1, pointerId: 41, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(viewport, { buttons: 1, pointerId: 41, clientX: 200, clientY: 300 });
+    fireEvent.pointerUp(viewport, { button: 0, pointerId: 41, clientX: 200, clientY: 300 });
+    await waitFor(() => expect(onDraftChange.mock.calls.at(-1)?.[0]?.cropAspect).toBe("whole"));
+    expect(screen.getByTestId("edit-region-summary").textContent).toBe("Whole image: 1200 × 800px");
+
+    fireEvent.click(screen.getByRole("button", { name: "1:1 crop" }));
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    await waitFor(() =>
+      expect(onDraftChange.mock.calls.at(-1)?.[0]?.selection).toEqual({ x: 0, y: 0, width: 1200, height: 800 }),
+    );
+    expect(screen.getByTestId("edit-region-summary")).toHaveTextContent(
+      "Whole image: 1200 × 800px (the selection covers 100% of it)",
+    );
+  });
+
   it("draws a source-coordinate rectangle selection without painted strokes", async () => {
     const onDraftChange = vi.fn();
     render(
@@ -640,6 +716,7 @@ describe("MaskRegionField", () => {
     expect(screen.getByRole("slider", { name: "Crop margin" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "1:1 crop" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Adaptive 16:9 or 9:16 crop" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Whole image" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rectangle selection" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Brush" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear region" })).toBeDisabled();

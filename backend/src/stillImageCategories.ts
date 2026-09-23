@@ -100,12 +100,20 @@ export type StillImageEditCrop = {
   sourceHeight: number;
 };
 
+export const STILL_IMAGE_EDIT_CROP_ASPECTS = ["1:1", "16:9", "9:16", "whole"] as const;
+export type StillImageEditCropAspect = (typeof STILL_IMAGE_EDIT_CROP_ASPECTS)[number];
+
 export type StillImageEditMask = {
   width: number;
   height: number;
   softness: number;
   cropMargin?: number;
-  cropAspect?: "1:1" | "16:9" | "9:16";
+  /**
+   * The shape the editor sent. "whole" means the crop is the entire picture.
+   * Round-tripped so a regenerated layer keeps the artist's choice; the crop
+   * itself is what this side acts on.
+   */
+  cropAspect?: StillImageEditCropAspect;
   selection?: { x: number; y: number; width: number; height: number };
   /** The mask covers everything the strokes do not. Round-tripped, never applied here. */
   inverted?: boolean;

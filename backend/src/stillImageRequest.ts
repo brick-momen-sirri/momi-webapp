@@ -15,8 +15,10 @@ import {
   acceptsStillImagePrompt,
   getStillImageCategory,
   isStillImageCategoryId,
+  STILL_IMAGE_EDIT_CROP_ASPECTS,
   stillImageRequestSlotCount,
   visibleStillImageSettings,
+  type StillImageEditCropAspect,
   type StillImageOptions,
   type StillImageEditOptions,
   type StillImageSettingDefinition,
@@ -267,8 +269,17 @@ function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>)
   const softness = boundedWholeNumber(mask.softness, "stillImage edit mask.softness", 0, 100);
   const cropMargin =
     mask.cropMargin === undefined ? undefined : boundedWholeNumber(mask.cropMargin, "stillImage edit mask.cropMargin", 0, 100);
-  if (mask.cropAspect !== undefined && mask.cropAspect !== "1:1" && mask.cropAspect !== "16:9" && mask.cropAspect !== "9:16") {
-    throw new Error("stillImage edit mask.cropAspect must be 1:1, 16:9, or 9:16.");
+  if (mask.cropAspect !== undefined && !STILL_IMAGE_EDIT_CROP_ASPECTS.includes(mask.cropAspect as StillImageEditCropAspect)) {
+    throw new Error("stillImage edit mask.cropAspect must be 1:1, 16:9, 9:16, or whole.");
+  }
+  // A whole-image edit has to send the whole picture. The crop is what gets
+  // uploaded and pasted back, so a mismatch would mean the layer records a
+  // choice the pixels do not match.
+  if (
+    mask.cropAspect === "whole" &&
+    (crop.x !== 0 || crop.y !== 0 || crop.width !== crop.sourceWidth || crop.height !== crop.sourceHeight)
+  ) {
+    throw new Error("stillImage edit crop must cover the whole image when mask.cropAspect is whole.");
   }
   let selection: StillImageEditOptions["mask"]["selection"];
   if (mask.selection !== undefined) {
@@ -318,7 +329,7 @@ function normalizedMask(value: unknown, crop: ReturnType<typeof normalizedCrop>)
     height,
     softness,
     ...(cropMargin === undefined ? {} : { cropMargin }),
-    ...(mask.cropAspect === undefined ? {} : { cropAspect: mask.cropAspect as "1:1" | "16:9" | "9:16" }),
+    ...(mask.cropAspect === undefined ? {} : { cropAspect: mask.cropAspect as StillImageEditCropAspect }),
     ...(selection === undefined ? {} : { selection }),
     ...(mask.inverted ? { inverted: true } : {}),
     ...(transform === undefined ? {} : { transform }),

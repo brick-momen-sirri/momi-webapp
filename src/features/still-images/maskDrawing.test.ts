@@ -108,6 +108,17 @@ describe("stroke list", () => {
     expect(maskCropAspect(landscape)).toBe("16:9");
   });
 
+  it("keeps a whole-image choice through a rectangle of any shape and onto a new source", () => {
+    const whole = setMaskCropAspect(createMaskDrawing(1000, 1000), "whole");
+    const portrait = setMaskRectangleSelection(whole, { x: 100, y: 100, width: 180, height: 320 });
+    expect(maskCropAspect(whole)).toBe("whole");
+    // Only the widescreen choice follows the rectangle's orientation.
+    expect(maskCropAspect(portrait)).toBe("whole");
+    expect(maskCropAspect(setMaskCropAspect(portrait, "whole"))).toBe("whole");
+    expect(retargetMaskDrawing(portrait, 500, 400).cropAspect).toBe("whole");
+    expect(maskCropAspect(setMaskCropAspect(portrait, "1:1"))).toBe("1:1");
+  });
+
   it("normalizes a rectangle drag and keeps it mutually exclusive with brush strokes", () => {
     expect(maskRectangleFromPoints({ x: 90.2, y: 70.8 }, { x: -10, y: 10.2 }, 100, 80)).toEqual({
       x: 0,

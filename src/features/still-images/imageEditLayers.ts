@@ -18,6 +18,33 @@ import type { StillImageCategoryState, StillImageEditLayer } from "./stillImageC
 
 export const EDIT_CROP_PADDING_RATIO = 0.5;
 
+/**
+ * A mask whose box covers at least this share of the picture is sent whole.
+ *
+ * Past this point a crop saves almost nothing, because it would be most of the
+ * picture anyway. It also tends to fail outright: a square cannot hold a
+ * selection that is wider than the picture is tall. Sending the whole picture
+ * gives the model all of the context for the same result.
+ */
+export const WHOLE_IMAGE_COVERAGE = 0.75;
+
+/**
+ * Why an edit goes out as the whole picture instead of a crop around its mask.
+ *
+ * "chosen": the artist picked Whole image. "coverage": the mask's box covers at
+ * least WHOLE_IMAGE_COVERAGE of the picture. "too-large": no crop of the chosen
+ * shape can hold the mask and still fit inside the picture.
+ */
+export type WholeImageReason = "chosen" | "coverage" | "too-large";
+
+export type EditCropPlan = {
+  crop: StillImageEditCrop;
+  /** Set when the crop is the entire picture, saying why. */
+  wholeImage?: WholeImageReason;
+  /** Share of the picture that the mask's bounding box covers, 0-1. */
+  coverage: number;
+};
+
 export type MaskBounds = { left: number; top: number; right: number; bottom: number };
 
 /** A lightweight layer source; either editable vector mask data or a frozen mask asset. */
@@ -108,29 +135,48 @@ export function aspectEditCrop(
   paddingRatio = EDIT_CROP_PADDING_RATIO,
   coverageBounds?: MaskBounds,
 ): StillImageEditCrop {
+  return planEditCrop(drawing, aspect, paddingRatio, coverageBounds).crop;
+}
+
+/**
+ * What the model is shown for this mask: a crop around it, or the whole picture.
+ *
+ * The one place that makes the choice, so the editor's outline, the in-flight
+ * claim and the uploaded crop cannot disagree about it. The whole picture is
+ * used when the artist asks for it, when the mask's box covers most of the
+ * picture, and when no crop of the chosen shape can hold the mask.
+ */
+export function planEditCrop(
+  drawing: MaskDrawing,
+  aspect: EditCropAspect,
+  paddingRatio = EDIT_CROP_PADDING_RATIO,
+  coverageBounds?: MaskBounds,
+): EditCropPlan {
   const bounds = coverageBounds ?? positiveStrokeBounds(drawing);
   if (!bounds) throw new Error("Paint or select the region to edit before generating.");
 
   const sourceWidth = positiveInteger(drawing.width);
   const sourceHeight = positiveInteger(drawing.height);
+  const coverage = boundsCoverage(bounds, sourceWidth, sourceHeight);
+  const whole = (reason: WholeImageReason): EditCropPlan => ({
+    crop: wholeImageCrop(sourceWidth, sourceHeight),
+    wholeImage: reason,
+    coverage,
+  });
+  if (aspect === "whole") return whole("chosen");
+  if (coverage >= WHOLE_IMAGE_COVERAGE) return whole("coverage");
+
   const [aspectWidth, aspectHeight] = aspect === "16:9" ? [16, 9] : aspect === "9:16" ? [9, 16] : [1, 1];
   const maximumUnit = Math.min(Math.floor(sourceWidth / aspectWidth), Math.floor(sourceHeight / aspectHeight));
   const maskWidth = Math.max(1, bounds.right - bounds.left);
   const maskHeight = Math.max(1, bounds.bottom - bounds.top);
   const minimumUnit = Math.ceil(Math.max(maskWidth / aspectWidth, maskHeight / aspectHeight));
 
-  // Failing explicitly is safer than silently clipping part of what the artist
-  // painted. Integer aspect units also keep a 16:9 crop exactly 16:9.
-  if (maximumUnit < 1 || minimumUnit > maximumUnit) {
-    if (aspect === "1:1") {
-      throw new Error(
-        "The selected region is too wide for a square crop on this image. Choose a smaller region or switch crop shape.",
-      );
-    }
-    throw new Error(
-      `The selected region is too wide or tall for a ${aspect} crop on this image. Choose a smaller region or switch to 1:1.`,
-    );
-  }
+  // A crop of this shape would have to clip part of what the artist painted,
+  // which is never acceptable. This used to be an error. The whole picture holds
+  // any mask, and a mask this big is one that wants the whole picture anyway.
+  // Integer aspect units also keep a 16:9 crop exactly 16:9.
+  if (maximumUnit < 1 || minimumUnit > maximumUnit) return whole("too-large");
 
   const blur = drawing.selection ? 0 : maskBlurPixels(drawing.softness, sourceWidth, sourceHeight);
   const subjectSize = Math.max(maskWidth, maskHeight);
@@ -144,7 +190,24 @@ export function aspectEditCrop(
   const x = clampInteger(Math.round(centreX - width / 2), 0, sourceWidth - width);
   const y = clampInteger(Math.round(centreY - height / 2), 0, sourceHeight - height);
 
-  return { x, y, size: Math.max(width, height), width, height, sourceWidth, sourceHeight };
+  return { crop: { x, y, size: Math.max(width, height), width, height, sourceWidth, sourceHeight }, coverage };
+}
+
+/** The entire picture, as a crop. */
+export function wholeImageCrop(sourceWidth: number, sourceHeight: number): StillImageEditCrop {
+  const width = positiveInteger(sourceWidth);
+  const height = positiveInteger(sourceHeight);
+  return { x: 0, y: 0, size: Math.max(width, height), width, height, sourceWidth: width, sourceHeight: height };
+}
+
+/**
+ * Does this crop take in the entire picture?
+ *
+ * True for every whole-image plan, and also for an ordinary crop whose margin
+ * has grown it out to the picture's edges.
+ */
+export function isWholeImageCrop(crop: StillImageEditCrop) {
+  return crop.x <= 0 && crop.y <= 0 && editCropWidth(crop) >= crop.sourceWidth && editCropHeight(crop) >= crop.sourceHeight;
 }
 
 /** Dimensions of new rectangular crops, with a square fallback for saved edits. */
@@ -318,6 +381,13 @@ function positiveStrokeBounds(drawing: MaskDrawing): MaskBounds | undefined {
     right: clamp(bounds.right, 0, drawing.width),
     bottom: clamp(bounds.bottom, 0, drawing.height),
   };
+}
+
+/** Share of the picture inside a box, 0-1, with any part of the box off the picture ignored. */
+function boundsCoverage(bounds: MaskBounds, width: number, height: number) {
+  const coveredWidth = Math.max(0, clamp(bounds.right, 0, width) - clamp(bounds.left, 0, width));
+  const coveredHeight = Math.max(0, clamp(bounds.bottom, 0, height) - clamp(bounds.top, 0, height));
+  return (coveredWidth * coveredHeight) / (width * height);
 }
 
 function positiveInteger(value: number) {

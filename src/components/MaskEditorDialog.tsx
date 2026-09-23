@@ -16,6 +16,7 @@ import {
   Contrast,
   Download,
   Eraser,
+  Fullscreen,
   Hand,
   Lasso,
   LoaderCircle,
@@ -52,6 +53,7 @@ import {
   invertMaskDrawing,
   invertTransform,
   isIdentityTransform,
+  isWidescreenCropAspect,
   marqueeSelection,
   maskGeometryBounds,
   maskTransform,
@@ -85,7 +87,12 @@ import {
   type MaskView,
   type TransformHandle,
 } from "../features/still-images/maskDrawing";
-import { editCropHeight, editCropWidth } from "../features/still-images/imageEditLayers";
+import {
+  editCropHeight,
+  editCropWidth,
+  isWholeImageCrop,
+  type EditCropPlan,
+} from "../features/still-images/imageEditLayers";
 import {
   clampLayersPanelWidth,
   DEFAULT_LAYERS_PANEL_WIDTH,
@@ -97,7 +104,7 @@ import {
 import type { StillImageEditTarget } from "../features/still-images/stillImageCategories";
 import type { StillImageEditCrop } from "../types";
 import {
-  currentMaskEditCrop,
+  currentMaskEditPlan,
   MASK_DRAFT_COLOUR,
   MASK_DRAFT_EDGE,
   MASK_DRAFT_FEATHER_COLOUR,
@@ -468,15 +475,17 @@ export function MaskEditorDialog({
     if (selectionPreview) return setMaskRectangleSelection(draft, selectionPreview);
     return stroke ? appendMaskStroke(draft, { ...stroke, points: simplifyStrokePoints(stroke.points, stroke.radius) }) : draft;
   }, [draft, selectionPreview, stroke]);
-  const editRegion = useMemo(() => {
+  const editRegion = useMemo((): { crop?: EditCropPlan["crop"]; plan?: EditCropPlan; error?: string } => {
     if (!hasPaintedRegion(liveDrawing)) return {};
     try {
-      const crop = currentMaskEditCrop(liveDrawing);
-      return crop ? { crop } : {};
+      const plan = currentMaskEditPlan(liveDrawing);
+      return plan ? { crop: plan.crop, plan } : {};
     } catch (error) {
       return { error: error instanceof Error ? error.message : "The edit region cannot be calculated." };
     }
   }, [liveDrawing]);
+  const cropAspect = maskCropAspect(draft);
+  const wholeImageRegion = editRegion.crop ? isWholeImageCrop(editRegion.crop) : false;
 
   // A chained mask is dragged by either half of the layer; an unchained one only
   // moves when it is the half that is armed. The ghost has to say which.
@@ -662,7 +671,7 @@ export function MaskEditorDialog({
     const settled = !moveDelta && !transformPreview;
     const showMaskGeometry = maskVisualization !== "none" || processing;
     if (editRegion.crop && settled && showMaskGeometry)
-      paintEditRegion(context, editRegion.crop, view, naturalWidth, naturalHeight, processing);
+      paintEditRegion(context, editRegion.crop, view, naturalWidth, naturalHeight, processing, wholeImageRegion);
     if (liveDrawing.selection && settled && showMaskGeometry) {
       paintRectangleSelection(context, liveDrawing.selection, maskTransform(liveDrawing), view, processing);
     }
@@ -711,6 +720,7 @@ export function MaskEditorDialog({
     transformSummary,
     view,
     viewport,
+    wholeImageRegion,
   ]);
 
   // A second transparent canvas lets CSS animate the exact mask shape without
@@ -804,6 +814,14 @@ export function MaskEditorDialog({
         // what Ctrl+D does everywhere else.
         event.preventDefault();
         return commitDraft((current) => (current.selection ? setMaskRectangleSelection(current, undefined) : current));
+      }
+      if (accelerator && event.key.toLowerCase() === "a") {
+        // Select All, as in Photoshop: the whole picture as one rectangle. It
+        // covers everything, so the crop planner sends the whole image.
+        event.preventDefault();
+        return commitDraft((current) =>
+          setMaskRectangleSelection(current, { x: 0, y: 0, width: current.width, height: current.height }),
+        );
       }
       if (accelerator && event.key.toLowerCase() === "i") {
         event.preventDefault();
@@ -1296,12 +1314,12 @@ export function MaskEditorDialog({
             type="button"
             disabled={readOnly}
             aria-label="1:1 crop"
-            aria-pressed={maskCropAspect(draft) === "1:1"}
+            aria-pressed={cropAspect === "1:1"}
             title="Square crop"
             onClick={() => setDraft((current) => setMaskCropAspect(current, "1:1"))}
             className={cn(
               "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
-              maskCropAspect(draft) === "1:1" ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-900",
+              cropAspect === "1:1" ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-900",
             )}
           >
             <Square className="h-3.5 w-3.5" />
@@ -1311,24 +1329,44 @@ export function MaskEditorDialog({
             type="button"
             disabled={readOnly}
             aria-label="Adaptive 16:9 or 9:16 crop"
-            aria-pressed={maskCropAspect(draft) !== "1:1"}
+            aria-pressed={isWidescreenCropAspect(cropAspect)}
             title="Adaptive landscape or portrait crop"
             onClick={() => setDraft((current) => setMaskCropAspect(current, "16:9"))}
             className={cn(
               "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
-              maskCropAspect(draft) !== "1:1" ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-900",
+              isWidescreenCropAspect(cropAspect) ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-900",
             )}
           >
-            {maskCropAspect(draft) === "9:16" ? (
-              <RectangleVertical className="h-3.5 w-3.5" />
-            ) : (
-              <RectangleHorizontal className="h-3.5 w-3.5" />
+            {cropAspect === "9:16" ? <RectangleVertical className="h-3.5 w-3.5" /> : <RectangleHorizontal className="h-3.5 w-3.5" />}
+            {cropAspect === "9:16" ? "9:16" : "16:9"} Auto
+          </button>
+          <button
+            type="button"
+            disabled={readOnly}
+            aria-label="Whole image"
+            aria-pressed={cropAspect === "whole"}
+            title="Send the whole image instead of a crop. Only the selected area is changed. Selections covering 75% or more of the image are sent whole automatically."
+            onClick={() => setDraft((current) => setMaskCropAspect(current, "whole"))}
+            className={cn(
+              "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
+              cropAspect === "whole" ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-900",
             )}
-            {maskCropAspect(draft) === "9:16" ? "9:16" : "16:9"} Auto
+          >
+            <Fullscreen className="h-3.5 w-3.5" />
+            Whole
           </button>
         </div>
 
-        <label className="flex items-center gap-2 text-xs font-medium text-stone-600">
+        <label
+          className={cn(
+            "flex items-center gap-2 text-xs font-medium text-stone-600",
+            // Nothing lies outside the whole picture to add as context. Not dimmed
+            // when the margin itself grew the crop out to the edges: that is the
+            // slider working, not being ignored.
+            editRegion.plan?.wholeImage && "opacity-45",
+          )}
+          title={editRegion.plan?.wholeImage ? "No margin applies: the whole image is being sent" : undefined}
+        >
           Margin
           <input
             type="range"
@@ -1336,7 +1374,7 @@ export function MaskEditorDialog({
             max={100}
             step={5}
             value={maskCropMargin(draft)}
-            disabled={readOnly}
+            disabled={readOnly || cropAspect === "whole"}
             onChange={(event) => setDraft((current) => setMaskCropMargin(current, Number(event.target.value)))}
             className="w-24 accent-accent"
             aria-label="Crop margin"
@@ -1679,6 +1717,10 @@ export function MaskEditorDialog({
             </kbd>{" "}
             reposition ·{" "}
             <kbd className="rounded border border-stone-300 bg-stone-50 px-1.5 py-0.5 font-sans text-[10px] text-stone-700">
+              Ctrl+A
+            </kbd>{" "}
+            select all ·{" "}
+            <kbd className="rounded border border-stone-300 bg-stone-50 px-1.5 py-0.5 font-sans text-[10px] text-stone-700">
               Ctrl+D
             </kbd>{" "}
             deselect
@@ -1702,8 +1744,9 @@ export function MaskEditorDialog({
           </span>
         ) : null}
         {editRegion.crop ? (
-          <span className="font-semibold tabular-nums text-stone-700">
-            Edit region: {editCropWidth(editRegion.crop)} × {editCropHeight(editRegion.crop)}px ({maskCropAspect(draft)})
+          <span className="font-semibold tabular-nums text-stone-700" data-testid="edit-region-summary">
+            {wholeImageRegion ? "Whole image" : "Edit region"}: {editCropWidth(editRegion.crop)} ×{" "}
+            {editCropHeight(editRegion.crop)}px{editRegionNote(editRegion.plan, cropAspect)}
           </span>
         ) : editRegion.error ? (
           <span className="font-semibold text-red-600">{editRegion.error}</span>
@@ -2077,14 +2120,26 @@ function awayFrom(from: MaskPoint, to: MaskPoint): MaskPoint {
   return length < 0.001 ? { x: 0, y: -1 } : { x: x / length, y: y / length };
 }
 
+/**
+ * The bracketed part of the footer readout: the crop shape, or why the whole
+ * picture is going out when the artist did not pick it themselves.
+ */
+function editRegionNote(plan: EditCropPlan | undefined, aspect: ReturnType<typeof maskCropAspect>) {
+  if (plan?.wholeImage === "chosen") return "";
+  if (plan?.wholeImage === "coverage") return ` (the selection covers ${Math.floor(plan.coverage * 100)}% of it)`;
+  if (plan?.wholeImage === "too-large") return ` (the selection is too big for a ${aspect} crop)`;
+  return ` (${aspect})`;
+}
+
 /** Shade everything outside the exact crop sent to the editing model. */
 function paintEditRegion(
   context: CanvasRenderingContext2D,
-  crop: NonNullable<ReturnType<typeof currentMaskEditCrop>>,
+  crop: StillImageEditCrop,
   view: MaskView,
   imageWidth: number,
   imageHeight: number,
   processing = false,
+  wholeImage = false,
 ) {
   const imageLeft = view.offsetX;
   const imageTop = view.offsetY;
@@ -2134,7 +2189,7 @@ function paintEditRegion(
     context,
     left + 8,
     top > 34 ? top - 30 : top + 8,
-    `${processing ? "PROCESSING" : "EDIT REGION"}  ${editCropWidth(crop)} × ${editCropHeight(crop)} px`,
+    `${processing ? "PROCESSING" : wholeImage ? "WHOLE IMAGE" : "EDIT REGION"}  ${editCropWidth(crop)} × ${editCropHeight(crop)} px`,
   );
   context.restore();
 }

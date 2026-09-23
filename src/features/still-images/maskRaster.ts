@@ -16,7 +16,14 @@
 // happened to be under them.
 
 import type { StillImageEditCrop } from "../../types";
-import { aspectEditCrop, drawingForCrop, editCropHeight, editCropWidth, type MaskBounds } from "./imageEditLayers";
+import {
+  drawingForCrop,
+  editCropHeight,
+  editCropWidth,
+  planEditCrop,
+  type EditCropPlan,
+  type MaskBounds,
+} from "./imageEditLayers";
 import {
   conjugateTransform,
   imagePointFromViewport,
@@ -330,8 +337,17 @@ export function currentMaskEditCrop(
   paddingRatio = maskCropMargin(drawing) / 100,
   maximumSide = DEFAULT_CROP_SAMPLE_SIDE,
 ) {
+  return currentMaskEditPlan(drawing, paddingRatio, maximumSide)?.crop;
+}
+
+/** The same crop, plus whether it is the whole picture and why, for the editor to say. */
+export function currentMaskEditPlan(
+  drawing: MaskDrawing,
+  paddingRatio = maskCropMargin(drawing) / 100,
+  maximumSide = DEFAULT_CROP_SAMPLE_SIDE,
+): EditCropPlan | undefined {
   const bounds = maskCoverageBounds(drawing, maximumSide);
-  return bounds ? aspectEditCrop(drawing, maskCropAspect(drawing), paddingRatio, bounds) : undefined;
+  return bounds ? planEditCrop(drawing, maskCropAspect(drawing), paddingRatio, bounds) : undefined;
 }
 
 export function maskBoundsFromPixels(

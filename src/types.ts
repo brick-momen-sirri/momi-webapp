@@ -143,7 +143,8 @@ export type StillImageEditMask = {
   height: number;
   softness: number;
   cropMargin?: number;
-  cropAspect?: "1:1" | "16:9" | "9:16";
+  /** "whole" sends the entire picture rather than a crop around the mask. */
+  cropAspect?: "1:1" | "16:9" | "9:16" | "whole";
   selection?: { x: number; y: number; width: number; height: number };
   inverted?: boolean;
   /** A free transform on the mask, as canvas takes it. Round-tripped, never applied here. */

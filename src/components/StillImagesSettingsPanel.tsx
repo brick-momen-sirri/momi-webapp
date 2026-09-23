@@ -17,6 +17,8 @@ import {
   visibleEditLayers,
 } from "../features/still-images/imageEditLayers";
 import type { EditSessionCost } from "../features/still-images/editDocument";
+import { softEditWarning } from "../features/still-images/editOutputScale";
+import { currentMaskEditCrop } from "../features/still-images/maskRaster";
 import {
   FLUX2_KLEIN_PROMPT_CATEGORIES,
   FLUX2_KLEIN_PROMPT_PRESETS,
@@ -227,18 +229,41 @@ export function StillImagesSettingsPanel({
    * slider bound to this same state.settings.variations, and showing both
    * would be two controls fighting over one number.
    */
+  // What this edit would send, worked out the same way the submission does. A
+  // whole picture, or any large crop, sent at 1K comes back enlarged and soft,
+  // and the resolution control right above is where that is fixed.
+  const plannedEditCrop = useMemo(() => {
+    if (!paintsItsOwnSlots || !hasPaintedRegion(state.mask)) return undefined;
+    try {
+      return currentMaskEditCrop(state.mask as MaskDrawing);
+    } catch {
+      return undefined;
+    }
+  }, [paintsItsOwnSlots, state.mask]);
+  const resolutionWarning =
+    plannedEditCrop && (state.settings.engine ?? "nano-banana") === "nano-banana"
+      ? softEditWarning(plannedEditCrop, String(state.settings.resolution ?? "1K"))
+      : undefined;
   const inpaintControls =
     paintsItsOwnSlots && editMode === "inpaint"
-      ? visibleStillImageSettings(category, state)
-          .filter((setting) => setting.id !== "variations")
-          .map((setting) => (
-            <StillImageSettingField
-              key={setting.id}
-              setting={setting}
-              value={state.settings[setting.id] ?? setting.defaultValue}
-              onChange={(value) => onSettingChange(setting.id, value)}
-            />
-          ))
+      ? [
+          ...visibleStillImageSettings(category, state)
+            .filter((setting) => setting.id !== "variations")
+            .map((setting) => (
+              <StillImageSettingField
+                key={setting.id}
+                setting={setting}
+                value={state.settings[setting.id] ?? setting.defaultValue}
+                onChange={(value) => onSettingChange(setting.id, value)}
+              />
+            )),
+          resolutionWarning ? (
+            <p key="resolution-warning" className="flex gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-4 text-amber-800">
+              <TriangleAlert className="mt-px h-3 w-3 shrink-0" />
+              {resolutionWarning}
+            </p>
+          ) : null,
+        ]
       : undefined;
   const compositeLayers = paintsItsOwnSlots ? visibleEditLayers(state) : [];
   // Edits on different regions are independent -- the compositor pastes each

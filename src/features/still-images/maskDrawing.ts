@@ -30,7 +30,16 @@ export type MaskTool = "brush" | "eraser" | "lasso";
  */
 export type BrushSizing = "image" | "screen";
 
-export type EditCropAspect = "1:1" | "16:9" | "9:16";
+/**
+ * The shape of what is sent to the model.
+ *
+ * The first three are crops around the mask. "whole" sends the entire picture
+ * instead, so the model sees all of it. The mask still decides which pixels
+ * change, and everything outside it is still kept from the original. Held with
+ * the aspects rather than as a separate flag because it answers the same
+ * question, what the provider is shown, and a crop cannot be both.
+ */
+export type EditCropAspect = "1:1" | "16:9" | "9:16" | "whole";
 
 export type MaskStroke = {
   tool: MaskTool;
@@ -156,11 +165,18 @@ export function setMaskCropMargin(drawing: MaskDrawing, margin: number): MaskDra
 }
 
 export function maskCropAspect(drawing: MaskDrawing | undefined): EditCropAspect {
-  return drawing?.cropAspect === "16:9" || drawing?.cropAspect === "9:16" ? drawing.cropAspect : DEFAULT_EDIT_CROP_ASPECT;
+  return drawing?.cropAspect === "16:9" || drawing?.cropAspect === "9:16" || drawing?.cropAspect === "whole"
+    ? drawing.cropAspect
+    : DEFAULT_EDIT_CROP_ASPECT;
+}
+
+/** The adaptive landscape-or-portrait crop, as opposed to a square or the whole picture. */
+export function isWidescreenCropAspect(aspect: EditCropAspect) {
+  return aspect === "16:9" || aspect === "9:16";
 }
 
 export function setMaskCropAspect(drawing: MaskDrawing, aspect: EditCropAspect): MaskDrawing {
-  if (aspect === "1:1" || !drawing.selection) return { ...drawing, cropAspect: aspect };
+  if (!isWidescreenCropAspect(aspect) || !drawing.selection) return { ...drawing, cropAspect: aspect };
   return { ...drawing, cropAspect: adaptiveSelectionAspect(drawing.selection) };
 }
 
@@ -185,7 +201,10 @@ export function setMaskRectangleSelection(drawing: MaskDrawing, selection: MaskR
     ...drawing,
     selection,
     strokes: selection ? [] : drawing.strokes,
-    cropAspect: selection && maskCropAspect(drawing) !== "1:1" ? adaptiveSelectionAspect(selection) : maskCropAspect(drawing),
+    // Only the widescreen choice follows the rectangle's orientation. A square or
+    // a whole-image choice is kept whatever shape is drawn.
+    cropAspect:
+      selection && isWidescreenCropAspect(maskCropAspect(drawing)) ? adaptiveSelectionAspect(selection) : maskCropAspect(drawing),
   };
 }
 

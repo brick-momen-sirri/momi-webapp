@@ -6,9 +6,13 @@ import {
   editCropHeight,
   editCropWidth,
   editGenerationBaseLayers,
+  isWholeImageCrop,
+  planEditCrop,
   squareEditCrop,
   visibleEditLayers,
   descriptorMaskDrawing,
+  WHOLE_IMAGE_COVERAGE,
+  type MaskBounds,
 } from "./imageEditLayers";
 import {
   createMaskDrawing,
@@ -74,24 +78,65 @@ describe("squareEditCrop", () => {
     expect(currentCrop.x + currentCrop.size).toBeLessThan(800);
   });
 
-  it("rejects a painted region no in-bounds square could contain", () => {
-    expect(() =>
-      squareEditCrop(
-        drawing({
-          strokes: [
-            {
-              tool: "lasso",
-              radius: 0,
-              points: [
-                { x: 0, y: 200 },
-                { x: 1600, y: 200 },
-                { x: 1600, y: 500 },
-              ],
-            },
+  it("sends the whole image when no in-bounds square could contain the region", () => {
+    // 1600 wide on a 1200-tall picture: any square holding it would leave the
+    // image. That used to be an error; the whole picture holds it instead.
+    const wide = drawing({
+      strokes: [
+        {
+          tool: "lasso",
+          radius: 0,
+          points: [
+            { x: 0, y: 200 },
+            { x: 1600, y: 200 },
+            { x: 1600, y: 500 },
           ],
-        }),
-      ),
-    ).toThrow(/too wide for a square crop/i);
+        },
+      ],
+    });
+    expect(squareEditCrop(wide)).toEqual({ x: 0, y: 0, size: 2000, width: 2000, height: 1200, sourceWidth: 2000, sourceHeight: 1200 });
+    expect(planEditCrop(wide, "1:1").wholeImage).toBe("too-large");
+  });
+});
+
+describe("planEditCrop", () => {
+  const square = (bounds: MaskBounds) => planEditCrop(drawing({ width: 2000, height: 2000 }), "1:1", 0, bounds);
+
+  it("sends the whole image when the artist chooses it, however small the mask", () => {
+    const plan = planEditCrop(drawing(), "whole", 0.5, { left: 1750, top: 250, right: 1850, bottom: 350 });
+    expect(plan.wholeImage).toBe("chosen");
+    expect(plan.crop).toEqual({ x: 0, y: 0, size: 2000, width: 2000, height: 1200, sourceWidth: 2000, sourceHeight: 1200 });
+    expect(isWholeImageCrop(plan.crop)).toBe(true);
+    // Nothing moves: the mask's points are already in the whole picture's pixels.
+    expect(drawingForCrop(drawing(), plan.crop).strokes[0].points[0]).toEqual({ x: 1800, y: 300 });
+  });
+
+  it("sends the whole image once the mask's box covers three quarters of it", () => {
+    // 1733 squared is just over 75% of 2000 squared, 1732 squared just under.
+    const over = square({ left: 0, top: 0, right: 1733, bottom: 1733 });
+    const under = square({ left: 0, top: 0, right: 1732, bottom: 1732 });
+
+    expect(over.wholeImage).toBe("coverage");
+    expect(over.coverage).toBeGreaterThanOrEqual(WHOLE_IMAGE_COVERAGE);
+    expect(isWholeImageCrop(over.crop)).toBe(true);
+    expect(under.wholeImage).toBeUndefined();
+    expect(under.crop).toMatchObject({ x: 0, y: 0, width: 1732, height: 1732 });
+    expect(isWholeImageCrop(under.crop)).toBe(false);
+  });
+
+  it("measures coverage from the mask's box, not its painted area", () => {
+    // A thin diagonal stroke paints little but spans the picture, and a crop has
+    // to hold its whole box -- so it is sent whole.
+    const plan = square({ left: 0, top: 0, right: 2000, bottom: 1900 });
+    expect(plan.coverage).toBeCloseTo(0.95);
+    expect(plan.wholeImage).toBe("coverage");
+  });
+
+  it("keeps an ordinary crop for a mask that is small and fits", () => {
+    const plan = planEditCrop(drawing(), "16:9", 0.5, { left: 350, top: 450, right: 450, bottom: 550 });
+    expect(plan.wholeImage).toBeUndefined();
+    expect(plan.coverage).toBeCloseTo(100 * 100 / (2000 * 1200));
+    expect(plan.crop).toEqual(aspectEditCrop(drawing(), "16:9", 0.5, { left: 350, top: 450, right: 450, bottom: 550 }));
   });
 });
 
