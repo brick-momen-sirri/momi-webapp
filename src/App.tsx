@@ -84,6 +84,7 @@ function App() {
   const [initialSettings] = useState(readPersistedGenerationSettings);
   const [mainSection, setMainSection] = useState<MainSection>("animation");
   const stillImagesForm = useStillImagesForm();
+  const setLegacyStillImagesTargetFolderId = stillImagesForm.setTargetFolderId;
   const { toasts, showToast, dismissToast } = useNotifications();
   const { theme, toggleTheme: handleThemeToggle } = useTheme();
   const {
@@ -109,7 +110,17 @@ function App() {
   // see jobPageParams. Deliberately not persisted: it is an admin looking something
   // up, not a view they should come back to tomorrow still inside.
   const [jobOwnerId, setJobOwnerId] = useState(ALL_JOB_OWNERS);
-  const [targetFolderId, setTargetFolderId] = useState(initialSettings.targetFolderId ?? "");
+  // One destination belongs to the selected project, not to a generation mode.
+  // Prefer the Animation preference, while accepting the old Still Images value
+  // as a migration fallback for browsers that only used that workspace before.
+  const [targetFolderId, setTargetFolderId] = useState(
+    initialSettings.targetFolderId ?? stillImagesForm.targetFolderId ?? "",
+  );
+  // Keep the legacy Still Images preference current while both preference files
+  // still exist. The live UI and every submission use targetFolderId below.
+  useEffect(() => {
+    setLegacyStillImagesTargetFolderId(targetFolderId);
+  }, [setLegacyStillImagesTargetFolderId, targetFolderId]);
   const {
     projects,
     setProjects,
@@ -318,7 +329,7 @@ function App() {
       projectId: selectedProjectId,
       categoryId: stillImagesForm.selectedCategoryId,
       categoryState: selectedStillImageState,
-      targetFolderId: stillImagesForm.targetFolderId,
+      targetFolderId,
       saveNumber: stillImagesForm.saveNumber,
     });
   };
@@ -335,7 +346,7 @@ function App() {
     try {
       const job = await finalizeImageEdit({
         projectId: selectedProjectId,
-        targetFolderId: stillImagesForm.targetFolderId,
+        targetFolderId,
         saveNumber: stillImagesForm.saveNumber,
         state: selectedStillImageState,
         currentDrawing: drawing,
@@ -379,7 +390,6 @@ function App() {
   useResetWhenChanged(selectedProjectId, () => {
     setSelectedFolderId("all");
     setTargetFolderId("");
-    stillImagesForm.setTargetFolderId("");
   });
 
   // Folders arrive from the backend and can be archived or deleted underneath a
@@ -391,7 +401,7 @@ function App() {
     .map((folder) => folder.folderId)
     .join(",");
   useResetWhenChanged(
-    `${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}|${stillImagesForm.targetFolderId}`,
+    `${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}`,
     () => {
       const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
       if (targetFolderId && !folderIds.has(targetFolderId)) {
@@ -399,9 +409,6 @@ function App() {
       }
       if (selectedFolderId !== "all" && selectedFolderId !== "root" && !folderIds.has(selectedFolderId)) {
         setSelectedFolderId("all");
-      }
-      if (stillImagesForm.targetFolderId && !folderIds.has(stillImagesForm.targetFolderId)) {
-        stillImagesForm.setTargetFolderId("");
       }
     },
   );
@@ -716,7 +723,7 @@ function App() {
                 category={stillImagesForm.selectedCategory}
                 state={selectedStillImageState}
                 selectedProject={selectedProject}
-                targetFolderId={stillImagesForm.targetFolderId}
+                targetFolderId={targetFolderId}
                 saveNumber={stillImagesForm.saveNumber}
                 onCategoryChange={stillImagesForm.setSelectedCategoryId}
                 onImagesChange={stillImagesForm.setImages}
@@ -724,7 +731,7 @@ function App() {
                 onPromptChange={stillImagesForm.setPrompt}
                 onSeedChange={stillImagesForm.setSeed}
                 onSettingChange={stillImagesForm.setSetting}
-                onTargetFolderChange={stillImagesForm.setTargetFolderId}
+                onTargetFolderChange={setTargetFolderId}
                 onSaveNumberChange={stillImagesForm.setSaveNumber}
                 onGenerate={handleStillImagesGenerate}
                 onNewEditLayer={stillImagesForm.startNewEditLayer}
@@ -792,7 +799,7 @@ function App() {
               category={stillImagesForm.selectedCategory}
               state={selectedStillImageState}
               selectedProject={selectedProject}
-              targetFolderId={stillImagesForm.targetFolderId}
+              targetFolderId={targetFolderId}
               saveNumber={stillImagesForm.saveNumber}
               userName={account.name}
               jobs={stillImageJobs}

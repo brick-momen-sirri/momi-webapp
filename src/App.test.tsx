@@ -193,6 +193,27 @@ describe("main workspace sections", () => {
     expect(screen.getByText(/AI generation jobs/i)).toBeInTheDocument();
   });
 
+  it("keeps one Save result destination when switching between Animation and Still Images", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("momi_generation_settings_v1", JSON.stringify({ selectedProjectId: "proj_1" }));
+    await bootSignedIn((state) => {
+      state.projects = [
+        backendProject({ folders: [{ folderId: "fld_interiors", name: "Interiors", archived: false }] }),
+      ];
+    });
+
+    const animationDestination = await screen.findByRole("combobox", { name: "Save result to" });
+    await user.selectOptions(animationDestination, "fld_interiors");
+    expect(animationDestination).toHaveValue("fld_interiors");
+
+    await user.click(screen.getByRole("button", { name: /^Still Images/ }));
+    expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("fld_interiors");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Save result to" }), "");
+    await user.click(screen.getByRole("button", { name: /^Animation/ }));
+    expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("");
+  });
+
   it("shows all Still Images categories without submitting a job", async () => {
     const user = userEvent.setup();
     await bootSignedIn();
