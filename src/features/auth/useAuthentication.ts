@@ -9,12 +9,14 @@ import {
   resetBackendUserPassword,
   setBackendUserActive,
   signInBackend,
+  updateBackendPinnedFolders,
   updateBackendPinnedProjects,
   updateBackendProfile,
   updateBackendUser,
   type AuthResult,
   type AuthUser,
 } from "../../services/backendApi";
+import { folderPinKey } from "../projects/folderTree";
 import { mergeUsers } from "../workspace/workspaceUtils";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
@@ -102,6 +104,30 @@ export function useAuthentication(showToast: ShowToast) {
     showToast(result.error, "error");
   }
 
+  // Pins live on the account, not in this browser, so an artist's own folder is on
+  // top wherever they sign in.
+  async function handleToggleFolderPin(projectId: string, folderId: string) {
+    if (!account) return;
+    const key = folderPinKey(projectId, folderId);
+    const currentPins = account.pinnedFolderKeys ?? [];
+    const pinning = !currentPins.includes(key);
+    const nextPins = pinning ? [key, ...currentPins] : currentPins.filter((item) => item !== key);
+    const optimisticAccount = { ...account, pinnedFolderKeys: nextPins };
+    setAccount(optimisticAccount);
+    setWorkspaceAccounts((current) => mergeUsers([optimisticAccount], current));
+
+    const result = await updateBackendPinnedFolders(nextPins);
+    if (result.ok) {
+      setAccount(result.account);
+      setWorkspaceAccounts((current) => mergeUsers([result.account], current));
+      showToast(pinning ? "Folder pinned to the top." : "Folder unpinned.");
+      return;
+    }
+    setAccount(account);
+    setWorkspaceAccounts((current) => mergeUsers([account], current));
+    showToast(result.error, "error");
+  }
+
   async function handleChangePassword(
     currentPassword: string,
     newPassword: string,
@@ -166,6 +192,7 @@ export function useAuthentication(showToast: ShowToast) {
     handleLogout,
     handleUpdateProfile,
     handleToggleProjectPin,
+    handleToggleFolderPin,
     handleChangePassword,
     handleCreateUser,
     handleUpdateUser,

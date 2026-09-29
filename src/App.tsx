@@ -102,6 +102,7 @@ function App() {
     handleLogout,
     handleUpdateProfile,
     handleToggleProjectPin,
+    handleToggleFolderPin,
     handleChangePassword,
     handleCreateUser,
     handleUpdateUser,
@@ -687,6 +688,7 @@ function App() {
                 selectedModel={selectedModel}
                 selectedProject={selectedProject}
                 targetFolderId={targetFolderId}
+                pinnedFolderKeys={account.pinnedFolderKeys}
                 selectedResolution={selectedResolution}
                 allowSeedance4K={allowSeedance4K}
                 selectedNanoBananaAspectRatio={selectedNanoBananaAspectRatio}
@@ -737,6 +739,7 @@ function App() {
                 state={selectedStillImageState}
                 selectedProject={selectedProject}
                 targetFolderId={targetFolderId}
+                pinnedFolderKeys={account.pinnedFolderKeys}
                 saveNumber={stillImagesForm.saveNumber}
                 onCategoryChange={stillImagesForm.setSelectedCategoryId}
                 onImagesChange={stillImagesForm.setImages}
@@ -813,6 +816,7 @@ function App() {
               state={selectedStillImageState}
               selectedProject={selectedProject}
               targetFolderId={targetFolderId}
+              pinnedFolderKeys={account.pinnedFolderKeys}
               saveNumber={stillImagesForm.saveNumber}
               userName={account.name}
               jobs={stillImageJobs}
@@ -876,9 +880,11 @@ function App() {
               selectedProjectId={selectedProjectId}
               selectedFolderId={selectedFolderId}
               pinnedProjectIds={account.pinnedProjectIds ?? []}
+              pinnedFolderKeys={account.pinnedFolderKeys ?? []}
               onSelectProject={setSelectedProjectId}
               onSelectFolder={handleSelectFolder}
               onToggleProjectPin={handleToggleProjectPin}
+              onToggleFolderPin={handleToggleFolderPin}
               onCreateProject={handleCreateProject}
               onUpdateProject={handleUpdateProject}
               onAddProjectMember={handleAddProjectMember}

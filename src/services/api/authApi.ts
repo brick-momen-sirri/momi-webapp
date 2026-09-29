@@ -62,6 +62,19 @@ export async function updateBackendPinnedProjects(projectIds: string[]): Promise
   }
 }
 
+export async function updateBackendPinnedFolders(folderKeys: string[]): Promise<AuthResult> {
+  try {
+    const data = await apiRequest<{ user: AuthUser }>("/api/auth/me/pinned-folders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderKeys }),
+    });
+    return { ok: true, account: mapUser(data.user) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not save pinned folders." };
+  }
+}
+
 export async function changeBackendPassword(
   currentPassword: string,
   newPassword: string,

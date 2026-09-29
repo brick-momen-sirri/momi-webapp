@@ -18,7 +18,43 @@ type FolderNode = { folderId: string; parentId: string | null; name: string; arc
 
 const PATH_SEPARATOR = " / ";
 
-export type FolderTreeEntry<T extends FolderNode> = { folder: T; depth: number; path: string };
+/**
+ * `pinned` marks a pinned top-level folder and everything beneath it, so a picker
+ * can group that branch apart from the rest.
+ */
+export type FolderTreeEntry<T extends FolderNode> = { folder: T; depth: number; path: string; pinned: boolean };
+
+/**
+ * How an account's pins name a folder. Folder ids are only unique within a
+ * project, so the project is part of the key. backend/src/routes/authSessionRoutes.ts
+ * builds the same key to check a pin names a real top-level folder.
+ */
+export function folderPinKey(projectId: string, folderId: string) {
+  return `${projectId}:${folderId}`;
+}
+
+/** The folder ids an account has pinned in one project. */
+export function pinnedFolderIdsIn(projectId: string | undefined, pinnedFolderKeys: readonly string[] = []) {
+  const prefix = `${projectId}:`;
+  return new Set(
+    projectId ? pinnedFolderKeys.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length)) : [],
+  );
+}
+
+/**
+ * Top-level folders with the pinned ones first, each group by name. Only the
+ * first level is pinnable: it is where each artist's own folder sits.
+ */
+export function orderTopLevelFolders<T extends { folderId: string; name: string }>(
+  folders: readonly T[],
+  pinnedFolderIds: ReadonlySet<string> = new Set(),
+) {
+  return [...folders].sort(
+    (left, right) =>
+      Number(pinnedFolderIds.has(right.folderId)) - Number(pinnedFolderIds.has(left.folderId)) ||
+      compareFolderNames(left.name, right.name),
+  );
+}
 
 /** "Parent / Child", walked from the folder up. Stops on a missing parent or a cycle. */
 export function folderPathLabel(folder: FolderNode, folders: readonly FolderNode[]) {
@@ -27,12 +63,15 @@ export function folderPathLabel(folder: FolderNode, folders: readonly FolderNode
 
 /**
  * The project's live folders in tree order: each folder, then its subfolders, with
- * siblings ordered by name.
+ * siblings ordered by name -- except that pinned top-level folders come first.
  *
  * A folder whose parent is archived or missing is listed at the top level rather
  * than dropped, so nothing live can vanish from a picker because of its parent.
  */
-export function folderTreeEntries<T extends FolderNode>(folders: readonly T[]): FolderTreeEntry<T>[] {
+export function folderTreeEntries<T extends FolderNode>(
+  folders: readonly T[],
+  pinnedFolderIds: ReadonlySet<string> = new Set(),
+): FolderTreeEntry<T>[] {
   const byId = new Map<string, FolderNode>(folders.map((folder) => [folder.folderId, folder]));
   const active = folders.filter((folder) => !folder.archived);
   const activeIds = new Set(active.map((folder) => folder.folderId));
@@ -44,21 +83,24 @@ export function folderTreeEntries<T extends FolderNode>(folders: readonly T[]): 
 
   const entries: FolderTreeEntry<T>[] = [];
   const visited = new Set<string>();
-  const visit = (parentKey: string, depth: number) => {
-    const children = [...(childrenByParent.get(parentKey) ?? [])].sort((left, right) =>
-      compareFolderNames(left.name, right.name),
-    );
+  const visit = (parentKey: string, depth: number, inPinnedBranch: boolean) => {
+    const siblings = childrenByParent.get(parentKey) ?? [];
+    const children =
+      depth === 0
+        ? orderTopLevelFolders(siblings, pinnedFolderIds)
+        : [...siblings].sort((left, right) => compareFolderNames(left.name, right.name));
     for (const folder of children) {
       if (visited.has(folder.folderId)) continue;
       visited.add(folder.folderId);
-      entries.push({ folder, depth, path: pathOf(folder, byId) });
-      visit(folder.folderId, depth + 1);
+      const pinned = inPinnedBranch || (depth === 0 && pinnedFolderIds.has(folder.folderId));
+      entries.push({ folder, depth, path: pathOf(folder, byId), pinned });
+      visit(folder.folderId, depth + 1, pinned);
     }
   };
-  visit("", 0);
+  visit("", 0, false);
   // Only a parent cycle can leave a live folder unvisited. List it anyway.
   for (const folder of active) {
-    if (!visited.has(folder.folderId)) entries.push({ folder, depth: 0, path: pathOf(folder, byId) });
+    if (!visited.has(folder.folderId)) entries.push({ folder, depth: 0, path: pathOf(folder, byId), pinned: false });
   }
   return entries;
 }

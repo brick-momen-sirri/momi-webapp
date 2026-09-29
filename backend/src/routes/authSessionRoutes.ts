@@ -3,7 +3,7 @@
 
 import express from "express";
 import { extractAuthToken, getRequestUser } from "../authMiddleware.js";
-import { changePassword, logout, updateOwnProfile, updatePinnedProjects } from "../authService.js";
+import { changePassword, logout, updateOwnProfile, updatePinnedFolders, updatePinnedProjects } from "../authService.js";
 import { canViewProject } from "../jobPermissions.js";
 import { createMediaAccessToken } from "../mediaAccessToken.js";
 import { getProjects } from "../projectService.js";
@@ -67,6 +67,34 @@ authSessionRouter.patch("/api/auth/me/pinned-projects", async (req, res) => {
     res.json({ user: updated });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not save pinned projects." });
+  }
+});
+
+// Only a live top-level folder of a project the caller can see can be pinned --
+// pins exist to put an artist's own folder at the top of the list, and a stale
+// or foreign key is dropped rather than stored.
+authSessionRouter.patch("/api/auth/me/pinned-folders", async (req, res) => {
+  try {
+    const user = getRequestUser(req);
+    const requestedKeys: string[] = Array.isArray(req.body?.folderKeys)
+      ? req.body.folderKeys.filter((item: unknown): item is string => typeof item === "string")
+      : [];
+    const pinnableKeys = new Set(
+      getProjects()
+        .filter((project) => canViewProject(user, project))
+        .flatMap((project) =>
+          (project.folders ?? [])
+            .filter((folder) => !folder.archived && !folder.parentId)
+            .map((folder) => `${project.id}:${folder.folderId}`),
+        ),
+    );
+    const updated = await updatePinnedFolders(
+      user.id,
+      requestedKeys.filter((key) => pinnableKeys.has(key)),
+    );
+    res.json({ user: updated });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Could not save pinned folders." });
   }
 });
 

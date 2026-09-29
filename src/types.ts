@@ -10,6 +10,8 @@ export type User = {
   avatarColor?: string;
   profileImageUrl?: string;
   pinnedProjectIds?: string[];
+  /** Pinned top-level folders, as folderPinKey(projectId, folderId). */
+  pinnedFolderKeys?: string[];
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;

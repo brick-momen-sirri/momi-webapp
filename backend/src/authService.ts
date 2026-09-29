@@ -232,16 +232,29 @@ export async function updateOwnProfile(
 }
 
 export async function updatePinnedProjects(userId: string, projectIds: string[]) {
+  return updateOwnPins(userId, (user) => {
+    user.pinnedProjectIds = sanitizePinnedIds(projectIds);
+  });
+}
+
+/** Keys are "projectId:folderId"; the route checks each names a pinnable folder. */
+export async function updatePinnedFolders(userId: string, folderKeys: string[]) {
+  return updateOwnPins(userId, (user) => {
+    user.pinnedFolderKeys = sanitizePinnedIds(folderKeys);
+  });
+}
+
+async function updateOwnPins(userId: string, apply: (user: StoredUser) => void) {
   if (sqliteAuthStore) {
     const updated = sqliteAuthStore.applyToUser(userId, (user) => {
-      user.pinnedProjectIds = sanitizePinnedProjectIds(projectIds);
+      apply(user);
       user.updatedAt = new Date().toISOString();
     });
     if (!updated) throw new Error("User not found.");
     return toPublicUser(updated);
   }
   const user = findStoredUser(userId);
-  user.pinnedProjectIds = sanitizePinnedProjectIds(projectIds);
+  apply(user);
   user.updatedAt = new Date().toISOString();
   await persistUsers();
   return toPublicUser(user);
@@ -393,7 +406,7 @@ async function buildStoredUser(input: CreateUserInput): Promise<StoredUser> {
     avatar: initialsFor(normalized.displayName),
     avatarColor: safeAvatarColor(input.avatarColor),
     profileImageUrl: safeOptionalString(input.profileImageUrl, 250000),
-    pinnedProjectIds: sanitizePinnedProjectIds(input.pinnedProjectIds),
+    pinnedProjectIds: sanitizePinnedIds(input.pinnedProjectIds),
     createdAt,
     updatedAt: createdAt,
   };
@@ -572,7 +585,8 @@ function normalizeStoredUser(user: StoredUser | Partial<StoredUser>): StoredUser
     avatar: user.avatar || initialsFor(displayName),
     avatarColor: safeAvatarColor(user.avatarColor),
     profileImageUrl: safeOptionalString(user.profileImageUrl, 250000),
-    pinnedProjectIds: sanitizePinnedProjectIds(user.pinnedProjectIds),
+    pinnedProjectIds: sanitizePinnedIds(user.pinnedProjectIds),
+    pinnedFolderKeys: sanitizePinnedIds(user.pinnedFolderKeys),
     createdAt,
     updatedAt: safeDate(user.updatedAt) ?? createdAt,
     lastLoginAt: safeDate(user.lastLoginAt),
@@ -633,7 +647,7 @@ function safeOptionalString(value: unknown, maxLength: number) {
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
 }
 
-function sanitizePinnedProjectIds(value: unknown) {
+function sanitizePinnedIds(value: unknown) {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const ids: string[] = [];

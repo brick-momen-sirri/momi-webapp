@@ -2,7 +2,15 @@
 // every artist's folder holds the same exercise subfolders.
 
 import { describe, expect, it } from "vitest";
-import { folderFilterScope, folderPathLabel, folderTreeEntries, isInFolderScope } from "./folderTree";
+import {
+  folderFilterScope,
+  folderPathLabel,
+  folderPinKey,
+  folderTreeEntries,
+  isInFolderScope,
+  orderTopLevelFolders,
+  pinnedFolderIdsIn,
+} from "./folderTree";
 
 function folder(folderId: string, name: string, parentId: string | null = null, archived = false) {
   return { folderId, name, parentId, archived };
@@ -44,9 +52,39 @@ describe("folderTreeEntries", () => {
     ]);
   });
 
+  it("puts a pinned top-level folder and its subfolders first, marked as the pinned branch", () => {
+    const entries = folderTreeEntries(training, new Set(["sara"]));
+    expect(entries.map((entry) => [entry.path, entry.pinned])).toEqual([
+      ["Sara Haddad", true],
+      ["Sara Haddad / 01 Camera Moves", true],
+      ["Sara Haddad / 02 Character Walk", true],
+      ["Omar Khalil", false],
+      ["Omar Khalil / 01 Camera Moves", false],
+      ["Omar Khalil / 01 Camera Moves / Takes", false],
+    ]);
+  });
+
+  it("ignores a pin on a subfolder", () => {
+    expect(folderTreeEntries(training, new Set(["sara_02"]))[0].path).toBe("Omar Khalil");
+  });
+
   it("survives a parent cycle", () => {
     const entries = folderTreeEntries([folder("a", "A", "b"), folder("b", "B", "a")]);
     expect(entries.map((entry) => entry.folder.folderId).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("folder pins", () => {
+  it("reads back only the pins made in the given project", () => {
+    const keys = [folderPinKey("proj_1", "sara"), folderPinKey("proj_2", "lookdev"), folderPinKey("proj_1", "omar")];
+    expect([...pinnedFolderIdsIn("proj_1", keys)]).toEqual(["sara", "omar"]);
+    expect([...pinnedFolderIdsIn("proj_3", keys)]).toEqual([]);
+    expect([...pinnedFolderIdsIn(undefined, keys)]).toEqual([]);
+  });
+
+  it("orders pinned top-level folders first, each group by name", () => {
+    const folders = [folder("b", "Bea"), folder("z", "Zed"), folder("a", "Ann"), folder("y", "Yan")];
+    expect(orderTopLevelFolders(folders, new Set(["z", "y"])).map((item) => item.name)).toEqual(["Yan", "Zed", "Ann", "Bea"]);
   });
 });
 

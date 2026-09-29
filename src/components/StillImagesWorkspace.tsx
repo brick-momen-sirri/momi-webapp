@@ -42,7 +42,7 @@ import { stillImageResultFileName } from "../features/still-images/resultFileNam
 import { useStillImageResultView } from "../features/still-images/useStillImageResultView";
 import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
-import { folderPathLabel, folderTreeEntries } from "../features/projects/folderTree";
+import { folderPathLabel, folderTreeEntries, pinnedFolderIdsIn } from "../features/projects/folderTree";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
@@ -62,6 +62,8 @@ type StillImagesWorkspaceProps = {
   state: StillImageCategoryState;
   selectedProject?: Project;
   targetFolderId: string;
+  /** Orders the folder filter with this account's pinned folders first. */
+  pinnedFolderKeys?: string[];
   saveNumber: string;
   userName: string;
   /** Still image jobs only -- App filters by section before passing them here. */
@@ -108,6 +110,7 @@ export function StillImagesWorkspace({
   state,
   selectedProject,
   targetFolderId,
+  pinnedFolderKeys,
   saveNumber,
   userName,
   jobs,
@@ -180,7 +183,10 @@ export function StillImagesWorkspace({
           <StillImageResultFilterBar
             filters={filters}
             onChange={setFilters}
-            folders={folderTreeEntries(projectFolders ?? []).map((entry) => ({
+            folders={folderTreeEntries(
+              projectFolders ?? [],
+              pinnedFolderIdsIn(selectedProject?.id, pinnedFolderKeys),
+            ).map((entry) => ({
               folderId: entry.folder.folderId,
               name: entry.path,
             }))}

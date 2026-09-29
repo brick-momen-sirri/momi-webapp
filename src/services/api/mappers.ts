@@ -245,6 +245,9 @@ export function mapUser(user: AuthUser): AuthUser {
     pinnedProjectIds: Array.isArray(user.pinnedProjectIds)
       ? user.pinnedProjectIds.filter((item): item is string => typeof item === "string")
       : [],
+    pinnedFolderKeys: Array.isArray(user.pinnedFolderKeys)
+      ? user.pinnedFolderKeys.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }
 

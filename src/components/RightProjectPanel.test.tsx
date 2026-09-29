@@ -336,3 +336,50 @@ describe("pinning", () => {
     expect(screen.getByRole("button", { name: "Unpin Timber Cabin" })).toBeInTheDocument();
   });
 });
+
+describe("folder pinning", () => {
+  const trainingFolders = [
+    { folderId: "fld_omar", parentId: null, name: "Omar Khalil", archived: false },
+    { folderId: "fld_sara", parentId: null, name: "Sara Haddad", archived: false },
+    { folderId: "fld_sara_01", parentId: "fld_sara", name: "01 Camera Moves", archived: false },
+  ];
+
+  it("lets a non-admin pin their own top-level folder, but not a subfolder", async () => {
+    const client = userEvent.setup();
+    const onToggleFolderPin = vi.fn();
+    renderPanel({
+      currentUserRole: "user",
+      projects: [project({ folders: trainingFolders } as never)],
+      onToggleFolderPin,
+    });
+
+    await client.click(screen.getByRole("button", { name: "Pin folder Sara Haddad" }));
+
+    expect(onToggleFolderPin).toHaveBeenCalledWith("proj_1", "fld_sara");
+    expect(screen.queryByRole("button", { name: "Pin folder 01 Camera Moves" })).toBeNull();
+  });
+
+  it("lists a pinned folder first, with its subfolders still beneath it", () => {
+    renderPanel({
+      projects: [project({ folders: trainingFolders } as never)],
+      pinnedFolderKeys: ["proj_1:fld_sara"],
+      onToggleFolderPin: vi.fn(),
+    });
+
+    const labels = screen
+      .getAllByRole("button", { name: /^(Omar Khalil|Sara Haddad|01 Camera Moves)$/ })
+      .map((button) => button.textContent);
+    expect(labels).toEqual(["Sara Haddad", "01 Camera Moves", "Omar Khalil"]);
+    expect(screen.getByRole("button", { name: "Unpin folder Sara Haddad" })).toBeInTheDocument();
+  });
+
+  it("ignores a pin made in another project", () => {
+    renderPanel({
+      projects: [project({ folders: trainingFolders } as never)],
+      pinnedFolderKeys: ["proj_2:fld_sara"],
+      onToggleFolderPin: vi.fn(),
+    });
+
+    expect(screen.getByRole("button", { name: "Pin folder Sara Haddad" })).toBeInTheDocument();
+  });
+});

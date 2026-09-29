@@ -58,6 +58,7 @@ type StillImagesSettingsPanelProps = {
   state: StillImageCategoryState;
   selectedProject?: Project;
   targetFolderId: string;
+  pinnedFolderKeys?: string[];
   saveNumber: string;
   onCategoryChange: (categoryId: StillImageCategoryId) => void;
   onImagesChange: (images: UploadedImage[]) => void;
@@ -104,6 +105,7 @@ export function StillImagesSettingsPanel({
   state,
   selectedProject,
   targetFolderId,
+  pinnedFolderKeys,
   saveNumber,
   onCategoryChange,
   onImagesChange,
@@ -647,6 +649,7 @@ export function StillImagesSettingsPanel({
         selectedProject={selectedProject}
         targetFolderId={targetFolderId}
         onTargetFolderChange={onTargetFolderChange}
+        pinnedFolderKeys={pinnedFolderKeys}
       />
 
       {!paintsItsOwnSlots ? (

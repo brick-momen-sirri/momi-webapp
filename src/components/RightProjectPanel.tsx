@@ -18,9 +18,11 @@ type RightProjectPanelProps = {
   selectedProjectId: string;
   selectedFolderId: "all" | "root" | string;
   pinnedProjectIds: string[];
+  pinnedFolderKeys?: string[];
   onSelectProject: (projectId: string) => void;
   onSelectFolder: (folderId: "all" | "root" | string) => void;
   onToggleProjectPin: (projectId: string) => void;
+  onToggleFolderPin?: (projectId: string, folderId: string) => void;
   onCreateProject: (project: Project) => void;
   onUpdateProject: (project: Project) => void;
   onAddProjectMember: (projectId: string, userId: string, role: ProjectRole) => Promise<boolean>;
@@ -38,9 +40,11 @@ export function RightProjectPanel({
   selectedProjectId,
   selectedFolderId,
   pinnedProjectIds,
+  pinnedFolderKeys,
   onSelectProject,
   onSelectFolder,
   onToggleProjectPin,
+  onToggleFolderPin,
   onCreateProject,
   onUpdateProject,
   onAddProjectMember,
@@ -130,10 +134,12 @@ export function RightProjectPanel({
             selectedProjectId={selectedProjectId}
             selectedFolderId={selectedFolderId}
             pinnedProjectIds={pinnedProjectIds}
+            pinnedFolderKeys={pinnedFolderKeys}
             canManageFolders={currentUserRole === "admin"}
             onSelectProject={onSelectProject}
             onSelectFolder={onSelectFolder}
             onToggleProjectPin={onToggleProjectPin}
+            onToggleFolderPin={onToggleFolderPin}
             onOpenProjectSettings={openProjectSettings}
             onRenameProject={renameProject}
             onCreateProjectFolder={onCreateProjectFolder}

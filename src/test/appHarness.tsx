@@ -42,6 +42,7 @@ export function backendUser(overrides: Record<string, unknown> = {}) {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     pinnedProjectIds: [],
+    pinnedFolderKeys: [],
     ...overrides,
   };
 }
@@ -159,6 +160,7 @@ export function installBackend(state: HarnessState = defaultState()): Harness {
     if (path === "/api/media/access-token") return { body: { mediaAccess: { token: "mt_test", expiresAt: futureIso() } } };
     if (path === "/api/auth/change-password") return { body: { user: state.user } };
     if (path === "/api/auth/me/pinned-projects") return { body: { user: state.user } };
+    if (path === "/api/auth/me/pinned-folders") return { body: { user: state.user } };
 
     // Catalogue and workspace
     if (path === "/api/models") return { body: { models: state.models } };

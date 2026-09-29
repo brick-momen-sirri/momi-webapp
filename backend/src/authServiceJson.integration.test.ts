@@ -307,6 +307,16 @@ test("updatePinnedProjects treats a non-array as an empty list", async () => {
   assert.deepEqual(updated.pinnedProjectIds, []);
 });
 
+test("updatePinnedFolders stores folder keys without touching pinned projects", async () => {
+  const user = await newUser();
+  await authService.updatePinnedProjects(user.id, ["prj_1"]);
+  const updated = await authService.updatePinnedFolders(user.id, ["prj_1:fld_a", "prj_1:fld_a", " prj_2:fld_b "]);
+
+  assert.deepEqual(updated.pinnedFolderKeys, ["prj_1:fld_a", "prj_2:fld_b"]);
+  assert.deepEqual(updated.pinnedProjectIds, ["prj_1"]);
+  assert.deepEqual(authService.getUserById(user.id)?.pinnedFolderKeys, ["prj_1:fld_a", "prj_2:fld_b"]);
+});
+
 test("listUsers hides disabled accounts unless asked, and sorts by name", async () => {
   await newUser({ email: "zoe@example.com", name: "Zoe Last", password: "ZoePass123" });
   const disabled = await newUser({ email: "gone@example.com", name: "Gone Away", password: "GonePass123" });

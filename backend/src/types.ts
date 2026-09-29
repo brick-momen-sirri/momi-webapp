@@ -65,6 +65,11 @@ export type User = {
   avatarColor?: string;
   profileImageUrl?: string;
   pinnedProjectIds?: string[];
+  /**
+   * Top-level folders this account keeps at the top of a project's folder list,
+   * as "projectId:folderId" -- folder ids are only unique within a project.
+   */
+  pinnedFolderKeys?: string[];
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;

@@ -21,6 +21,7 @@ type LeftSettingsPanelProps = {
   selectedModel: ModelType;
   selectedProject?: Project;
   targetFolderId: string;
+  pinnedFolderKeys?: string[];
   selectedResolution: string;
   allowSeedance4K: boolean;
   selectedNanoBananaAspectRatio: string;
@@ -70,6 +71,7 @@ export function LeftSettingsPanel({
   selectedModel,
   selectedProject,
   targetFolderId,
+  pinnedFolderKeys,
   selectedResolution,
   allowSeedance4K,
   selectedNanoBananaAspectRatio,
@@ -199,6 +201,7 @@ export function LeftSettingsPanel({
           selectedProject={selectedProject}
           targetFolderId={targetFolderId}
           onTargetFolderChange={onTargetFolderChange}
+          pinnedFolderKeys={pinnedFolderKeys}
         />
 
         <GenerateButton

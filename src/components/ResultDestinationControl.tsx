@@ -1,22 +1,38 @@
 import { AlertCircle, FolderCheck } from "lucide-react";
-import { folderTreeEntries } from "../features/projects/folderTree";
+import { folderTreeEntries, pinnedFolderIdsIn } from "../features/projects/folderTree";
 import type { Project } from "../types";
 
 type ResultDestinationControlProps = {
   selectedProject?: Project;
   targetFolderId: string;
   onTargetFolderChange: (folderId: string) => void;
+  /** This account's pinned top-level folders, as folderPinKey(projectId, folderId). */
+  pinnedFolderKeys?: string[];
 };
 
 export function ResultDestinationControl({
   selectedProject,
   targetFolderId,
   onTargetFolderChange,
+  pinnedFolderKeys,
 }: ResultDestinationControlProps) {
   // Full paths, not bare names: with a folder per artist and the same exercise
   // subfolders in each, "01 Camera Moves" alone does not say whose it is.
-  const folderEntries = folderTreeEntries(selectedProject?.folders ?? []);
+  const folderEntries = folderTreeEntries(
+    selectedProject?.folders ?? [],
+    pinnedFolderIdsIn(selectedProject?.id, pinnedFolderKeys),
+  );
   const targetFolder = folderEntries.find((entry) => entry.folder.folderId === targetFolderId);
+  // A pinned folder's branch gets its own group on top, so an artist finds their
+  // folder without scrolling past a hundred others.
+  const pinnedEntries = folderEntries.filter((entry) => entry.pinned);
+  const otherEntries = folderEntries.filter((entry) => !entry.pinned);
+  const folderOptions = (entries: typeof folderEntries) =>
+    entries.map((entry) => (
+      <option key={entry.folder.folderId} value={entry.folder.folderId}>
+        {entry.path}
+      </option>
+    ));
 
   return (
     <>
@@ -29,11 +45,14 @@ export function ResultDestinationControl({
             className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Root</option>
-            {folderEntries.map((entry) => (
-              <option key={entry.folder.folderId} value={entry.folder.folderId}>
-                {entry.path}
-              </option>
-            ))}
+            {pinnedEntries.length ? (
+              <>
+                <optgroup label="Pinned">{folderOptions(pinnedEntries)}</optgroup>
+                <optgroup label="All folders">{folderOptions(otherEntries)}</optgroup>
+              </>
+            ) : (
+              folderOptions(otherEntries)
+            )}
           </select>
         </label>
       ) : null}
