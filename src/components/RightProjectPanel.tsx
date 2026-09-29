@@ -136,6 +136,7 @@ export function RightProjectPanel({
             pinnedProjectIds={pinnedProjectIds}
             pinnedFolderKeys={pinnedFolderKeys}
             canManageFolders={currentUserRole === "admin"}
+            currentUser={{ id: ownerId, role: currentUserRole }}
             onSelectProject={onSelectProject}
             onSelectFolder={onSelectFolder}
             onToggleProjectPin={onToggleProjectPin}

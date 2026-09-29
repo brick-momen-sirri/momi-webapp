@@ -21,7 +21,7 @@
 // before it consults these predicates, with a message of its own.
 
 import type { AuthUser } from "../../services/api/types";
-import type { Project, ProjectRole } from "../../types";
+import type { Project, ProjectFolder, ProjectRole } from "../../types";
 
 type AccessUser = Pick<AuthUser, "id" | "role"> | null | undefined;
 
@@ -50,6 +50,25 @@ export function canCreateJobInProject(user: AccessUser, project?: Project) {
   if (role === "owner" || role === "editor") return true;
   if (role === "viewer") return false;
   return grantsWorkspaceAccess(project);
+}
+
+/**
+ * Mirror of backend/src/folderPermissions.ts. Anyone who can generate in a project
+ * can add a subfolder inside an existing folder, and rename or delete a subfolder
+ * they created; the first level (one folder per artist) stays the admin's.
+ */
+export function canCreateSubfolder(user: AccessUser, project?: Project) {
+  return canCreateJobInProject(user, project);
+}
+
+export function canChangeFolder(
+  user: AccessUser,
+  project: Project | undefined,
+  folder: Pick<ProjectFolder, "parentId" | "createdBy">,
+) {
+  if (!user || !project) return false;
+  if (user.role === "admin") return true;
+  return Boolean(folder.parentId && folder.createdBy === user.id && canCreateJobInProject(user, project));
 }
 
 export function canManageProjectMembers(user: AccessUser, project?: Project) {

@@ -56,6 +56,19 @@ export function orderTopLevelFolders<T extends { folderId: string; name: string 
   );
 }
 
+/**
+ * Where a result sits, as its full folder path ("Sara Haddad / Shot 0100"). Falls
+ * back to the name stored on the job -- "Root", or a folder the project no longer
+ * lists.
+ */
+export function jobFolderLabel(
+  job: { folderId?: string | null; folderName?: string },
+  folders: readonly FolderNode[] = [],
+) {
+  const folder = job.folderId ? folders.find((item) => item.folderId === job.folderId) : undefined;
+  return folder ? folderPathLabel(folder, folders) : job.folderName;
+}
+
 /** "Parent / Child", walked from the folder up. Stops on a missing parent or a cycle. */
 export function folderPathLabel(folder: FolderNode, folders: readonly FolderNode[]) {
   return pathOf(folder, new Map(folders.map((item) => [item.folderId, item])));

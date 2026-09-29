@@ -2,6 +2,7 @@ import { FileText, Layers, Pin } from "lucide-react";
 import type { ReactNode } from "react";
 import { sortFoldersByName } from "../features/projects/folderSort";
 import { orderTopLevelFolders, pinnedFolderIdsIn } from "../features/projects/folderTree";
+import { canChangeFolder, canCreateSubfolder } from "../features/projects/projectAccess";
 import type { Project, ProjectFolder } from "../types";
 import { ProjectCard, ProjectRowMenuButton } from "./ProjectCard";
 
@@ -12,7 +13,10 @@ type ProjectListProps = {
   pinnedProjectIds: string[];
   /** This account's pinned top-level folders, as folderPinKey(projectId, folderId). */
   pinnedFolderKeys?: string[];
+  /** Admin: every folder action, including top-level folders. */
   canManageFolders: boolean;
+  /** Everyone else gets subfolder actions by the rule in projectAccess. */
+  currentUser?: { id: string; role: "admin" | "user" };
   onSelectProject: (projectId: string) => void;
   onSelectFolder: (folderId: "all" | "root" | string) => void;
   onToggleProjectPin: (projectId: string) => void;
@@ -31,6 +35,7 @@ export function ProjectList({
   pinnedProjectIds,
   pinnedFolderKeys = [],
   canManageFolders,
+  currentUser,
   onSelectProject,
   onSelectFolder,
   onToggleProjectPin,
@@ -76,38 +81,47 @@ export function ProjectList({
           foldersByParent.set(key, [...(foldersByParent.get(key) ?? []), folder]);
         }
         // Pinning is for the first level only -- each artist's own folder -- and is
-        // open to everyone, unlike the admin-only folder actions.
+        // open to everyone. Subfolder actions follow the rule in projectAccess.
         const pinnedFolderIds = pinnedFolderIdsIn(project.id, pinnedFolderKeys);
+        const mayAddSubfolder = canManageFolders || canCreateSubfolder(currentUser, project);
         const renderFolderRows = (parentId: string | null, depth = 0): ReactNode[] => {
           const siblings = foldersByParent.get(parentId ?? "") ?? [];
           const ordered = depth === 0 ? orderTopLevelFolders(siblings, pinnedFolderIds) : sortFoldersByName(siblings);
-          return ordered.flatMap((folder) => [
-            <FolderListRow
-              key={folder.folderId}
-              label={folder.name}
-              selected={selectedFolderId === folder.folderId}
-              count={0}
-              depth={depth}
-              canManage={canManageFolders}
-              pinned={depth === 0 && pinnedFolderIds.has(folder.folderId)}
-              onTogglePin={
-                depth === 0 && onToggleFolderPin ? () => onToggleFolderPin(project.id, folder.folderId) : undefined
-              }
-              onSelect={() => onSelectFolder(folder.folderId)}
-              onRename={() => {
-                const name = window.prompt("Folder name", folder.name);
-                if (!name?.trim() || name.trim() === folder.name) return;
-                onRenameProjectFolder(project.id, folder.folderId, name.trim());
-              }}
-              onCreateSubfolder={() => {
-                const name = window.prompt("New subfolder name");
-                if (!name?.trim()) return;
-                onCreateProjectFolder(project.id, name.trim(), folder.folderId);
-              }}
-              onDelete={() => onDeleteProjectFolder(project.id, folder.folderId)}
-            />,
-            ...renderFolderRows(folder.folderId, depth + 1),
-          ]);
+          return ordered.flatMap((folder) => {
+            const mayChange = canManageFolders || canChangeFolder(currentUser, project, folder);
+            return [
+              <FolderListRow
+                key={folder.folderId}
+                label={folder.name}
+                selected={selectedFolderId === folder.folderId}
+                count={0}
+                depth={depth}
+                pinned={depth === 0 && pinnedFolderIds.has(folder.folderId)}
+                onTogglePin={depth === 0 && onToggleFolderPin ? () => onToggleFolderPin(project.id, folder.folderId) : undefined}
+                onSelect={() => onSelectFolder(folder.folderId)}
+                onRename={
+                  mayChange
+                    ? () => {
+                        const name = window.prompt("Folder name", folder.name);
+                        if (!name?.trim() || name.trim() === folder.name) return;
+                        onRenameProjectFolder(project.id, folder.folderId, name.trim());
+                      }
+                    : undefined
+                }
+                onCreateSubfolder={
+                  mayAddSubfolder
+                    ? () => {
+                        const name = window.prompt("New subfolder name");
+                        if (!name?.trim()) return;
+                        onCreateProjectFolder(project.id, name.trim(), folder.folderId);
+                      }
+                    : undefined
+                }
+                onDelete={mayChange ? () => onDeleteProjectFolder(project.id, folder.folderId) : undefined}
+              />,
+              ...renderFolderRows(folder.folderId, depth + 1),
+            ];
+          });
         };
         return (
           <div key={project.id} className="space-y-1">
@@ -152,7 +166,6 @@ function FolderListRow({
   selected,
   count,
   depth = 0,
-  canManage = false,
   pinned = false,
   onTogglePin,
   onSelect,
@@ -164,7 +177,6 @@ function FolderListRow({
   selected: boolean;
   count: number;
   depth?: number;
-  canManage?: boolean;
   pinned?: boolean;
   onTogglePin?: () => void;
   onSelect: () => void;
@@ -172,6 +184,12 @@ function FolderListRow({
   onCreateSubfolder?: () => void;
   onDelete?: () => void;
 }) {
+  // Only the actions this person may take; no menu at all when there are none.
+  const menuItems = [
+    ...(onRename ? [{ label: "Rename folder", icon: "rename" as const, onClick: onRename }] : []),
+    ...(onCreateSubfolder ? [{ label: "New subfolder", icon: "new" as const, onClick: onCreateSubfolder }] : []),
+    ...(onDelete ? [{ label: "Delete folder", icon: "delete" as const, danger: true, onClick: onDelete }] : []),
+  ];
   return (
     <div
       className={`group flex items-center gap-2 rounded-md py-1.5 pr-2 text-sm transition ${selected ? "bg-accent/10 text-accent" : "text-stone-700 hover:bg-stone-50"}`}
@@ -197,16 +215,7 @@ function FolderListRow({
           <Pin className={`h-3.5 w-3.5 ${pinned ? "fill-current" : ""}`} />
         </button>
       ) : null}
-      {canManage ? (
-        <ProjectRowMenuButton
-          label={label}
-          items={[
-            ...(onRename ? [{ label: "Rename folder", icon: "rename" as const, onClick: onRename }] : []),
-            ...(onCreateSubfolder ? [{ label: "New subfolder", icon: "new" as const, onClick: onCreateSubfolder }] : []),
-            ...(onDelete ? [{ label: "Delete folder", icon: "delete" as const, danger: true, onClick: onDelete }] : []),
-          ]}
-        />
-      ) : null}
+      {menuItems.length ? <ProjectRowMenuButton label={label} items={menuItems} /> : null}
     </div>
   );
 }

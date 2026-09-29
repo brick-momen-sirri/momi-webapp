@@ -257,6 +257,27 @@ describe("main workspace sections", () => {
     expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("fld_lookdev");
   });
 
+  it("labels a result card with its folder's full path", async () => {
+    window.localStorage.setItem("momi_generation_settings_v1", JSON.stringify({ selectedProjectId: "proj_1" }));
+    await bootSignedIn((state) => {
+      state.projects = [
+        backendProject({
+          folders: [
+            { folderId: "fld_sara", parentId: null, name: "Sara Haddad", archived: false },
+            { folderId: "fld_sara_0100", parentId: "fld_sara", name: "Shot 0100", archived: false },
+          ],
+        }),
+      ];
+      state.jobs = [backendJob({ folderId: "fld_sara_0100", folderName: "Shot 0100" })];
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("Sara Haddad / Shot 0100").some((element) => element.tagName === "SPAN"),
+      ).toBe(true),
+    );
+  });
+
   it("shows all Still Images categories without submitting a job", async () => {
     const user = userEvent.setup();
     await bootSignedIn();

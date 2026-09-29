@@ -42,7 +42,7 @@ import { stillImageResultFileName } from "../features/still-images/resultFileNam
 import { useStillImageResultView } from "../features/still-images/useStillImageResultView";
 import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
-import { folderPathLabel, folderTreeEntries, pinnedFolderIdsIn } from "../features/projects/folderTree";
+import { folderPathLabel, folderTreeEntries, jobFolderLabel, pinnedFolderIdsIn } from "../features/projects/folderTree";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
@@ -489,8 +489,10 @@ function StillImageJobCard({
             <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
               {project?.name ?? job.projectId}
             </span>
-            {job.folderName ? (
-              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">{job.folderName}</span>
+            {jobFolderLabel(job, project?.folders) ? (
+              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">
+                {jobFolderLabel(job, project?.folders)}
+              </span>
             ) : null}
             <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">
               <Hash className="h-3 w-3" />
@@ -636,7 +638,7 @@ function StillImageJobCard({
           copyValue={seed === undefined ? undefined : String(seed)}
         />
         <MetadataItem label="Project" value={project?.shortName ?? "Not selected"} />
-        <MetadataItem label="Folder" value={job.folderName ?? "Root"} />
+        <MetadataItem label="Folder" value={jobFolderLabel(job, project?.folders) ?? "Root"} />
         {/* Measured, or nothing. These pods return no usage figures, so a cost
             exists only where RunPod reported worker time and the GPU behind the
             worker is one we have a rate for; anything else would be the old flat

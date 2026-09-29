@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   folderFilterScope,
   folderPathLabel,
+  jobFolderLabel,
   folderPinKey,
   folderTreeEntries,
   isInFolderScope,
@@ -85,6 +86,20 @@ describe("folder pins", () => {
   it("orders pinned top-level folders first, each group by name", () => {
     const folders = [folder("b", "Bea"), folder("z", "Zed"), folder("a", "Ann"), folder("y", "Yan")];
     expect(orderTopLevelFolders(folders, new Set(["z", "y"])).map((item) => item.name)).toEqual(["Yan", "Zed", "Ann", "Bea"]);
+  });
+});
+
+describe("jobFolderLabel", () => {
+  it("shows a result's folder as its full path", () => {
+    expect(jobFolderLabel({ folderId: "omar_01_takes", folderName: "Takes" }, training)).toBe(
+      "Omar Khalil / 01 Camera Moves / Takes",
+    );
+  });
+
+  it("falls back to the stored name for the root or an unknown folder", () => {
+    expect(jobFolderLabel({ folderId: null, folderName: "Root" }, training)).toBe("Root");
+    expect(jobFolderLabel({ folderId: "fld_gone", folderName: "Old shots" }, training)).toBe("Old shots");
+    expect(jobFolderLabel({ folderId: "sara_01", folderName: "01 Camera Moves" })).toBe("01 Camera Moves");
   });
 });
 

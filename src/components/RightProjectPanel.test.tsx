@@ -337,6 +337,44 @@ describe("pinning", () => {
   });
 });
 
+describe("folder actions for artists", () => {
+  const folders = [
+    { folderId: "fld_sara", parentId: null, name: "Sara Haddad", archived: false, createdBy: "usr_admin" },
+    { folderId: "fld_own", parentId: "fld_sara", name: "Shot 0100", archived: false, createdBy: "usr_momen" },
+    { folderId: "fld_other", parentId: "fld_sara", name: "Shot 0200", archived: false, createdBy: "usr_owner" },
+  ];
+
+  async function menuItems(label: string) {
+    const client = userEvent.setup();
+    await client.click(screen.getByRole("button", { name: `${label} actions` }));
+    const items = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((text) => text === "Rename folder" || text === "New subfolder" || text === "Delete folder");
+    await client.keyboard("{Escape}");
+    return items;
+  }
+
+  it("lets a non-admin add a subfolder inside their folder, but not rename or delete it", async () => {
+    renderPanel({ currentUserRole: "user", projects: [project({ folders } as never)] });
+    expect(await menuItems("Sara Haddad")).toEqual(["New subfolder"]);
+  });
+
+  it("lets a non-admin rename and delete only the subfolders they created", async () => {
+    renderPanel({ currentUserRole: "user", projects: [project({ folders } as never)] });
+    expect(await menuItems("Shot 0100")).toEqual(["Rename folder", "New subfolder", "Delete folder"]);
+    expect(await menuItems("Shot 0200")).toEqual(["New subfolder"]);
+  });
+
+  it("gives a viewer no folder actions at all", () => {
+    renderPanel({
+      currentUserRole: "user",
+      projects: [project({ folders, members: [{ userId: "usr_momen", role: "viewer" }] } as never)],
+    });
+    expect(screen.queryByRole("button", { name: "Sara Haddad actions" })).toBeNull();
+  });
+});
+
 describe("folder pinning", () => {
   const trainingFolders = [
     { folderId: "fld_omar", parentId: null, name: "Omar Khalil", archived: false },

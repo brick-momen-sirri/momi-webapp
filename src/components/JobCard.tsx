@@ -4,6 +4,7 @@ import type { Job, Project, User } from "../types";
 import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
+import { jobFolderLabel } from "../features/projects/folderTree";
 import { JobActions } from "./JobActions";
 import { resultCardElementId } from "../utils/resultCard";
 import { JobMetadata } from "./JobMetadata";
@@ -55,6 +56,7 @@ export function JobCard({
   const isLong = job.prompt.length > 130;
   const hasSaveNumber = Boolean(job.workflowOptions?.save?.cameraNumber || job.workflowOptions?.save?.shotNumber);
   const showSaveNumber = job.source !== "existing_project_media" || hasSaveNumber || canEditSaveNumber;
+  const folderLabel = jobFolderLabel(job, project?.folders);
   const saveNumberLabel = getJobSaveNumberLabel(job);
   const saveNumber = getJobSaveNumber(job);
   const [saveDraft, setSaveDraft] = useState(saveNumber);
@@ -106,8 +108,9 @@ export function JobCard({
             <span className="rounded-full bg-stone-100 px-2 py-1 text-[11px] font-semibold text-stone-600">
               {project?.name ?? "Unknown project"}
             </span>
-            {job.folderName ? (
-              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">{job.folderName}</span>
+            {/* The full path: with a folder per artist, "Shot 0100" alone does not say whose. */}
+            {folderLabel ? (
+              <span className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">{folderLabel}</span>
             ) : null}
             {showSaveNumber && editingSaveNumber ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700">

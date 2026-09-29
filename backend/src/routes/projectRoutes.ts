@@ -5,6 +5,7 @@ import { getRequestUser, requireAdmin } from "../authMiddleware.js";
 import { getUserById } from "../authService.js";
 import { creditsSpentForJob, findCreditTrackerProjectStats, roundCredits, roundUsd, usdSpentForJob } from "../creditDashboardService.js";
 import { getCreditTrackerProjectStats } from "../creditUsageService.js";
+import { canChangeProjectFolder, canCreateProjectFolder } from "../folderPermissions.js";
 import { currentMonthRange } from "../httpQuery.js";
 import { canAccessJob, canManageJob, canManageProject, canViewProject, filterJobsForUser } from "../jobPermissions.js";
 import { getJob, getJobsWithExistingMedia, moveJobResult, renameJob, updateJobSaveNumber } from "../jobQueue.js";
@@ -190,16 +191,24 @@ projectRouter.patch("/api/projects/:projectId", async (req, res) => {
   }
 });
 
-projectRouter.post("/api/projects/:projectId/folders", requireAdmin, async (req, res) => {
+// Folder changes are no longer admin-only: see folderPermissions.ts for who may
+// add, rename and delete which folders.
+projectRouter.post("/api/projects/:projectId/folders", async (req, res) => {
   try {
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    const parentId = typeof req.body?.parentId === "string" && req.body.parentId ? req.body.parentId : null;
+    if (!canCreateProjectFolder(user, project, parentId)) {
+      return res.status(403).json({
+        error: parentId ? "You cannot add folders to this project." : "Only an admin can add a top-level folder.",
+      });
+    }
     const folder = await createProjectFolder(
       project.id,
       {
         name: typeof req.body?.name === "string" ? req.body.name : "",
-        parentId: typeof req.body?.parentId === "string" ? req.body.parentId : null,
+        parentId,
       },
       user.id,
     );
@@ -210,11 +219,14 @@ projectRouter.post("/api/projects/:projectId/folders", requireAdmin, async (req,
   }
 });
 
-projectRouter.patch("/api/projects/:projectId/folders/:folderId", requireAdmin, async (req, res) => {
+projectRouter.patch("/api/projects/:projectId/folders/:folderId", async (req, res) => {
   try {
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canChangeProjectFolder(user, project, req.params.folderId)) {
+      return res.status(403).json({ error: "You can only rename subfolders you created." });
+    }
     const folder = await renameProjectFolder(
       project.id,
       req.params.folderId,
@@ -230,11 +242,14 @@ projectRouter.patch("/api/projects/:projectId/folders/:folderId", requireAdmin, 
   }
 });
 
-projectRouter.delete("/api/projects/:projectId/folders/:folderId", requireAdmin, async (req, res) => {
+projectRouter.delete("/api/projects/:projectId/folders/:folderId", async (req, res) => {
   try {
     const user = getRequestUser(req);
     const project = getProject(req.params.projectId);
     if (!project || !canViewProject(user, project)) return res.status(404).json({ error: "Project not found" });
+    if (!canChangeProjectFolder(user, project, req.params.folderId)) {
+      return res.status(403).json({ error: "You can only delete subfolders you created." });
+    }
     const folder = await deleteProjectFolder(project.id, req.params.folderId, user.id);
     if (!folder) return res.status(404).json({ error: "Folder not found" });
     res.json({ folder, project: getProject(project.id) });
