@@ -44,6 +44,33 @@
   }
 }
 
+/* SlideOnHoverText: a line too long for its box fades at the right edge. While
+   its card (the nearest .group) is hovered, or reached with the keyboard, the
+   text slides left once to show the rest and stays; it eases back when the
+   pointer leaves. Distance and duration are measured per line by the component.
+   Nothing here changes the box's size -- hover must never alter what the
+   component measures, or the two chase each other and the text flickers. */
+.slide-on-hover[data-overflowing="true"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+
+.slide-on-hover-text {
+  transition: transform 350ms ease-out;
+}
+
+.group:hover .slide-on-hover[data-overflowing="true"] > .slide-on-hover-text {
+  transform: translateX(var(--slide-distance, 0));
+  transition: transform var(--slide-duration, 2s) ease-in-out 300ms;
+}
+
+/* Its own rule: a browser without :has drops the whole rule it appears in, and
+   must not lose the hover slide with it. */
+.group:has(:focus-visible) .slide-on-hover[data-overflowing="true"] > .slide-on-hover-text {
+  transform: translateX(var(--slide-distance, 0));
+  transition: transform var(--slide-duration, 2s) ease-in-out 300ms;
+}
+
 :root {
   color: #27241f;
   background: #f5f3ee;

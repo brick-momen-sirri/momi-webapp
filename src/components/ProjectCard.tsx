@@ -2,6 +2,7 @@ import { Folder, FolderPlus, Pencil, Pin, Settings2, Trash2 } from "lucide-react
 import { useEffect, useRef, useState } from "react";
 import { formatCredits, formatUsdTotal } from "../features/credits/creditUsageDashboardUtils";
 import type { Project } from "../types";
+import { SlideOnHoverText } from "./SlideOnHoverText";
 import { SpendLimitBar } from "./SpendLimitBar";
 
 type MenuItem = {
@@ -46,10 +47,18 @@ export function ProjectCard({
   // The first level only, like the count on each folder row: in a training
   // project that is one folder per artist plus the group folders.
   const topLevelFolderCount = (project.folders ?? []).filter((folder) => !folder.archived && !folder.parentId).length;
+  const summary = [
+    project.shortName,
+    project.jobCount === 1 ? "1 job" : `${project.jobCount} jobs`,
+    project.memberCount === 1 ? "1 member" : `${project.memberCount} members`,
+    topLevelFolderCount ? (topLevelFolderCount === 1 ? "1 folder" : `${topLevelFolderCount} folders`) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div
-      className={`relative flex w-full flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition ${
+      className={`group relative flex w-full flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition ${
         selected ? "border-accent bg-accent/10" : "border-transparent bg-white hover:border-line hover:bg-stone-50"
       }`}
     >
@@ -65,7 +74,8 @@ export function ProjectCard({
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
-              <span className="truncate text-sm font-semibold">{project.name}</span>
+              {/* Slides to show the rest on hover rather than ending in an ellipsis. */}
+              <SlideOnHoverText text={project.name} className="min-w-0 text-sm font-semibold" />
               {project.unreadCount ? (
                 <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-700">
                   {project.unreadCount}
@@ -75,16 +85,7 @@ export function ProjectCard({
             {/* Two tiers rather than one run of five numbers: what the project is
                 and how busy it is, then what it has cost. The spend is the figure
                 people come here for, so it gets its own line and the only emphasis. */}
-            <span className="mt-1 block truncate text-[11px] tabular-nums text-stone-500">
-              {project.shortName} &middot; {project.jobCount === 1 ? "1 job" : `${project.jobCount} jobs`} &middot;{" "}
-              {project.memberCount === 1 ? "1 member" : `${project.memberCount} members`}
-              {topLevelFolderCount ? (
-                <span title="Folders at the top level of this project">
-                  {" "}
-                  &middot; {topLevelFolderCount === 1 ? "1 folder" : `${topLevelFolderCount} folders`}
-                </span>
-              ) : null}
-            </span>
+            <SlideOnHoverText text={summary} className="mt-1 text-[11px] tabular-nums text-stone-500" />
             <span className="mt-0.5 flex items-baseline justify-between gap-2 text-[11px]">
               <span className="truncate tabular-nums text-stone-500">{formatCredits(project.creditsUsed ?? 0)} credits</span>
               <span className="shrink-0 font-semibold tabular-nums text-ink">{formatUsdTotal(project.usdUsed ?? 0)}</span>
