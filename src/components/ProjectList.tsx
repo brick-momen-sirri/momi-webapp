@@ -1,8 +1,9 @@
-import { FileText, Layers, Pin } from "lucide-react";
+import { ChevronRight, FileText, Folders, Layers, Pin } from "lucide-react";
 import type { ReactNode } from "react";
 import { sortFoldersByName } from "../features/projects/folderSort";
-import { orderTopLevelFolders, pinnedFolderIdsIn } from "../features/projects/folderTree";
+import { folderPinKey, orderTopLevelFolders, pinnedFolderIdsIn } from "../features/projects/folderTree";
 import { canChangeFolder, canCreateSubfolder } from "../features/projects/projectAccess";
+import { useExpandedFolders } from "../features/projects/useExpandedFolders";
 import type { Project, ProjectFolder } from "../types";
 import { ProjectCard, ProjectRowMenuButton } from "./ProjectCard";
 
@@ -47,6 +48,7 @@ export function ProjectList({
   onDeleteProjectFolder,
 }: ProjectListProps) {
   const pinnedSet = new Set(pinnedProjectIds);
+  const expandedFolders = useExpandedFolders();
 
   return (
     <div className="space-y-1.5">
@@ -89,12 +91,19 @@ export function ProjectList({
           const ordered = depth === 0 ? orderTopLevelFolders(siblings, pinnedFolderIds) : sortFoldersByName(siblings);
           return ordered.flatMap((folder) => {
             const mayChange = canManageFolders || canChangeFolder(currentUser, project, folder);
+            // Folders start collapsed; the row says how many subfolders it holds.
+            const subfolderCount = foldersByParent.get(folder.folderId)?.length ?? 0;
+            const expandKey = folderPinKey(project.id, folder.folderId);
+            const open = subfolderCount > 0 && expandedFolders.isExpanded(expandKey);
             return [
               <FolderListRow
                 key={folder.folderId}
                 label={folder.name}
                 selected={selectedFolderId === folder.folderId}
                 count={0}
+                subfolderCount={subfolderCount}
+                expanded={open}
+                onToggleExpanded={subfolderCount ? () => expandedFolders.toggle(expandKey) : undefined}
                 depth={depth}
                 pinned={depth === 0 && pinnedFolderIds.has(folder.folderId)}
                 onTogglePin={depth === 0 && onToggleFolderPin ? () => onToggleFolderPin(project.id, folder.folderId) : undefined}
@@ -113,13 +122,16 @@ export function ProjectList({
                     ? () => {
                         const name = window.prompt("New subfolder name");
                         if (!name?.trim()) return;
+                        // Open the parent, so the new folder -- which becomes the
+                        // selection -- is not hidden inside a collapsed one.
+                        expandedFolders.expand(expandKey);
                         onCreateProjectFolder(project.id, name.trim(), folder.folderId);
                       }
                     : undefined
                 }
                 onDelete={mayChange ? () => onDeleteProjectFolder(project.id, folder.folderId) : undefined}
               />,
-              ...renderFolderRows(folder.folderId, depth + 1),
+              ...(open ? renderFolderRows(folder.folderId, depth + 1) : []),
             ];
           });
         };
@@ -165,6 +177,9 @@ function FolderListRow({
   label,
   selected,
   count,
+  subfolderCount = 0,
+  expanded = false,
+  onToggleExpanded,
   depth = 0,
   pinned = false,
   onTogglePin,
@@ -176,6 +191,9 @@ function FolderListRow({
   label: string;
   selected: boolean;
   count: number;
+  subfolderCount?: number;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
   depth?: number;
   pinned?: boolean;
   onTogglePin?: () => void;
@@ -195,10 +213,35 @@ function FolderListRow({
       className={`group flex items-center gap-2 rounded-md py-1.5 pr-2 text-sm transition ${selected ? "bg-accent/10 text-accent" : "text-stone-700 hover:bg-stone-50"}`}
       style={{ paddingLeft: `${8 + depth * 14}px` }}
     >
+      {onToggleExpanded ? (
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-stone-400 transition hover:bg-white hover:text-accent"
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          title={expanded ? "Hide subfolders" : "Show subfolders"}
+        >
+          <ChevronRight className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        </button>
+      ) : (
+        // Keeps names aligned whether or not a row can open.
+        <span className="-mr-1 w-5 shrink-0" aria-hidden="true" />
+      )}
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
         <span className="truncate text-xs font-semibold">{label}</span>
       </button>
+      {subfolderCount ? (
+        <span
+          className="flex shrink-0 items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-stone-500"
+          title={subfolderCount === 1 ? "1 subfolder" : `${subfolderCount} subfolders`}
+          aria-label={subfolderCount === 1 ? "1 subfolder" : `${subfolderCount} subfolders`}
+        >
+          <Folders className="h-3 w-3" />
+          {subfolderCount}
+        </span>
+      ) : null}
       {count ? <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-stone-500">{count}</span> : null}
       {onTogglePin ? (
         // Shown on hover until pinned, so a list of a hundred artist folders is not

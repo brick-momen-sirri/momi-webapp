@@ -362,6 +362,7 @@ describe("folder actions for artists", () => {
 
   it("lets a non-admin rename and delete only the subfolders they created", async () => {
     renderPanel({ currentUserRole: "user", projects: [project({ folders } as never)] });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Expand Sara Haddad" }));
     expect(await menuItems("Shot 0100")).toEqual(["Rename folder", "New subfolder", "Delete folder"]);
     expect(await menuItems("Shot 0200")).toEqual(["New subfolder"]);
   });
@@ -397,12 +398,13 @@ describe("folder pinning", () => {
     expect(screen.queryByRole("button", { name: "Pin folder 01 Camera Moves" })).toBeNull();
   });
 
-  it("lists a pinned folder first, with its subfolders still beneath it", () => {
+  it("lists a pinned folder first, with its subfolders still beneath it", async () => {
     renderPanel({
       projects: [project({ folders: trainingFolders } as never)],
       pinnedFolderKeys: ["proj_1:fld_sara"],
       onToggleFolderPin: vi.fn(),
     });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Expand Sara Haddad" }));
 
     const labels = screen
       .getAllByRole("button", { name: /^(Omar Khalil|Sara Haddad|01 Camera Moves)$/ })
@@ -419,5 +421,61 @@ describe("folder pinning", () => {
     });
 
     expect(screen.getByRole("button", { name: "Pin folder Sara Haddad" })).toBeInTheDocument();
+  });
+});
+
+describe("collapsing folders", () => {
+  const folders = [
+    { folderId: "fld_sara", parentId: null, name: "Sara Haddad", archived: false },
+    { folderId: "fld_0100", parentId: "fld_sara", name: "Shot 0100", archived: false },
+    { folderId: "fld_0200", parentId: "fld_sara", name: "Shot 0200", archived: false },
+    { folderId: "fld_takes", parentId: "fld_0100", name: "Takes", archived: false },
+    { folderId: "fld_omar", parentId: null, name: "Omar Khalil", archived: false },
+  ];
+
+  it("starts collapsed and says how many subfolders sit directly inside", () => {
+    renderPanel({ projects: [project({ folders } as never)] });
+
+    expect(screen.queryByRole("button", { name: "Shot 0100" })).toBeNull();
+    expect(screen.getByLabelText("2 subfolders")).toBeInTheDocument();
+    // No arrow and no count on a folder with nothing inside.
+    expect(screen.queryByRole("button", { name: "Expand Omar Khalil" })).toBeNull();
+  });
+
+  it("opens and closes one level at a time", async () => {
+    const client = userEvent.setup();
+    renderPanel({ projects: [project({ folders } as never)] });
+
+    await client.click(screen.getByRole("button", { name: "Expand Sara Haddad" }));
+    expect(screen.getByRole("button", { name: "Shot 0100" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Takes" })).toBeNull();
+    expect(screen.getByLabelText("1 subfolder")).toBeInTheDocument();
+
+    await client.click(screen.getByRole("button", { name: "Collapse Sara Haddad" }));
+    expect(screen.queryByRole("button", { name: "Shot 0100" })).toBeNull();
+  });
+
+  it("remembers what was left open", async () => {
+    const client = userEvent.setup();
+    const first = renderPanel({ projects: [project({ folders } as never)] });
+    await client.click(screen.getByRole("button", { name: "Expand Sara Haddad" }));
+    first.unmount();
+
+    renderPanel({ projects: [project({ folders } as never)] });
+    expect(screen.getByRole("button", { name: "Shot 0100" })).toBeInTheDocument();
+  });
+
+  it("opens a folder when a subfolder is added to it, so the new one is in view", async () => {
+    const client = userEvent.setup();
+    const onCreateProjectFolder = vi.fn();
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Shot 0300");
+    renderPanel({ projects: [project({ folders } as never)], onCreateProjectFolder });
+
+    await client.click(screen.getByRole("button", { name: "Sara Haddad actions" }));
+    await client.click(screen.getByRole("button", { name: "New subfolder" }));
+
+    expect(onCreateProjectFolder).toHaveBeenCalledWith("proj_1", "Shot 0300", "fld_sara");
+    expect(screen.getByRole("button", { name: "Collapse Sara Haddad" })).toBeInTheDocument();
+    prompt.mockRestore();
   });
 });
