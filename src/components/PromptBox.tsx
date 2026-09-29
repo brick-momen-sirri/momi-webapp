@@ -14,6 +14,10 @@ type PromptBoxProps = {
   onChange: (value: string) => void;
   images: UploadedImage[];
   selectedModel: ModelType;
+  // Undefined hides the switch: only Kling 3.0 image-to-video has a negative prompt
+  // for it to append to, and a switch that does nothing should not be on screen.
+  cameraStabilization?: boolean;
+  onCameraStabilizationChange?: (enabled: boolean) => void;
 };
 
 const movementActions = {
@@ -94,7 +98,14 @@ const cameraActionTemplates: Record<string, string> = {
     "Static detailed composition isolating the architectural form and surface qualities of the {target_subject}, zero camera movement",
 };
 
-export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxProps) {
+export function PromptBox({
+  value,
+  onChange,
+  images,
+  selectedModel,
+  cameraStabilization,
+  onCameraStabilizationChange,
+}: PromptBoxProps) {
   const [isDescribing, setIsDescribing] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
   const [descriptionError, setDescriptionError] = useState("");
@@ -213,14 +224,31 @@ export function PromptBox({ value, onChange, images, selectedModel }: PromptBoxP
           <FileText className="h-4 w-4 text-stone-500" />
           <h2 className="text-sm font-semibold">Prompt</h2>
         </div>
-        <button
-          type="button"
-          onClick={() => onChange("")}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-line text-stone-500 transition hover:bg-stone-50"
-          title="Clear prompt"
-        >
-          <Eraser className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-3">
+          {cameraStabilization !== undefined ? (
+            <label
+              className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-stone-600"
+              title="Adds camera shake, handheld, jitter and drift to Kling's negative prompt. Turn off if you want handheld or shaky camera motion."
+            >
+              <input
+                type="checkbox"
+                name="kling_camera_stabilization"
+                checked={cameraStabilization}
+                onChange={(event) => onCameraStabilizationChange?.(event.target.checked)}
+                className="accent-accent"
+              />
+              Stabilize camera
+            </label>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-line text-stone-500 transition hover:bg-stone-50"
+            title="Clear prompt"
+          >
+            <Eraser className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <textarea

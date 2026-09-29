@@ -237,6 +237,12 @@ export type WorkflowOptions = {
     // match on that track fails the whole job with the video already rendered.
     generateAudio?: boolean;
   };
+  // Kling 3.0 image-to-video only -- the one Kling graph with a negative prompt.
+  // See klingCameraStabilization.ts.
+  kling?: {
+    /** True appends anti-shake terms to the negative prompt. Absent or false changes nothing. */
+    cameraStabilization?: boolean;
+  };
   save?: {
     cameraNumber?: string;
     shotNumber?: string;

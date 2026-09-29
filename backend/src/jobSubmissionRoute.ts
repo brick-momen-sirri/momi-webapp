@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 
 import { getRequestUser } from "./authMiddleware.js";
+import { supportsKlingCameraStabilization } from "./klingCameraStabilization.js";
 import { remoteVideoInputRejection, requiresNormalizedVideoInput } from "./runpodVideoPreprocessService.js";
 import {
   isSeedanceVersionId,
@@ -100,6 +101,7 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   // same limits the picker offered, rather than the file's inferred 2.0 ones.
   const effectiveModel = seedanceEffectiveModel(model, workflowOptions);
   assertSeedanceOptionsFitVersion(model, workflowOptions);
+  assertKlingOptionsFitModel(model, workflowOptions);
   const durationSeconds = optionalDuration(body.durationSeconds, effectiveModel);
   const targetFolderId = optionalFolderId(body.targetFolderId);
 
@@ -314,6 +316,17 @@ function assertSeedanceOptionsFitVersion(model: WorkflowModel, workflowOptions: 
   }
 }
 
+/**
+ * Refuse camera stabilization on a graph with no negative prompt to append to.
+ * First-last-frame and 2.6 would render as if the switch were off, so saying so
+ * beats a render that ignored it. False is a no-op anywhere and passes.
+ */
+function assertKlingOptionsFitModel(model: WorkflowModel, workflowOptions: WorkflowOptions | undefined) {
+  if (workflowOptions?.kling?.cameraStabilization === true && !supportsKlingCameraStabilization(model)) {
+    throw new JobSubmissionError(`${model.name} has no negative prompt, so camera stabilization cannot apply to it.`);
+  }
+}
+
 function assertSupportedResolution(resolution: Resolution, model: WorkflowModel) {
   const supported = model.supportedResolutions ?? [];
   if (!supported.length) return;
@@ -346,7 +359,7 @@ function normalizeResolution(value: string) {
 function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   if (value == null) return undefined;
   const options = plainRecord(value, "workflowOptions");
-  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "seedance", "save", "stillImage"]);
+  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "seedance", "kling", "save", "stillImage"]);
   const unknown = Object.keys(options).find((key) => !allowedKeys.has(key));
   if (unknown) throw new JobSubmissionError(`Unsupported provider-specific workflow option: ${unknown}.`);
 
@@ -376,6 +389,12 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
     }
     if (seedance.videoEditing === true && !version.supportsVideoEditing) {
       throw new JobSubmissionError(`Seedance ${version.id} has no video editing mode.`);
+    }
+  }
+  if (options.kling != null) {
+    const kling = plainRecord(options.kling, "Kling options");
+    if (kling.cameraStabilization != null && typeof kling.cameraStabilization !== "boolean") {
+      throw new JobSubmissionError("Kling cameraStabilization must be true or false.");
     }
   }
   if (options.gptImage != null) {

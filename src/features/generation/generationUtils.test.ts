@@ -4,6 +4,7 @@ import {
   DEFAULT_SEEDANCE_RATIO,
   normalizeSeedanceRatio,
   supports16By9CropToggle,
+  supportsKlingCameraStabilization,
   supportsSeedanceRatio,
   workflowOptionsForJob,
 } from "./generationUtils";
@@ -100,6 +101,7 @@ describe("seedance ratio", () => {
     seedanceVersionId: "2.0" as const,
     seedanceVideoEditing: false,
     seedanceGenerateAudio: false,
+    klingCameraStabilization: true,
   };
 
   it("submits the version and ratio only for Seedance models", () => {
@@ -168,5 +170,54 @@ describe("seedance ratio", () => {
       ratio: "9:16",
       generateAudio: false,
     });
+  });
+});
+
+describe("Kling camera stabilization", () => {
+  const options = {
+    archVizGrid: { slotCount: "1" as const, useSmartDefaults: true, cameraSlots: [] },
+    saveNumber: "0001",
+    imageOutputCount: 1 as const,
+    nanoBananaAspectRatio: "auto",
+    seedanceRatio: "16:9",
+    seedanceVersionId: "2.0" as const,
+    seedanceVideoEditing: false,
+    seedanceGenerateAudio: false,
+    klingCameraStabilization: true,
+  };
+  const klingVideo = model({
+    id: "brick_api_kling_v3_video",
+    label: "Api Kling V3 Video",
+    backendCategory: "image_to_video",
+    workflowPath: "C:\Momi-Animation\workflow\i2v\Brick_api_kling_v3_video.json",
+  });
+  const klingFirstLast = model({
+    id: "brick_api_kling_v3_flf2v",
+    label: "Api Kling V3 Flf2v",
+    backendCategory: "first_last_frame_to_video",
+    workflowPath: "C:\Momi-Animation\workflow\flf2v\Brick_api_kling_v3_flf2v.json",
+  });
+  const kling26 = model({
+    id: "brick_api_kling_v2.6_video",
+    label: "Api Kling V2.6 Video",
+    backendCategory: "image_to_video",
+    workflowPath: "C:\Momi-Animation\workflow\i2v\Brick_api_kling_v2.6_video.json",
+  });
+
+  // Only KlingVideoNode has a negative prompt; anywhere else the switch would do nothing.
+  it("is offered only on Kling 3.0 image-to-video", () => {
+    expect(supportsKlingCameraStabilization(klingVideo)).toBe(true);
+    expect(supportsKlingCameraStabilization(klingFirstLast)).toBe(false);
+    expect(supportsKlingCameraStabilization(kling26)).toBe(false);
+    expect(supportsKlingCameraStabilization(model())).toBe(false);
+  });
+
+  it("sends the switch in both states on Kling 3.0 image-to-video and nowhere else", () => {
+    expect(workflowOptionsForJob({ ...options, model: klingVideo }).kling).toEqual({ cameraStabilization: true });
+    expect(workflowOptionsForJob({ ...options, model: klingVideo, klingCameraStabilization: false }).kling).toEqual({
+      cameraStabilization: false,
+    });
+    expect(workflowOptionsForJob({ ...options, model: klingFirstLast }).kling).toBeUndefined();
+    expect(workflowOptionsForJob({ ...options, model: kling26 }).kling).toBeUndefined();
   });
 });

@@ -13,6 +13,11 @@ import {
   loadWorkflowPrompt,
   saveWorkflowSnapshot,
 } from "./workflowService.js";
+import {
+  applyKlingCameraStabilization,
+  KLING_CAMERA_STABILITY_NEGATIVE_PROMPT,
+  supportsKlingCameraStabilization,
+} from "./klingCameraStabilization.js";
 import type { CreateJobRequest, WorkflowModel } from "./types.js";
 
 await loadWorkflowModels();
@@ -638,6 +643,63 @@ test("Kling video workflows randomize fixed seeds and preserve long prompts for 
   } finally {
     Math.random = originalRandom;
   }
+});
+
+test("Kling 3.0 camera stabilization appends the anti-shake terms to the negative prompt only when on", async () => {
+  const kling = requiredModel("brick_api_kling_v3_video");
+  const build = async (cameraStabilization?: boolean) =>
+    (await loadWorkflowForRunpod(
+      kling,
+      {
+        ...request(kling, ["start.png"]),
+        prompt: "slow handheld walk through the lobby",
+        ...(cameraStabilization === undefined ? {} : { workflowOptions: { kling: { cameraStabilization } } }),
+      },
+      "0000_ply_graound",
+      ["start.png"],
+    )) as Record<string, any>;
+
+  const on = (await build(true))["3"].inputs;
+  assert.equal(on.multi_shot, "disabled");
+  assert.equal(on["multi_shot.negative_prompt"], KLING_CAMERA_STABILITY_NEGATIVE_PROMPT);
+  assert.equal(on["multi_shot.prompt"], "slow handheld walk through the lobby");
+
+  assert.equal((await build(false))["3"].inputs["multi_shot.negative_prompt"], "");
+  // Jobs from before the switch existed carry no kling block and must render as they did.
+  assert.equal((await build(undefined))["3"].inputs["multi_shot.negative_prompt"], "");
+});
+
+test("Kling camera stabilization never overwrites a negative prompt the graph already has", () => {
+  const inputs: Record<string, unknown> = { multi_shot: "disabled", model: "kling-v3", "multi_shot.negative_prompt": "text, watermark, " };
+  applyKlingCameraStabilization(inputs, { kling: { cameraStabilization: true } });
+  assert.equal(inputs["multi_shot.negative_prompt"], `text, watermark, ${KLING_CAMERA_STABILITY_NEGATIVE_PROMPT}`);
+
+  applyKlingCameraStabilization(inputs, { kling: { cameraStabilization: true } });
+  assert.equal(inputs["multi_shot.negative_prompt"], `text, watermark, ${KLING_CAMERA_STABILITY_NEGATIVE_PROMPT}`);
+
+  // Storyboards and turbo send no negative prompt, so there is nothing to append to.
+  const storyboard: Record<string, unknown> = { multi_shot: "2 storyboards", model: "kling-v3" };
+  applyKlingCameraStabilization(storyboard, { kling: { cameraStabilization: true } });
+  assert.ok(!("multi_shot.negative_prompt" in storyboard));
+  const turbo: Record<string, unknown> = { multi_shot: "disabled", model: "kling-3.0-turbo", "multi_shot.negative_prompt": "" };
+  applyKlingCameraStabilization(turbo, { kling: { cameraStabilization: true } });
+  assert.equal(turbo["multi_shot.negative_prompt"], "");
+});
+
+test("only the Kling 3.0 image-to-video graph offers camera stabilization", async () => {
+  assert.equal(supportsKlingCameraStabilization(requiredModel("brick_api_kling_v3_video")), true);
+  assert.equal(supportsKlingCameraStabilization(requiredModel("brick_api_kling_v3_flf2v")), false);
+
+  const firstLast = requiredModel("brick_api_kling_v3_flf2v");
+  const workflow = (await loadWorkflowForRunpod(
+    firstLast,
+    { ...request(firstLast, ["start.png", "end.png"]), workflowOptions: { kling: { cameraStabilization: true } } },
+    "0000_ply_graound",
+    ["start.png", "end.png"],
+  )) as Record<string, any>;
+  const serialized = JSON.stringify(workflow);
+  assert.ok(!serialized.includes("negative_prompt"), "first-last-frame has no negative prompt input to append to");
+  assert.ok(!serialized.includes("camera shake"));
 });
 
 test("Veo3 image-to-video workflow applies selected duration over scalar defaults", async () => {

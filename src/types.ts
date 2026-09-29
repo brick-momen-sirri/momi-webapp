@@ -351,6 +351,11 @@ export type WorkflowOptions = {
     // Seedance job rather than only when switched on.
     generateAudio?: boolean;
   };
+  // Kling 3.0 image-to-video only: true has the server append anti-shake terms to
+  // the negative prompt. Absent on jobs from before the switch, which sent none.
+  kling?: {
+    cameraStabilization?: boolean;
+  };
   save?: {
     cameraNumber?: string;
     shotNumber?: string;

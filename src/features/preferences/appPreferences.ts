@@ -22,6 +22,7 @@ export type PersistedGenerationSettings = {
   selectedSeedanceVersion?: SeedanceVersionId;
   seedanceVideoEditing?: boolean;
   seedanceGenerateAudio?: boolean;
+  klingCameraStabilization?: boolean;
   imageToVideo16By9Cropping?: boolean;
 };
 
@@ -52,6 +53,9 @@ export function readPersistedGenerationSettings(): PersistedGenerationSettings {
       // from before this switch existed starts silent rather than inheriting the
       // node's own default.
       seedanceGenerateAudio: parsed.seedanceGenerateAudio === true,
+      // The opposite way round: only an explicit false turns it off, so a stored
+      // preference from before the switch starts stabilized.
+      klingCameraStabilization: parsed.klingCameraStabilization !== false,
       imageToVideo16By9Cropping:
         typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };

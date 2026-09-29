@@ -25,6 +25,7 @@ import {
   normalizeSaveNumber,
   normalizeSeedanceRatio,
   supportsImageOutputCount,
+  supportsKlingCameraStabilization,
   supportsSeedanceGenerateAudio,
   supportsSeedanceRatio,
 } from "./features/generation/generationUtils";
@@ -47,6 +48,7 @@ import {
   rehydrateJobInputImages,
   rehydrateJobInputVideo,
   reusableImageOutputCount,
+  reusableKlingCameraStabilization,
   reusableNanoBananaAspectRatio,
   reusableSaveNumber,
   reusableSeedanceRatio,
@@ -176,6 +178,8 @@ function App() {
     setSeedanceVideoEditing,
     seedanceGenerateAudio,
     setSeedanceGenerateAudio,
+    klingCameraStabilization,
+    setKlingCameraStabilization,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -196,6 +200,7 @@ function App() {
     selectedModelSupportsCropToggle,
     selectedModelSupportsVideoEditing,
     selectedModelSupportsGenerateAudio,
+    selectedModelSupportsCameraStabilization,
     requiredImages,
     use16By9Cropping,
     disabledReason,
@@ -289,6 +294,7 @@ function App() {
     selectedSeedanceVersion,
     seedanceVideoEditing,
     seedanceGenerateAudio,
+    klingCameraStabilization,
     setJobs,
     setProjects,
     setBackendJobsTotal,
@@ -632,6 +638,12 @@ function App() {
       restored.add("sound");
     }
 
+    const cameraStabilization = reusableKlingCameraStabilization(job.workflowOptions);
+    if (cameraStabilization !== undefined && supportsKlingCameraStabilization(targetModel)) {
+      setKlingCameraStabilization(cameraStabilization);
+      restored.add("camera stabilization");
+    }
+
     if (hasInputImageMetadata(job)) {
       const slotCount = reusableModel ? imageSlotCountForModel(reusableModel) : job.inputImages.length;
       const nextImages = await rehydrateJobInputImages(job, slotCount);
@@ -698,6 +710,8 @@ function App() {
                 showSeedanceVideoEditing={selectedModelSupportsVideoEditing}
                 seedanceGenerateAudio={seedanceGenerateAudio}
                 showSeedanceGenerateAudio={selectedModelSupportsGenerateAudio}
+                klingCameraStabilization={klingCameraStabilization}
+                showKlingCameraStabilization={selectedModelSupportsCameraStabilization}
                 selectedDurationSeconds={selectedDurationSeconds}
                 prompt={prompt}
                 archVizGridOptions={archVizGridOptions}
@@ -720,6 +734,7 @@ function App() {
                 onSeedanceVersionChange={(value) => setSelectedSeedanceVersion(normalizeSeedanceVersion(value))}
                 onSeedanceVideoEditingChange={setSeedanceVideoEditing}
                 onSeedanceGenerateAudioChange={setSeedanceGenerateAudio}
+                onKlingCameraStabilizationChange={setKlingCameraStabilization}
                 onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
                 onPromptChange={setPrompt}
                 onArchVizGridOptionsChange={setArchVizGridOptions}

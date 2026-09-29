@@ -193,6 +193,14 @@ export function reusableSeedanceGenerateAudio(options: WorkflowOptions | undefin
   return typeof options?.seedance?.generateAudio === "boolean" ? options.seedance.generateAudio : undefined;
 }
 
+/**
+ * Undefined for a job from before the switch existed, so reusing one leaves the
+ * current choice alone rather than reading "no terms were sent" as a choice.
+ */
+export function reusableKlingCameraStabilization(options: WorkflowOptions | undefined) {
+  return typeof options?.kling?.cameraStabilization === "boolean" ? options.kling.cameraStabilization : undefined;
+}
+
 export async function rehydrateJobInputImages(job: Job, slotCount: number) {
   const limit = slotCount > 0 ? slotCount : job.inputImages.length;
   const hydrated = await Promise.all(

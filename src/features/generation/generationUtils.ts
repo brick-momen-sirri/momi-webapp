@@ -240,6 +240,7 @@ export function workflowOptionsForJob({
   seedanceVersionId,
   seedanceVideoEditing,
   seedanceGenerateAudio,
+  klingCameraStabilization,
 }: {
   model: SeedanceModelFields;
   archVizGrid: ArchVizGridOptions;
@@ -250,6 +251,7 @@ export function workflowOptionsForJob({
   seedanceVersionId: SeedanceVersionId;
   seedanceVideoEditing: boolean;
   seedanceGenerateAudio: boolean;
+  klingCameraStabilization: boolean;
 }): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
@@ -259,6 +261,7 @@ export function workflowOptionsForJob({
       : {}),
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
     ...seedanceWorkflowOptions(model, seedanceVersionId, seedanceRatio, seedanceVideoEditing, seedanceGenerateAudio),
+    ...(supportsKlingCameraStabilization(model) ? { kling: { cameraStabilization: klingCameraStabilization } } : {}),
     save: {
       cameraNumber: normalizedSaveNumber,
       shotNumber: normalizedSaveNumber,
@@ -315,6 +318,19 @@ export function supportsSeedanceGenerateAudio(
   return isSeedanceWorkflowModel(model);
 }
 
+/**
+ * Kling 3.0 image-to-video is the only Kling graph with a negative prompt to append
+ * anti-shake terms to: first-last-frame has none, and the node sends none when
+ * storyboards are on, which this app never enables. Anywhere else the switch would
+ * do nothing, so it is not offered. The server holds the terms and the same check.
+ */
+export function supportsKlingCameraStabilization(
+  model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">,
+) {
+  const key = `${model.id} ${model.label ?? ""} ${model.backendCategory ?? ""} ${model.workflowPath ?? ""}`.toLowerCase();
+  return key.includes("kling_v3_video");
+}
+
 export function isNanoBananaModel(model: Pick<ModelType, "id" | "label" | "backendCategory" | "workflowPath">) {
   const key = `${model.id} ${model.label ?? ""} ${model.backendCategory ?? ""} ${model.workflowPath ?? ""}`.toLowerCase();
   return key.includes("nano") && key.includes("banana");
@@ -354,6 +370,7 @@ export function createLocalJob({
   selectedSeedanceVersion,
   seedanceVideoEditing,
   seedanceGenerateAudio,
+  klingCameraStabilization,
   use16By9Cropping,
   requiredImages,
 }: {
@@ -373,6 +390,7 @@ export function createLocalJob({
   selectedSeedanceVersion: SeedanceVersionId;
   seedanceVideoEditing: boolean;
   seedanceGenerateAudio: boolean;
+  klingCameraStabilization: boolean;
   use16By9Cropping: boolean;
   requiredImages: number;
 }): Job {
@@ -412,6 +430,7 @@ export function createLocalJob({
       seedanceVersionId: selectedSeedanceVersion,
       seedanceVideoEditing,
       seedanceGenerateAudio,
+      klingCameraStabilization,
     }),
     status: "queued",
     inputImages,

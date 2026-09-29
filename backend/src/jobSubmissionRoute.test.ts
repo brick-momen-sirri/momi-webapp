@@ -90,6 +90,21 @@ const seedanceFirstLastModel: WorkflowModel = {
   imageSlotCount: 2,
 };
 
+const klingVideoModel: WorkflowModel = {
+  ...model,
+  id: "brick_api_kling_v3_video",
+  name: "Api Kling V3 Video",
+  workflowPath: "i2v/Brick_api_kling_v3_video.json",
+  supportedDurations: Array.from({ length: 12 }, (_, index) => index + 4),
+};
+
+const klingFirstLastModel: WorkflowModel = {
+  ...seedanceFirstLastModel,
+  id: "brick_api_kling_v3_flf2v",
+  name: "Api Kling V3 Flf2v",
+  workflowPath: "flf2v/Brick_api_kling_v3_flf2v.json",
+};
+
 // Shaped like the model inferWorkflowModel produces for the Nano Banana graph:
 // image_editing, so requiredInputs carries single_image even though the provider
 // generates from a prompt alone.
@@ -134,7 +149,8 @@ let replayCreation = false;
 const handler = createJobSubmissionHandler({
   getProject: (id) => (id === project.id ? project : undefined),
   getWorkflowModel: (id) =>
-    [model, seedanceModel, seedanceFirstLastModel].find((candidate) => candidate.id === id) ?? stillImageWorkflowModel(id),
+    [model, seedanceModel, seedanceFirstLastModel, klingVideoModel, klingFirstLastModel].find((candidate) => candidate.id === id) ??
+    stillImageWorkflowModel(id),
   canViewProject: (candidate, target) =>
     candidate.role === "admin" ||
     target.ownerId === candidate.id ||
@@ -433,6 +449,31 @@ test("rejects an unknown Seedance version and a ratio the picked node has no inp
   const editOn20 = await call({ ...seedanceBody(), workflowOptions: { seedance: { version: "2.0", videoEditing: true } } });
   assert.equal(editOn20.status, 400);
   assert.match(String(editOn20.body.error), /no video editing mode/i);
+});
+
+test("Kling camera stabilization is accepted on 3.0 image-to-video and refused where there is no negative prompt", async () => {
+  const accepted = await call({ ...validBody(), modelId: klingVideoModel.id, workflowOptions: { kling: { cameraStabilization: true } } });
+  assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+  assert.equal(createRequests.at(-1)?.workflowOptions?.kling?.cameraStabilization, true);
+
+  const malformed = await call({ ...validBody(), modelId: klingVideoModel.id, workflowOptions: { kling: { cameraStabilization: "yes" } } });
+  assert.equal(malformed.status, 400);
+  assert.match(String(malformed.body.error), /cameraStabilization must be true or false/i);
+
+  const firstLast = {
+    ...validBody(),
+    modelId: klingFirstLastModel.id,
+    startFrame: "https://media.example/start.png",
+    endFrame: "https://media.example/end.png",
+    inputImages: ["https://media.example/start.png", "https://media.example/end.png"],
+  };
+  const onFirstLast = await call({ ...firstLast, workflowOptions: { kling: { cameraStabilization: true } } });
+  assert.equal(onFirstLast.status, 400);
+  assert.match(String(onFirstLast.body.error), /no negative prompt/i);
+
+  // Off is a no-op on any graph, so it is not worth a refusal.
+  const offOnFirstLast = await call({ ...firstLast, workflowOptions: { kling: { cameraStabilization: false } } });
+  assert.equal(offOnFirstLast.status, 201, JSON.stringify(offOnFirstLast.body));
 });
 
 test("propagates media ownership failures without creating observable state", async () => {

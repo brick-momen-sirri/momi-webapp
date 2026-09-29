@@ -80,6 +80,7 @@ function useSubmissionHarness(overrides: HarnessOverrides = {}) {
     selectedSeedanceVersion: "2.0" as const,
     seedanceVideoEditing: false,
     seedanceGenerateAudio: false,
+    klingCameraStabilization: true,
     setJobs,
     setProjects,
     setBackendJobsTotal: setTotal,

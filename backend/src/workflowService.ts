@@ -5,6 +5,7 @@ import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
 import { isPathWithinRoot } from "./pathContainment.js";
+import { applyKlingCameraStabilization, isKlingVideoClassType } from "./klingCameraStabilization.js";
 import { applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
@@ -1112,6 +1113,9 @@ function injectInputs(
     }
     if (isSeedance2ClassType(classType)) {
       applySeedanceModelInputs(inputs, model, request.workflowOptions);
+    }
+    if (isKlingVideoClassType(classType)) {
+      applyKlingCameraStabilization(inputs, request.workflowOptions);
     }
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {

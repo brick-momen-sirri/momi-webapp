@@ -31,6 +31,8 @@ type LeftSettingsPanelProps = {
   showSeedanceVideoEditing: boolean;
   seedanceGenerateAudio: boolean;
   showSeedanceGenerateAudio: boolean;
+  klingCameraStabilization: boolean;
+  showKlingCameraStabilization: boolean;
   selectedDurationSeconds: number;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
@@ -53,6 +55,7 @@ type LeftSettingsPanelProps = {
   onSeedanceVersionChange: (version: SeedanceVersionId) => void;
   onSeedanceVideoEditingChange: (enabled: boolean) => void;
   onSeedanceGenerateAudioChange: (enabled: boolean) => void;
+  onKlingCameraStabilizationChange: (enabled: boolean) => void;
   onDurationChange: (seconds: number) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
@@ -81,6 +84,8 @@ export function LeftSettingsPanel({
   showSeedanceVideoEditing,
   seedanceGenerateAudio,
   showSeedanceGenerateAudio,
+  klingCameraStabilization,
+  showKlingCameraStabilization,
   selectedDurationSeconds,
   prompt,
   archVizGridOptions,
@@ -103,6 +108,7 @@ export function LeftSettingsPanel({
   onSeedanceVersionChange,
   onSeedanceVideoEditingChange,
   onSeedanceGenerateAudioChange,
+  onKlingCameraStabilizationChange,
   onDurationChange,
   onPromptChange,
   onArchVizGridOptionsChange,
@@ -192,7 +198,14 @@ export function LeftSettingsPanel({
         {showArchVizGridControls ? (
           <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
         ) : (
-          <PromptBox value={prompt} onChange={onPromptChange} images={promptImages} selectedModel={selectedModel} />
+          <PromptBox
+            value={prompt}
+            onChange={onPromptChange}
+            images={promptImages}
+            selectedModel={selectedModel}
+            cameraStabilization={showKlingCameraStabilization ? klingCameraStabilization : undefined}
+            onCameraStabilizationChange={onKlingCameraStabilizationChange}
+          />
         )}
 
         <SaveNumberControl selectedModel={selectedModel} value={saveNumber} onChange={onSaveNumberChange} />

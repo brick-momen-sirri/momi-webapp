@@ -23,6 +23,7 @@ import {
   normalizeSeedanceRatio,
   supports16By9CropToggle,
   supportsImageOutputCount,
+  supportsKlingCameraStabilization,
   supportsSeedanceGenerateAudio,
 } from "./generationUtils";
 import {
@@ -61,6 +62,9 @@ export function useGenerationForm(options: GenerationFormOptions) {
   // unwanted track that trips the provider's copyright check fails the whole job
   // after the video has already rendered and billed.
   const [seedanceGenerateAudio, setSeedanceGenerateAudio] = useState(initialSettings.seedanceGenerateAudio ?? false);
+  // On unless the artist asks for handheld motion: these are architectural walkthroughs,
+  // where drift and jitter are the defect rather than the style.
+  const [klingCameraStabilization, setKlingCameraStabilization] = useState(initialSettings.klingCameraStabilization ?? true);
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
@@ -104,6 +108,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
   // Unlike video editing, every Seedance version and task declares generate_audio,
   // so the switch shows for all of them.
   const selectedModelSupportsGenerateAudio = supportsSeedanceGenerateAudio(selectedModel);
+  const selectedModelSupportsCameraStabilization = supportsKlingCameraStabilization(selectedModel);
   const requiredImages = imageSlotCountForModel(selectedModel);
   const minimumRequiredImages = minimumImageCountForModel(selectedModel);
   const uploadedImages = images.slice(0, requiredImages).filter(Boolean);
@@ -152,6 +157,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
       selectedSeedanceVersion,
       seedanceVideoEditing,
       seedanceGenerateAudio,
+      klingCameraStabilization,
       selectedDurationSeconds,
       selectedProjectId,
       targetFolderId,
@@ -163,6 +169,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
   }, [
     enableImageToVideo16By9Cropping,
     imageOutputCount,
+    klingCameraStabilization,
     prompt,
     saveNumber,
     seedanceGenerateAudio,
@@ -212,6 +219,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setSeedanceVideoEditing,
     seedanceGenerateAudio,
     setSeedanceGenerateAudio,
+    klingCameraStabilization,
+    setKlingCameraStabilization,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
     prompt,
@@ -232,6 +241,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     selectedModelSupportsCropToggle,
     selectedModelSupportsVideoEditing,
     selectedModelSupportsGenerateAudio,
+    selectedModelSupportsCameraStabilization,
     requiredImages,
     use16By9Cropping,
     disabledReason,
