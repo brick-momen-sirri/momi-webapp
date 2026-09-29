@@ -73,15 +73,21 @@ test("API-role boot leaves dispatcher-owned running status untouched", async () 
   assert.equal(sqliteJob("job_running")?.status, "running");
 });
 
-test("API-role cancellation writes only cancelRequested", async () => {
-  const canceled = await jobQueue.cancelJob("job_queued");
+test("API-role cancellation writes only cancelRequested and who asked", async () => {
+  const canceled = await jobQueue.cancelJob("job_queued", "usr_1");
 
   assert.equal(canceled?.status, "queued");
   assert.equal(canceled?.cancelRequested, true);
+  assert.equal(canceled?.canceledBy, "usr_1");
   const persisted = sqliteJob("job_queued");
   assert.equal(persisted?.status, "queued");
   assert.equal(persisted?.cancelRequested, true);
+  assert.equal(persisted?.canceledBy, "usr_1");
   assert.equal(persisted?.completedAt, undefined);
+
+  // A second request, from anyone, does not rewrite who stopped it.
+  await jobQueue.cancelJob("job_queued", "usr_admin");
+  assert.equal(sqliteJob("job_queued")?.canceledBy, "usr_1");
 });
 
 test("live jobs cannot be archived by an API worker", async () => {

@@ -257,6 +257,8 @@ export type Job = {
    * "Canceled" from the status.
    */
   cancelRequested?: boolean;
+  /** Who asked for the cancel: the submitter (equal to userId) or an admin. See cancellationNote. */
+  canceledBy?: string;
   inputImages: string[];
   inputVideo?: string;
   resultUrl?: string;

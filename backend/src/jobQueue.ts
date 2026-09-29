@@ -633,20 +633,27 @@ async function detectJobSourceResolution(reference: string) {
   return detectMediaResolution(safePath, "image");
 }
 
-export async function cancelJob(jobId: string) {
+// The first request names the canceller; a repeat (a second tab, or an admin
+// pressing it after the owner did) does not rewrite who stopped the job.
+function requestCancellation(job: Job, userId: string) {
+  if (!job.cancelRequested) job.canceledBy = userId;
+  job.cancelRequested = true;
+}
+
+export async function cancelJob(jobId: string, userId: string) {
   let job: Job | undefined;
 
   if (jobRowLevelWrites && sqliteStore) {
     const updated = sqliteStore.applyToJob(jobId, (current) => {
       if (isTerminalJobStatus(current.status)) return current;
-      current.cancelRequested = true;
+      requestCancellation(current, userId);
       return current;
     });
     job = updated ? mergeCancellationRequestIntoMemory(updated) : undefined;
   } else {
     job = getJob(jobId);
     if (!job || isTerminalJobStatus(job.status)) return job;
-    job.cancelRequested = true;
+    requestCancellation(job, userId);
     await persistUpsert(job);
   }
 
@@ -663,6 +670,7 @@ function mergeCancellationRequestIntoMemory(updated: Job) {
     return updated;
   }
   cached.cancelRequested = updated.cancelRequested;
+  cached.canceledBy = updated.canceledBy;
   return cached;
 }
 
@@ -673,7 +681,10 @@ function mergeCancellationRequestIntoMemory(updated: Job) {
 function cancellationRequested(job: Job) {
   if (jobRowLevelWrites && sqliteStore) {
     const stored = sqliteStore.loadById(job.id);
-    if (stored?.cancelRequested) job.cancelRequested = true;
+    if (stored?.cancelRequested) {
+      job.cancelRequested = true;
+      job.canceledBy = stored.canceledBy ?? job.canceledBy;
+    }
     return stored?.cancelRequested === true || stored?.status === "canceled";
   }
   return job.cancelRequested === true || job.status === "canceled";
@@ -1132,7 +1143,10 @@ async function persistUpsert(job: Job): Promise<void> {
         // cancelRequested is API-owned. Preserve a concurrent request across
         // dispatcher writes, and never let a stale runner's finally block
         // resurrect a row after cancellation has been settled.
-        if (current.cancelRequested) next.cancelRequested = true;
+        if (current.cancelRequested) {
+          next.cancelRequested = true;
+          next.canceledBy = current.canceledBy ?? next.canceledBy;
+        }
         if (current.cancelRequested && isDispatcher() && !isTerminalJobStatus(current.status)) {
           next.status = "canceled";
           next.completedAt = current.completedAt ?? new Date().toISOString();
@@ -1144,6 +1158,7 @@ async function persistUpsert(job: Job): Promise<void> {
       });
       if (updated) {
         job.cancelRequested = updated.cancelRequested;
+        job.canceledBy = updated.canceledBy;
         job.status = updated.status;
         job.completedAt = updated.completedAt;
       } else {

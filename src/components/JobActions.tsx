@@ -1,10 +1,13 @@
 import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Star, Trash2, XCircle } from "lucide-react";
-import type { Job, Project } from "../types";
+import type { Job, Project, User } from "../types";
+import { canCancelJob } from "../features/jobs/cancellation";
 import { MoveResultMenu } from "./MoveResultMenu";
 
 type JobActionsProps = {
   job: Job;
   project?: Project;
+  /** The signed-in account. Required so no surface can forget it and show Cancel to everyone. */
+  viewer: Pick<User, "id" | "role"> | undefined;
   isFavorite: boolean;
   canReuseSettings: boolean;
   archiveView: boolean;
@@ -23,6 +26,7 @@ type JobActionsProps = {
 export function JobActions({
   job,
   project,
+  viewer,
   isFavorite,
   canReuseSettings,
   archiveView,
@@ -39,8 +43,13 @@ export function JobActions({
 }: JobActionsProps) {
   const result = job.resultUrl ?? job.thumbnailUrl;
   const canRetry = !archiveView && (job.status === "failed" || job.status === "canceled");
-  // Still working, so there is still GPU time left to save by stopping it.
-  const canCancel = !archiveView && (job.status === "queued" || job.status === "sending" || job.status === "running");
+  // Still working, so there is still GPU time left to save by stopping it -- and
+  // only by whoever submitted it or an admin. The server refuses anyone else;
+  // hiding it here keeps other artists from meeting that refusal as a toast.
+  const canCancel =
+    !archiveView &&
+    canCancelJob(viewer, job) &&
+    (job.status === "queued" || job.status === "sending" || job.status === "running");
   const canceling = canCancel && job.cancelRequested === true;
 
   return (

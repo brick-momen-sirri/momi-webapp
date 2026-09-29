@@ -9,6 +9,7 @@ import { filterJobs } from "../jobFilters.js";
 import { validateJobMediaReferences } from "../jobMediaValidation.js";
 import {
   canAccessJob,
+  canCancelJob,
   canCreateJobInProject,
   canManageJob,
   canViewProject,
@@ -203,9 +204,9 @@ jobRouter.post("/api/jobs/:jobId/cancel", async (req, res) => {
   const user = getRequestUser(req);
   const existing = getJob(req.params.jobId);
   if (!existing || !canAccessJob(user, existing)) return res.status(404).json({ error: "Job not found" });
-  if (!canManageJob(user, existing))
-    return res.status(403).json({ error: "You can only manage your own jobs unless you own the project." });
-  const job = await cancelJob(req.params.jobId);
+  if (!canCancelJob(user, existing))
+    return res.status(403).json({ error: "Only the person who submitted this job, or an admin, can cancel it." });
+  const job = await cancelJob(req.params.jobId, user.id);
   if (!job) return res.status(404).json({ error: "Job not found" });
   res.json({ job });
 });

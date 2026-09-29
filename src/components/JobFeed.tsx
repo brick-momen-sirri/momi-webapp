@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Job, JobStatus, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { folderFilterScope, folderPathLabel, isInFolderScope } from "../features/projects/folderTree";
+import { cancellationNote } from "../features/jobs/cancellation";
 import { JobCard } from "./JobCard";
 import { ResultTile } from "./ResultTile";
 import { resultCardElementId } from "../utils/resultCard";
@@ -129,6 +130,7 @@ export function JobFeed({
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [layout, setLayout] = useState<ResultLayout>("list");
   const [focusJobId, setFocusJobId] = useState<string | null>(null);
+  const viewer = useMemo(() => ({ id: currentUserId, role: currentUserRole }), [currentUserId, currentUserRole]);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [hasScrolled, setHasScrolled] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -652,6 +654,8 @@ export function JobFeed({
                   job={job}
                   project={projects.find((project) => project.id === job.projectId)}
                   user={users.find((user) => user.id === job.userId)}
+                  viewer={viewer}
+                  cancellationNote={cancellationNote(job, users)}
                   isFavorite={favoriteJobIds.has(job.id)}
                   canReuseSettings={canReuseSettings(job)}
                   onDownload={onDownload}

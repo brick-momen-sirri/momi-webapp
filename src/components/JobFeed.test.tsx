@@ -437,6 +437,40 @@ describe("job actions", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
+  it("offers an artist cancel on their own jobs only", () => {
+    renderFeed(
+      [
+        job({ id: "a", prompt: "my render", userId: "usr_momen", status: "running" }),
+        job({ id: "b", prompt: "their render", userId: "usr_other", status: "queued" }),
+      ],
+      { currentUserRole: "user" },
+    );
+
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    const theirs = screen.getByText("their render").closest("article");
+    expect(theirs?.querySelector("button[title^='Stop this job']")).toBeNull();
+  });
+
+  it("offers an admin cancel on anyone's job", () => {
+    // renderFeed signs in as an admin.
+    renderFeed([
+      job({ id: "a", prompt: "my render", userId: "usr_momen", status: "running" }),
+      job({ id: "b", prompt: "their render", userId: "usr_other", status: "queued" }),
+    ]);
+
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(2);
+  });
+
+  it("says whether the owner or an admin canceled a job, and names the admin", () => {
+    renderFeed([
+      job({ id: "a", prompt: "stopped by owner", userId: "usr_other", status: "canceled", canceledBy: "usr_other" }),
+      job({ id: "b", prompt: "stopped by admin", userId: "usr_other", status: "canceled", canceledBy: "usr_momen" }),
+    ]);
+
+    expect(screen.getByText("Canceled by the owner")).toBeInTheDocument();
+    expect(screen.getByText("Canceled by admin momen")).toBeInTheDocument();
+  });
+
   it("offers no cancel once a job has finished", () => {
     renderFeed([job({ id: "a", status: "completed" })]);
 

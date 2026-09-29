@@ -26,6 +26,13 @@ export function canManageJob(user: User, job: Job) {
   return Boolean(project && getProjectRole(project, user.id) === "owner");
 }
 
+// Narrower than canManageJob on purpose: stopping a render is the submitter's
+// call, or an admin's. A project owner may not cancel someone else's job.
+// Whoever does it is recorded on the job as canceledBy.
+export function canCancelJob(user: User, job: Job) {
+  return user.role === "admin" || job.userId === user.id;
+}
+
 export function canViewProject(user: User, project: Project) {
   if (user.role === "admin" || project.ownerId === user.id) return true;
   if (getProjectRole(project, user.id)) return true;

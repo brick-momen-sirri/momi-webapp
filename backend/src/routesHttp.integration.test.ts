@@ -422,15 +422,16 @@ test("media reads reject traversal and distinguish missing allowed files", async
   assert.equal(absent.response.status, 404);
 });
 
-test("POST /api/jobs persists a queued job without provider or network dispatch", async () => {
+/** A POST /api/jobs body the first workflow model fixture accepts, on the shared team project. */
+function queuedJobBody(clientRequestId: string) {
   const model = workflowService.getWorkflowModels()[0];
   assert.ok(model, "expected at least one workflow model fixture");
   const supportedResolution = model.supportedResolutions?.[0] ?? "1080p";
   const resolution = resolutionFor(supportedResolution);
   const imageData = "data:image/png;base64,AQID";
   const videoData = "data:video/mp4;base64,AQID";
-  const body = {
-    clientRequestId: "req_routes_integration_123456",
+  return {
+    clientRequestId,
     projectId: testProjectId,
     modelId: model.id,
     prompt: model.requiresPrompt ? "A safe route integration render" : "",
@@ -441,6 +442,10 @@ test("POST /api/jobs persists a queued job without provider or network dispatch"
     endFrame: model.requiredInputs.includes("end_frame") ? imageData : undefined,
     inputVideo: model.requiredInputs.includes("video") ? videoData : undefined,
   };
+}
+
+test("POST /api/jobs persists a queued job without provider or network dispatch", async () => {
+  const body = queuedJobBody("req_routes_integration_123456");
 
   const nativeFetch = globalThis.fetch;
   let outboundAttempt = "";
@@ -779,6 +784,40 @@ test("reading the workspace roster is open to any signed-in user", async () => {
   // every user has to be able to resolve names and avatars from user ids.
   assert.equal((await asAdmin("GET", "/api/users")).status, 200);
   assert.equal((await call("GET", "/api/users", { token: artistToken })).status, 200);
+});
+
+// Cancelling is narrower than every other job action: the submitter or an
+// admin, never a project owner or another artist. The artist can see the
+// admin's job on the team project, which is exactly why seeing it must not be
+// enough. Whoever cancels is recorded, so the card can say who stopped it.
+test("only the submitter or an admin can cancel a job, and the job records which", async () => {
+  const adminsJob = await call("POST", `/api/jobs/${createdJobId}/cancel`, { token: artistToken, body: {} });
+  assert.equal(adminsJob.status, 403, adminsJob.text);
+  assert.deepEqual(adminsJob.body, { error: "Only the person who submitted this job, or an admin, can cancel it." });
+  assert.notEqual(jobQueue.getJob(createdJobId)?.cancelRequested, true);
+
+  const submitJob = async (clientRequestId: string) => {
+    const submitted = await call("POST", "/api/jobs", { token: artistToken, body: queuedJobBody(clientRequestId) });
+    assert.equal(submitted.status, 201, submitted.text);
+    const id = String((submitted.body as { job?: { id?: string } }).job?.id);
+    assert.equal(jobQueue.getJob(id)?.userId, artistUserId());
+    return id;
+  };
+  type CancelBody = { job?: { cancelRequested?: boolean; canceledBy?: string } };
+
+  const ownJobId = await submitJob("req_routes_artist_cancel_1");
+  const bySubmitter = await call("POST", `/api/jobs/${ownJobId}/cancel`, { token: artistToken, body: {} });
+  assert.equal(bySubmitter.status, 200, bySubmitter.text);
+  assert.equal((bySubmitter.body as CancelBody).job?.cancelRequested, true);
+  assert.equal((bySubmitter.body as CancelBody).job?.canceledBy, artistUserId());
+
+  const stoppedByAdminId = await submitJob("req_routes_artist_cancel_2");
+  const byAdmin = await asAdmin("POST", `/api/jobs/${stoppedByAdminId}/cancel`, {});
+  assert.equal(byAdmin.status, 200, byAdmin.text);
+  assert.equal((byAdmin.body as CancelBody).job?.canceledBy, "usr_momen");
+  // Read back, not just echoed: the job list is what every other viewer sees.
+  const read = await call("GET", `/api/jobs/${stoppedByAdminId}`, { token: artistToken });
+  assert.equal((read.body as CancelBody).job?.canceledBy, "usr_momen", read.text);
 });
 
 test("every user mutation is refused for a non-admin", async () => {

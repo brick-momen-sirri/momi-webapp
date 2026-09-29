@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { Calendar, Check, ChevronDown, ChevronUp, Film, Hash, Images, Loader2, Pencil, UserRound, X } from "lucide-react";
+import {
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Film,
+  Hash,
+  Images,
+  Loader2,
+  Pencil,
+  UserRound,
+  X,
+  XCircle,
+} from "lucide-react";
 import type { Job, Project, User } from "../types";
 import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
@@ -14,6 +27,9 @@ type JobCardProps = {
   job: Job;
   project?: Project;
   user?: User;
+  viewer: Pick<User, "id" | "role"> | undefined;
+  /** "Canceled by admin …" -- see features/jobs/cancellation. */
+  cancellationNote?: string;
   isFavorite: boolean;
   canReuseSettings: boolean;
   archiveView: boolean;
@@ -35,6 +51,8 @@ export function JobCard({
   job,
   project,
   user,
+  viewer,
+  cancellationNote,
   isFavorite,
   canReuseSettings,
   archiveView,
@@ -199,11 +217,18 @@ export function JobCard({
                 }).format(new Date(job.archivedAt))}
               </span>
             ) : null}
+            {cancellationNote ? (
+              <span className="flex items-center gap-1 font-semibold text-rose-700">
+                <XCircle className="h-3.5 w-3.5" />
+                {cancellationNote}
+              </span>
+            ) : null}
           </div>
         </div>
         <JobActions
           job={job}
           project={project}
+          viewer={viewer}
           isFavorite={isFavorite}
           canReuseSettings={canReuseSettings}
           archiveView={archiveView}

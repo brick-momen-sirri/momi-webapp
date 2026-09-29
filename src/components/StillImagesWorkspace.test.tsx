@@ -785,3 +785,63 @@ describe("StillImagesWorkspace", () => {
 
 // jobSection's own cases live in features/still-images/jobSection.test.ts, next to
 // the module, so they are not tied to this component rendering.
+
+// Still Images renders the same JobActions toolbar as the Animation feed, so the
+// submitter-only rule has to hold here too: a preset runs on a pod billed by the
+// second, and another artist stopping it throws that time away.
+describe("cancelling a result", () => {
+  it("offers cancel on the viewer's own running job and not on anyone else's", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        currentUserId="usr_1"
+        jobs={[
+          stillJob({ id: "job_mine", userId: "usr_1", status: "running" }),
+          stillJob({ id: "job_theirs", userId: "usr_other", status: "queued" }),
+        ]}
+        onDownload={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    const cancels = screen.getAllByRole("button", { name: "Cancel" });
+    expect(cancels).toHaveLength(1);
+    await user.click(cancels[0]);
+    expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({ id: "job_mine" }));
+  });
+
+  it("offers an admin cancel on anyone's job, and names the admin who stopped one", () => {
+    render(
+      <StillImagesWorkspace
+        category={category}
+        state={state["pro-upscaler"]}
+        selectedProject={project}
+        targetFolderId=""
+        saveNumber="0012"
+        userName="Momen"
+        users={[
+          { id: "usr_1", name: "Momen" },
+          { id: "usr_other", name: "Rana" },
+        ]}
+        currentUserId="usr_1"
+        currentUserRole="admin"
+        jobs={[
+          stillJob({ id: "job_theirs", userId: "usr_other", status: "running" }),
+          stillJob({ id: "job_stopped", userId: "usr_other", status: "canceled", canceledBy: "usr_1" }),
+        ]}
+        onDownload={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    expect(screen.getByText("Canceled by admin Momen")).toBeInTheDocument();
+  });
+});

@@ -822,6 +822,7 @@ function App() {
               jobs={stillImageJobs}
               users={workspaceUsers}
               currentUserId={account.id}
+              currentUserRole={account.role}
               projects={projects}
               archiveView={showArchivedJobs}
               onToggleArchiveView={handleToggleArchivedView}

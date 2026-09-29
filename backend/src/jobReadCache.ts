@@ -52,6 +52,7 @@ function mergeJobObject(target: Job, source: Job, inFlight: boolean) {
   copyJobField(target, source, "folderId");
   copyJobField(target, source, "folderName");
   copyJobField(target, source, "cancelRequested");
+  copyJobField(target, source, "canceledBy");
   if (source.workflowOptions?.save) {
     target.workflowOptions = {
       ...(target.workflowOptions ?? {}),

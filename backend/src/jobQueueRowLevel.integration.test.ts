@@ -85,7 +85,7 @@ test("monolith cancellation requests are settled by the dispatcher path", async 
   assert.equal(jobQueue.getJob("job_cancel_requested")?.status, "canceled");
   assert.equal(sqliteRows().find((j) => j.id === "job_cancel_requested")?.status, "canceled");
 
-  await jobQueue.cancelJob("job_queued");
+  await jobQueue.cancelJob("job_queued", "usr_admin");
 
   // In-memory reflects it, and the SQLite row was updated per-row synchronously.
   assert.equal(jobQueue.getJobs().find((j) => j.id === "job_queued")?.status, "canceled");
@@ -93,6 +93,9 @@ test("monolith cancellation requests are settled by the dispatcher path", async 
   const persisted = sqliteRows().find((j) => j.id === "job_queued");
   assert.equal(persisted?.status, "canceled");
   assert.equal(persisted?.cancelRequested, true);
+  // Settling the request must not drop who made it.
+  assert.equal(persisted?.canceledBy, "usr_admin");
+  assert.equal(jobQueue.getJob("job_queued")?.canceledBy, "usr_admin");
 });
 
 test("permanentlyDeleteArchivedJob removes exactly that row", async () => {

@@ -14,6 +14,7 @@ import {
   Search,
   Star,
   UserRound,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
@@ -42,6 +43,7 @@ import { stillImageResultFileName } from "../features/still-images/resultFileNam
 import { useStillImageResultView } from "../features/still-images/useStillImageResultView";
 import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
+import { cancellationNote } from "../features/jobs/cancellation";
 import { folderPathLabel, folderTreeEntries, jobFolderLabel, pinnedFolderIdsIn } from "../features/projects/folderTree";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
@@ -71,6 +73,8 @@ type StillImagesWorkspaceProps = {
   users?: User[];
   /** The signed-in account, for the "Mine" filter. Absent leaves that filter unoffered. */
   currentUserId?: string;
+  /** With currentUserId, decides who sees Cancel: the submitter or an admin. */
+  currentUserRole?: "admin" | "user";
   // The same actions an Animation card offers. Passed through rather than
   // reimplemented so the two surfaces cannot drift into different behaviour for
   // download, archive or move.
@@ -116,10 +120,15 @@ export function StillImagesWorkspace({
   jobs,
   users = [],
   currentUserId,
+  currentUserRole = "user",
   favoriteJobIds,
   ...actions
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
+  const viewer = useMemo(
+    () => (currentUserId ? { id: currentUserId, role: currentUserRole } : undefined),
+    [currentUserId, currentUserRole],
+  );
   const projectFolders = selectedProject?.folders;
   const targetFolder = projectFolders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
   // The full path: artists' folders can hold same-named subfolders.
@@ -227,6 +236,8 @@ export function StillImagesWorkspace({
                 project={actions.projects?.find((item) => item.id === job.projectId) ?? selectedProject}
                 selectedProject={selectedProject}
                 userName={users.find((user) => user.id === job.userId)?.name ?? userName}
+                viewer={viewer}
+                cancellationNote={cancellationNote(job, users)}
                 isFavorite={favoriteJobIds?.has(job.id) ?? false}
                 actions={actions}
               />
@@ -436,6 +447,7 @@ type StillImageActions = Omit<
   | "jobs"
   | "users"
   | "currentUserId"
+  | "currentUserRole"
   | "favoriteJobIds"
 >;
 
@@ -444,6 +456,8 @@ function StillImageJobCard({
   project,
   selectedProject,
   userName,
+  viewer,
+  cancellationNote,
   isFavorite,
   actions,
 }: {
@@ -452,6 +466,9 @@ function StillImageJobCard({
   /** Where a new job would be submitted, which is not always this job's project. */
   selectedProject?: Project;
   userName: string;
+  viewer: Pick<User, "id" | "role"> | undefined;
+  /** "Canceled by admin …" -- see features/jobs/cancellation. */
+  cancellationNote?: string;
   isFavorite: boolean;
   actions: StillImageActions;
 }) {
@@ -508,6 +525,12 @@ function StillImageJobCard({
               <Calendar className="h-3.5 w-3.5" />
               {formatTimestamp(job.createdAt)}
             </span>
+            {cancellationNote ? (
+              <span className="flex items-center gap-1 font-semibold text-rose-700">
+                <XCircle className="h-3.5 w-3.5" />
+                {cancellationNote}
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -522,6 +545,7 @@ function StillImageJobCard({
             <JobActions
               job={job}
               project={project}
+              viewer={viewer}
               isFavorite={isFavorite}
               canReuseSettings={actions.canReuseSettings?.(job) ?? false}
               archiveView={actions.archiveView ?? false}

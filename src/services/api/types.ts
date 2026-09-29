@@ -52,6 +52,7 @@ export type BackendJob = {
   workflowOptions?: WorkflowOptions;
   status: Job["status"];
   cancelRequested?: boolean;
+  canceledBy?: string;
   runpodProgress?: Job["runpodProgress"];
   runpodTiming?: Job["runpodTiming"];
   inputImages: string[];

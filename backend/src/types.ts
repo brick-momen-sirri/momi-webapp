@@ -406,6 +406,12 @@ export type Job = {
   textArtifacts?: JobTextArtifact[];
   status: JobStatus;
   cancelRequested?: boolean;
+  /**
+   * The account that asked for the cancel: the submitter (equal to userId) or an
+   * admin. API-owned like cancelRequested, and kept across dispatcher writes the
+   * same way. Absent on jobs canceled before this was recorded.
+   */
+  canceledBy?: string;
   inputImages: string[];
   inputVideo?: string;
   resultUrls: string[];
