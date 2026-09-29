@@ -42,6 +42,7 @@ import { stillImageResultFileName } from "../features/still-images/resultFileNam
 import { useStillImageResultView } from "../features/still-images/useStillImageResultView";
 import { chainableResultUrl } from "../features/still-images/chainResult";
 import { useNearViewport } from "../features/jobs/useNearViewport";
+import { folderPathLabel, folderTreeEntries } from "../features/projects/folderTree";
 import { backendResultFileUrl, THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job, Project, User } from "../types";
 import { FullscreenImagePreview, type FullscreenImage } from "./FullscreenImagePreview";
@@ -116,15 +117,18 @@ export function StillImagesWorkspace({
   ...actions
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
-  const targetFolder = selectedProject?.folders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
+  const projectFolders = selectedProject?.folders;
+  const targetFolder = projectFolders?.find((folder) => folder.folderId === targetFolderId && !folder.archived);
+  // The full path: artists' folders can hold same-named subfolders.
+  const targetFolderPath = targetFolder ? folderPathLabel(targetFolder, projectFolders ?? []) : undefined;
   // Both outlive this mount: the panel is thrown away every time the section is
   // switched away from, and neither is a per-visit choice.
   const { filters, setFilters, layout, setLayout } = useStillImageResultView();
   // Which card to land on after leaving the grid.
   const [focusJobId, setFocusJobId] = useState<string | null>(null);
   const visibleJobs = useMemo(
-    () => filterStillImageJobs(jobs, filters, { favoriteJobIds, currentUserId }),
-    [jobs, filters, favoriteJobIds, currentUserId],
+    () => filterStillImageJobs(jobs, filters, { favoriteJobIds, currentUserId }, projectFolders),
+    [jobs, filters, favoriteJobIds, currentUserId, projectFolders],
   );
   const filtering = hasActiveStillImageFilters(filters);
 
@@ -152,9 +156,9 @@ export function StillImagesWorkspace({
             {/* Where the next Generate will save, which is not a filter on this
                 list. Unlabelled next to the project chip it read as one, while the
                 list went on showing results from every folder in the project. */}
-            {targetFolder ? (
+            {targetFolderPath ? (
               <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
-                Saving to {targetFolder.name}
+                Saving to {targetFolderPath}
               </span>
             ) : null}
             <span className="text-sm font-semibold text-stone-500">
@@ -176,7 +180,10 @@ export function StillImagesWorkspace({
           <StillImageResultFilterBar
             filters={filters}
             onChange={setFilters}
-            folders={selectedProject?.folders?.filter((folder) => !folder.archived) ?? []}
+            folders={folderTreeEntries(projectFolders ?? []).map((entry) => ({
+              folderId: entry.folder.folderId,
+              name: entry.path,
+            }))}
             // Each offered only where the panel was given what it needs to answer it,
             // the same rule the card actions follow. A "Mine" switch with no account
             // behind it would hide every result and look broken.
@@ -230,7 +237,7 @@ export function StillImagesWorkspace({
           category={category}
           state={state}
           selectedProject={selectedProject}
-          targetFolder={targetFolder?.name}
+          targetFolder={targetFolderPath}
           saveNumber={saveNumber}
           icon={<CategoryIcon className="h-5 w-5" />}
         />

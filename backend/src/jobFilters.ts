@@ -1,7 +1,7 @@
 // Job list filtering and the save-number search field.
 
 import { getProject } from "./projectService.js";
-import type { Job } from "./types.js";
+import type { Job, ProjectFolder } from "./types.js";
 
 export function normalizeJobSaveNumber(value?: number | string | null) {
   const digits = String(value ?? "")
@@ -65,6 +65,13 @@ export function getJobSaveSearchValue(job: Job) {
   return normalizeJobSaveNumber(value);
 }
 
+/**
+ * `projectFolders` supplies a project's folder tree, so a folder filter can take in
+ * the folder's subfolders: with a folder per artist and exercise folders inside,
+ * filtering on the artist must show everything they saved beneath it. The browser
+ * narrows with the same scope (src/features/projects/folderTree.ts), so the page
+ * sent and the list shown agree. Injected so the rule is testable without a store.
+ */
 export function filterJobs(
   jobs: Job[],
   filters: {
@@ -77,14 +84,25 @@ export function filterJobs(
     dateDays?: number;
     section?: string;
   },
+  projectFolders: (projectId: string) => readonly ProjectFolder[] = (projectId) => getProject(projectId)?.folders ?? [],
 ) {
   const query = filters.q.toLowerCase();
+  const folderScopes = new Map<string, Set<string>>();
+  const inSelectedFolder = (job: Job) => {
+    if (!job.folderId) return false;
+    let scope = folderScopes.get(job.projectId);
+    if (!scope) {
+      scope = folderAndDescendantIds(filters.folderId, projectFolders(job.projectId));
+      folderScopes.set(job.projectId, scope);
+    }
+    return scope.has(job.folderId);
+  };
   const cutoff = filters.dateDays ? Date.now() - filters.dateDays * 24 * 60 * 60 * 1000 : undefined;
 
   return jobs.filter((job) => {
     if (filters.projectId && job.projectId !== filters.projectId) return false;
     if (filters.folderId === "root" && job.folderId) return false;
-    if (filters.folderId && filters.folderId !== "root" && job.folderId !== filters.folderId) return false;
+    if (filters.folderId && filters.folderId !== "root" && !inSelectedFolder(job)) return false;
     if (filters.source && job.source !== filters.source) return false;
     if (filters.status && job.status !== filters.status) return false;
     if (filters.outputType && job.outputType !== filters.outputType) return false;
@@ -120,4 +138,22 @@ export function filterJobs(
 
     return true;
   });
+}
+
+/** The folder and every folder beneath it, archived ones included. Cycle-safe. */
+function folderAndDescendantIds(folderId: string, folders: readonly ProjectFolder[]) {
+  const childrenByParent = new Map<string, string[]>();
+  for (const folder of folders) {
+    if (!folder.parentId) continue;
+    childrenByParent.set(folder.parentId, [...(childrenByParent.get(folder.parentId) ?? []), folder.folderId]);
+  }
+  const scope = new Set<string>();
+  const pending = [folderId];
+  while (pending.length) {
+    const next = pending.pop() as string;
+    if (scope.has(next)) continue;
+    scope.add(next);
+    pending.push(...(childrenByParent.get(next) ?? []));
+  }
+  return scope;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Folder, FolderInput, FolderRoot, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { compareFolderNames } from "../features/projects/folderSort";
+import { folderPathLabel } from "../features/projects/folderTree";
 import type { Job, Project, ProjectFolder } from "../types";
 
 type MoveResultMenuProps = {
@@ -203,19 +204,4 @@ function currentFolderLabel(folders: ProjectFolder[], currentFolderId: string | 
   if (!currentFolderId) return "Project root";
   const current = folders.find((folder) => folder.folderId === currentFolderId);
   return current ? folderPathLabel(current, folders) : "Unknown folder";
-}
-
-function folderPathLabel(folder: ProjectFolder, folders: ProjectFolder[]) {
-  const byId = new Map(folders.map((item) => [item.folderId, item]));
-  const names = [folder.name];
-  const visited = new Set([folder.folderId]);
-  let parentId = folder.parentId;
-  while (parentId && !visited.has(parentId)) {
-    visited.add(parentId);
-    const parent = byId.get(parentId);
-    if (!parent) break;
-    names.unshift(parent.name);
-    parentId = parent.parentId;
-  }
-  return names.join(" / ");
 }

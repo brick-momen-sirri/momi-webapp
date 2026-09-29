@@ -56,7 +56,11 @@ import {
 } from "./features/jobs/jobReuse";
 import { useJobActions } from "./features/jobs/useJobActions";
 import { useJobSubmission } from "./features/jobs/useJobSubmission";
-import { readPersistedGenerationSettings } from "./features/preferences/appPreferences";
+import {
+  readPersistedGenerationSettings,
+  readRememberedResultFolder,
+  rememberResultFolder,
+} from "./features/preferences/appPreferences";
 import { useTheme } from "./features/preferences/useTheme";
 import { useNotifications } from "./features/notifications/useNotifications";
 import { useProjectActions, type ConfirmDialogState } from "./features/projects/useProjectActions";
@@ -384,13 +388,19 @@ function App() {
     account?.role === "admin" ? getWorkspaceMonthlyUsage(monthlyUsageByUser, jobs) : currentMonthUsage;
   const hasMoreBackendJobs = backendAvailable && backendJobsOffset < backendJobsTotal;
 
-  // Switching project invalidates both folder selections. Done during render
-  // rather than in an effect so the panels never paint one frame with the previous
-  // project's folder still selected.
+  // Switching project invalidates the folder being viewed, and brings back the
+  // destination last chosen in the project being switched to (Root if none). Done
+  // during render rather than in an effect so the panels never paint one frame with
+  // the previous project's folder still selected.
   useResetWhenChanged(selectedProjectId, () => {
     setSelectedFolderId("all");
-    setTargetFolderId("");
+    setTargetFolderId(selectedProjectId === ALL_PROJECTS_ID ? "" : readRememberedResultFolder(selectedProjectId));
   });
+  // Every destination change is remembered against its project, including the
+  // prune below dropping a folder that was archived.
+  useEffect(() => {
+    if (selectedProjectId !== ALL_PROJECTS_ID) rememberResultFolder(selectedProjectId, targetFolderId);
+  }, [selectedProjectId, targetFolderId]);
 
   // Folders arrive from the backend and can be archived or deleted underneath a
   // selection. The key reproduces the old dependency list exactly -- the live
@@ -405,7 +415,10 @@ function App() {
     () => {
       const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
       if (targetFolderId && !folderIds.has(targetFolderId)) {
-        setTargetFolderId("");
+        // Only clear the value checked here. On a project switch this runs in the
+        // same render as the reset above, still holding the previous project's
+        // folder, and a plain "" would overwrite the folder just brought back.
+        setTargetFolderId((current) => (current === targetFolderId ? "" : current));
       }
       if (selectedFolderId !== "all" && selectedFolderId !== "root" && !folderIds.has(selectedFolderId)) {
         setSelectedFolderId("all");

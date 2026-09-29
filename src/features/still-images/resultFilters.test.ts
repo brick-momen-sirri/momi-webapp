@@ -81,6 +81,22 @@ describe("filterStillImageJobs", () => {
     expect(filterStillImageJobs([inFolder, atRoot], filters({ folderId: "fld_1" })).map((i) => i.id)).toEqual(["in_folder"]);
   });
 
+  it("takes in a folder's subfolders when given the project's folders", () => {
+    const folders = [
+      { folderId: "sara", parentId: null, name: "Sara Haddad", archived: false },
+      { folderId: "sara_01", parentId: "sara", name: "01 Camera Moves", archived: false },
+      { folderId: "omar", parentId: null, name: "Omar Khalil", archived: false },
+    ] as never;
+    const own = job({ id: "own", folderId: "sara" });
+    const sub = job({ id: "sub", folderId: "sara_01" });
+    const other = job({ id: "other", folderId: "omar" });
+
+    expect(filterStillImageJobs([own, sub, other], filters({ folderId: "sara" }), {}, folders).map((i) => i.id)).toEqual([
+      "own",
+      "sub",
+    ]);
+  });
+
   it("searches the things an artist refers to a render by", () => {
     const target = job({
       id: "target",

@@ -14,8 +14,9 @@ import {
 import type { Job, Project } from "../../types";
 import { normalizeRequiredSaveNumber, workflowOptionsWithSaveNumber } from "../generation/generationUtils";
 import { readFavoriteJobIds, writeFavoriteJobIds } from "../preferences/appPreferences";
+import { folderFilterScope, isInFolderScope } from "../projects/folderTree";
 import type { ConfirmDialogState } from "../projects/useProjectActions";
-import { matchesFolder, mergeJobs } from "../workspace/workspaceUtils";
+import { mergeJobs } from "../workspace/workspaceUtils";
 import { clipboardCompatibleImageBlob, downloadFromUrl, fetchResultBlob, isImageResult } from "./resultMedia";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
@@ -110,7 +111,11 @@ export function useJobActions(options: JobActionsOptions) {
     }
 
     const optimisticJob: Job = { ...job, folderId: destinationFolderId, folderName: destinationFolder?.name ?? "Root" };
-    const leavesSelectedFolder = selectedFolderId !== "all" && matchesFolder(job, selectedFolderId);
+    // The feed shows the selected folder and its subfolders, so a move between two
+    // of them keeps the result on screen; only a move out of that scope drops it.
+    const folderScope = folderFilterScope(selectedFolderId, project.folders);
+    const leavesSelectedFolder =
+      isInFolderScope(job.folderId, folderScope) && !isInFolderScope(destinationFolderId, folderScope);
     setJobs((current) => current.map((item) => (item.id === job.id ? optimisticJob : item)));
     if (backendAvailable && leavesSelectedFolder) {
       setBackendJobsTotal((current) => Math.max(0, current - 1));

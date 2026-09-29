@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronDown, Hash, Loader2, Search, SlidersHorizontal, X 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Job, JobStatus, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
+import { folderFilterScope, folderPathLabel, isInFolderScope } from "../features/projects/folderTree";
 import { JobCard } from "./JobCard";
 import { ResultTile } from "./ResultTile";
 import { resultCardElementId } from "../utils/resultCard";
@@ -144,15 +145,24 @@ export function JobFeed({
   }, [layout, focusJobId]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const selectedFolder = selectedProject?.folders?.find((folder) => folder.folderId === selectedFolderId);
+  const selectedProjectFolders = selectedProject?.folders;
+  const selectedFolder = selectedProjectFolders?.find((folder) => folder.folderId === selectedFolderId);
+  // A folder takes in its subfolders, the same scope the server paged by.
+  const folderScope = folderFilterScope(selectedFolderId, selectedProjectFolders);
   const models = Array.from(new Set(jobs.map((job) => job.modelType))).sort((a, b) => a.localeCompare(b));
   const jobsForSelectedProject = selectedProjectId === "all" ? jobs : jobs.filter((job) => job.projectId === selectedProjectId);
-  const jobsForSelectedFolder = jobsForSelectedProject.filter((job) => matchesSelectedFolder(job, selectedFolderId));
+  const jobsForSelectedFolder = jobsForSelectedProject.filter((job) => isInFolderScope(job.folderId, folderScope));
 
   const visibleJobs = useMemo(() => {
     const projectJobs = selectedProjectId === "all" ? jobs : jobs.filter((job) => job.projectId === selectedProjectId);
+    // Rebuilt here rather than read from the render's copy, which is a new Set on
+    // every render and would defeat this memo.
+    const scope = folderFilterScope(
+      selectedFolderId,
+      projects.find((project) => project.id === selectedProjectId)?.folders,
+    );
     const filteredJobs = projectJobs.filter((job) => {
-      if (!matchesSelectedFolder(job, selectedFolderId)) return false;
+      if (!isInFolderScope(job.folderId, scope)) return false;
       const project = projects.find((item) => item.id === job.projectId);
       const user = users.find((item) => item.id === job.userId);
       const hasSaveNumber = hasJobSaveNumber(job);
@@ -368,7 +378,11 @@ export function JobFeed({
               )}
               {selectedProject && selectedFolderId !== "all" ? (
                 <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
-                  {selectedFolderId === "root" ? "Root" : (selectedFolder?.name ?? "Folder")}
+                  {selectedFolderId === "root"
+                    ? "Root"
+                    : selectedFolder
+                      ? folderPathLabel(selectedFolder, selectedProjectFolders ?? [])
+                      : "Folder"}
                 </span>
               ) : null}
               <span className="text-sm font-semibold text-stone-500">{resultCountLabel}</span>
@@ -780,12 +794,6 @@ function isWithinDays(date: string, days: number) {
   const now = Date.now();
   const target = new Date(date).getTime();
   return Number.isFinite(target) && now - target <= days * 24 * 60 * 60 * 1000;
-}
-
-function matchesSelectedFolder(job: Job, selectedFolderId: "all" | "root" | string) {
-  if (selectedFolderId === "all") return true;
-  if (selectedFolderId === "root") return !job.folderId;
-  return job.folderId === selectedFolderId;
 }
 
 function hasJobSaveNumber(job: Job) {

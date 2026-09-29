@@ -1,5 +1,5 @@
 import { AlertCircle, FolderCheck } from "lucide-react";
-import { sortFoldersByName } from "../features/projects/folderSort";
+import { folderTreeEntries } from "../features/projects/folderTree";
 import type { Project } from "../types";
 
 type ResultDestinationControlProps = {
@@ -13,10 +13,10 @@ export function ResultDestinationControl({
   targetFolderId,
   onTargetFolderChange,
 }: ResultDestinationControlProps) {
-  const activeFolders = sortFoldersByName(
-    (selectedProject?.folders ?? []).filter((folder) => !folder.archived),
-  );
-  const targetFolder = activeFolders.find((folder) => folder.folderId === targetFolderId);
+  // Full paths, not bare names: with a folder per artist and the same exercise
+  // subfolders in each, "01 Camera Moves" alone does not say whose it is.
+  const folderEntries = folderTreeEntries(selectedProject?.folders ?? []);
+  const targetFolder = folderEntries.find((entry) => entry.folder.folderId === targetFolderId);
 
   return (
     <>
@@ -29,9 +29,9 @@ export function ResultDestinationControl({
             className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Root</option>
-            {activeFolders.map((folder) => (
-              <option key={folder.folderId} value={folder.folderId}>
-                {folder.name}
+            {folderEntries.map((entry) => (
+              <option key={entry.folder.folderId} value={entry.folder.folderId}>
+                {entry.path}
               </option>
             ))}
           </select>
@@ -50,7 +50,7 @@ export function ResultDestinationControl({
           <div>
             <p className={`text-xs font-semibold ${selectedProject ? "text-teal-800" : "text-amber-900"}`}>
               {selectedProject
-                ? `Saving to ${selectedProject.shortName}_${selectedProject.name.replaceAll(" ", "_")}${targetFolder ? ` / ${targetFolder.name}` : ""}`
+                ? `Saving to ${selectedProject.shortName}_${selectedProject.name.replaceAll(" ", "_")}${targetFolder ? ` / ${targetFolder.path}` : ""}`
                 : "Please select a specific project before generating."}
             </p>
             <p className={`mt-1 text-xs leading-5 ${selectedProject ? "text-teal-700" : "text-amber-800"}`}>

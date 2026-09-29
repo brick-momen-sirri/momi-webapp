@@ -214,6 +214,49 @@ describe("main workspace sections", () => {
     expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("");
   });
 
+  it("brings back each project's own Save result destination when switching projects", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("momi_generation_settings_v1", JSON.stringify({ selectedProjectId: "proj_1" }));
+    await bootSignedIn((state) => {
+      state.projects = [
+        backendProject({
+          folders: [
+            { folderId: "fld_sara", parentId: null, name: "Sara Haddad", archived: false },
+            { folderId: "fld_sara_01", parentId: "fld_sara", name: "01 Camera Moves", archived: false },
+            { folderId: "fld_omar", parentId: null, name: "Omar Khalil", archived: false },
+            { folderId: "fld_omar_01", parentId: "fld_omar", name: "01 Camera Moves", archived: false },
+          ],
+        }),
+        backendProject({
+          id: "proj_2",
+          name: "Harbour Pavilion",
+          folders: [{ folderId: "fld_lookdev", parentId: null, name: "Lookdev", archived: false }],
+        }),
+      ];
+    });
+
+    const destination = await screen.findByRole("combobox", { name: "Save result to" });
+    // Same-named subfolders are told apart by their parent, in tree order.
+    expect(Array.from((destination as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
+      "Root",
+      "Omar Khalil",
+      "Omar Khalil / 01 Camera Moves",
+      "Sara Haddad",
+      "Sara Haddad / 01 Camera Moves",
+    ]);
+    await user.selectOptions(destination, "fld_sara_01");
+
+    await user.click(screen.getByRole("button", { name: "Select project Harbour Pavilion" }));
+    expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Save result to" }), "fld_lookdev");
+
+    await user.click(screen.getByRole("button", { name: "Select project Glass Tower" }));
+    expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("fld_sara_01");
+
+    await user.click(screen.getByRole("button", { name: "Select project Harbour Pavilion" }));
+    expect(screen.getByRole("combobox", { name: "Save result to" })).toHaveValue("fld_lookdev");
+  });
+
   it("shows all Still Images categories without submitting a job", async () => {
     const user = userEvent.setup();
     await bootSignedIn();

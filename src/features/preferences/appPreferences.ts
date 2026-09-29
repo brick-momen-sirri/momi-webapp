@@ -5,6 +5,7 @@ import { normalizeSeedanceVersion, type SeedanceVersionId } from "../generation/
 const GENERATION_SETTINGS_STORAGE_KEY = "momi_generation_settings_v1";
 const FAVORITE_JOB_IDS_STORAGE_KEY = "momi_favorite_job_ids_v1";
 const THEME_STORAGE_KEY = "momi_theme_v1";
+const RESULT_FOLDER_BY_PROJECT_STORAGE_KEY = "momi_result_folder_by_project_v1";
 
 export type PersistedGenerationSettings = {
   selectedModelId?: string;
@@ -65,6 +66,46 @@ export function writePersistedGenerationSettings(settings: PersistedGenerationSe
     window.localStorage.setItem(GENERATION_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   } catch {
     // Browser storage can fail in private mode or when the quota is full.
+  }
+}
+
+/**
+ * The result folder last chosen in each project, keyed by project id.
+ *
+ * Switching project used to send the destination back to Root, and it stayed there
+ * on the way back -- so an artist who looked at another project came home to find
+ * their next render landing in the project root instead of their own folder. An
+ * empty value (Root) is stored as no entry, so the map only holds real choices.
+ */
+export function readRememberedResultFolder(projectId: string) {
+  return readResultFolderMap()[projectId] ?? "";
+}
+
+export function rememberResultFolder(projectId: string, folderId: string) {
+  if (typeof window === "undefined") return;
+  const current = readResultFolderMap();
+  if ((current[projectId] ?? "") === folderId) return;
+  const next = { ...current };
+  if (folderId) next[projectId] = folderId;
+  else delete next[projectId];
+  try {
+    window.localStorage.setItem(RESULT_FOLDER_BY_PROJECT_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Browser storage can fail in private mode or when the quota is full.
+  }
+}
+
+function readResultFolderMap(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(RESULT_FOLDER_BY_PROJECT_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== ""),
+    );
+  } catch {
+    return {};
   }
 }
 

@@ -9,7 +9,8 @@
 // Kept out of the component and pure so the rules are testable on their own, and so
 // the counts the header reports come from the same function that builds the list.
 
-import type { Job } from "../../types";
+import type { Job, ProjectFolder } from "../../types";
+import { folderFilterScope, isInFolderScope } from "../projects/folderTree";
 import { measuredPodUsd } from "./podRuntimeCost";
 import { STILL_IMAGE_CATEGORIES, type StillImageCategoryId } from "./stillImageCategories";
 
@@ -70,12 +71,22 @@ export const STILL_IMAGE_PRESET_FILTER_OPTIONS = STILL_IMAGE_CATEGORIES.map((cat
   label: category.label,
 }));
 
-export function filterStillImageJobs(jobs: Job[], filters: StillImageResultFilters, viewer: StillImageResultViewer = {}) {
+/**
+ * `folders` is the project's folder list, so a folder filter can take in the
+ * folder's subfolders. Without it a folder matches only its own results.
+ */
+export function filterStillImageJobs(
+  jobs: Job[],
+  filters: StillImageResultFilters,
+  viewer: StillImageResultViewer = {},
+  folders: readonly ProjectFolder[] = [],
+) {
   const query = filters.query.trim().toLowerCase();
+  const folderScope = folderFilterScope(filters.folderId, folders);
   const matched = jobs.filter((job) => {
     if (filters.presetId !== "all" && job.workflowOptions?.stillImage?.categoryId !== filters.presetId) return false;
     if (!matchesStatus(job, filters.status)) return false;
-    if (!matchesFolder(job, filters.folderId)) return false;
+    if (!isInFolderScope(job.folderId, folderScope)) return false;
     // Both narrow to nothing when the panel was given no favourites and no account
     // to compare against. Empty is the honest answer -- none of these results is
     // known to be starred or known to be yours -- and the header says "0 of 12"
@@ -95,12 +106,6 @@ function matchesStatus(job: Job, status: StillImageResultStatus) {
   // someone filtering for trouble is looking for.
   if (status === "failed") return job.status === "failed" || job.status === "canceled";
   return job.status === "queued" || job.status === "sending" || job.status === "running";
-}
-
-function matchesFolder(job: Job, folderId: string) {
-  if (folderId === "all") return true;
-  if (folderId === ROOT_FOLDER_FILTER) return !job.folderId;
-  return job.folderId === folderId;
 }
 
 /**

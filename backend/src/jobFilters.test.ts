@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { filterJobs, getJobSaveSearchValue, isVideoSaveJob, jobSection, normalizeJobSaveNumber } from "./jobFilters.js";
-import type { Job } from "./types.js";
+import type { Job, ProjectFolder } from "./types.js";
 
 // This is what GET /api/jobs narrows on. A filter that drops a job the caller
 // should have seen reads to an artist as "my render is missing".
@@ -59,6 +59,38 @@ test("folderId 'root' means jobs with no folder", () => {
 test("a specific folderId matches only that folder", () => {
   const jobs = [job({ id: "a", folderId: null }), job({ id: "b", folderId: "fld_1" }), job({ id: "c", folderId: "fld_2" })];
   assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, folderId: "fld_1" })), ["b"]);
+});
+
+test("a folderId takes in every folder beneath it, and nothing beside it", () => {
+  // A folder per artist, exercise folders inside: filtering on the artist must
+  // show what they saved in their subfolders, and not another artist's.
+  const folder = (folderId: string, parentId: string | null, archived = false) =>
+    ({ folderId, parentId, name: folderId, archived }) as ProjectFolder;
+  const folders = [
+    folder("sara", null),
+    folder("sara_01", "sara"),
+    folder("sara_01_takes", "sara_01"),
+    folder("sara_old", "sara", true),
+    folder("omar", null),
+    folder("omar_01", "omar"),
+  ];
+  const jobs = [
+    job({ id: "own", folderId: "sara" }),
+    job({ id: "sub", folderId: "sara_01" }),
+    job({ id: "deep", folderId: "sara_01_takes" }),
+    job({ id: "archived_sub", folderId: "sara_old" }),
+    job({ id: "other_artist", folderId: "omar_01" }),
+    job({ id: "root", folderId: null }),
+    job({ id: "other_project", projectId: "proj_2", folderId: "sara_01" }),
+  ];
+  const lookup = (projectId: string) => (projectId === "proj_1" ? folders : []);
+
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, folderId: "sara" }, lookup)), ["own", "sub", "deep", "archived_sub"]);
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, projectId: "proj_1", folderId: "sara_01" }, lookup)), [
+    "sub",
+    "deep",
+  ]);
+  assert.deepEqual(ids(filterJobs(jobs, { ...noFilters, folderId: "omar" }, lookup)), ["other_artist"]);
 });
 
 const stillImage = { categoryId: "pro-upscaler", settings: { engine: "normal" } } as const;

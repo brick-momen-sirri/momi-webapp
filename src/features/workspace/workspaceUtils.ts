@@ -112,12 +112,6 @@ export function incrementProjectJobCount(projects: Project[], projectId: string)
   );
 }
 
-export function matchesFolder(job: Job, folderId: "all" | "root" | string) {
-  if (folderId === "all") return true;
-  if (folderId === "root") return !job.folderId;
-  return job.folderId === folderId;
-}
-
 /**
  * The query for one page of the feed.
  *
