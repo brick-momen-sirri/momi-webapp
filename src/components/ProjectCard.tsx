@@ -43,6 +43,9 @@ export function ProjectCard({
       : []),
     { label: "Manage members", icon: "settings" as const, onClick: () => onOpenSettings(project.id) },
   ];
+  // The first level only, like the count on each folder row: in a training
+  // project that is one folder per artist plus the group folders.
+  const topLevelFolderCount = (project.folders ?? []).filter((folder) => !folder.archived && !folder.parentId).length;
 
   return (
     <div
@@ -75,11 +78,15 @@ export function ProjectCard({
             <span className="mt-1 block truncate text-[11px] tabular-nums text-stone-500">
               {project.shortName} &middot; {project.jobCount === 1 ? "1 job" : `${project.jobCount} jobs`} &middot;{" "}
               {project.memberCount === 1 ? "1 member" : `${project.memberCount} members`}
+              {topLevelFolderCount ? (
+                <span title="Folders at the top level of this project">
+                  {" "}
+                  &middot; {topLevelFolderCount === 1 ? "1 folder" : `${topLevelFolderCount} folders`}
+                </span>
+              ) : null}
             </span>
             <span className="mt-0.5 flex items-baseline justify-between gap-2 text-[11px]">
-              <span className="truncate tabular-nums text-stone-500">
-                {formatCredits(project.creditsUsed ?? 0)} credits
-              </span>
+              <span className="truncate tabular-nums text-stone-500">{formatCredits(project.creditsUsed ?? 0)} credits</span>
               <span className="shrink-0 font-semibold tabular-nums text-ink">{formatUsdTotal(project.usdUsed ?? 0)}</span>
             </span>
           </span>
@@ -176,4 +183,3 @@ function menuIcon(icon: MenuItem["icon"]) {
   if (icon === "delete") return Trash2;
   return Settings2;
 }
-

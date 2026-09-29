@@ -479,3 +479,26 @@ describe("collapsing folders", () => {
     prompt.mockRestore();
   });
 });
+
+describe("project folder count", () => {
+  it("counts only the project's first level of live folders", () => {
+    renderPanel({
+      projects: [
+        project({
+          folders: [
+            { folderId: "fld_a", parentId: null, name: "Sara Haddad", archived: false },
+            { folderId: "fld_b", parentId: null, name: "Omar Khalil", archived: false },
+            { folderId: "fld_c", parentId: "fld_a", name: "Shot 0100", archived: false },
+            { folderId: "fld_d", parentId: null, name: "Gone", archived: true },
+          ],
+        } as never),
+      ],
+    });
+    expect(screen.getByText(/· 2 folders/)).toBeInTheDocument();
+  });
+
+  it("says nothing about folders when a project has none", () => {
+    renderPanel();
+    expect(screen.queryByText(/folders?$/)).toBeNull();
+  });
+});
