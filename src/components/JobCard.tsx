@@ -13,6 +13,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { isVideoEnhancerModel } from "../features/generation/videoEnhancer";
 import type { Job, Project, User } from "../types";
 import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
@@ -71,7 +72,11 @@ export function JobCard({
 }: JobCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editingSaveNumber, setEditingSaveNumber] = useState(false);
-  const isLong = job.prompt.length > 130;
+  // The enhancer takes no prompt. Say what it did instead: a card that showed a
+  // prompt read as if the prompt had been applied, which it never was.
+  const enhancerNote = isVideoEnhancerModel({ id: job.modelId ?? "" }) ? videoEnhancerCardNote(job) : undefined;
+  const promptText = enhancerNote ?? job.prompt;
+  const isLong = promptText.length > 130;
   const hasSaveNumber = Boolean(job.workflowOptions?.save?.cameraNumber || job.workflowOptions?.save?.shotNumber);
   const showSaveNumber = job.source !== "existing_project_media" || hasSaveNumber || canEditSaveNumber;
   const folderLabel = jobFolderLabel(job, project?.folders);
@@ -306,11 +311,11 @@ export function JobCard({
             <div className="min-w-[260px] flex-1">
               {job.fileName ? <p className="mb-1 truncate font-mono text-xs text-stone-500">{job.fileName}</p> : null}
               <p
-                className={`text-sm leading-6 text-stone-800 ${
+                className={`text-sm leading-6 ${enhancerNote ? "text-stone-500" : "text-stone-800"} ${
                   expanded ? "" : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
                 }`}
               >
-                {job.prompt}
+                {promptText}
               </p>
               {isLong ? (
                 <button
@@ -392,4 +397,14 @@ function formatElapsed(ms: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function videoEnhancerCardNote(job: Job) {
+  const plan = job.workflowOptions?.videoEnhancer?.plan;
+  const [numerator, denominator = 1] = (plan?.outputFps ?? "").split("/").map(Number);
+  const fps = numerator / denominator;
+  const summary = plan
+    ? `Enhanced to ${plan.width} × ${plan.height}, ${plan.frames} frames at ${Number.isFinite(fps) ? Number(fps.toFixed(2)) : plan.outputFps} fps. `
+    : "";
+  return `${summary}The Video Enhancer takes no prompt; it restores the source as it is.`;
 }

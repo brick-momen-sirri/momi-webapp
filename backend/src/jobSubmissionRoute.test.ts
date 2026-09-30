@@ -818,12 +818,19 @@ test("the Video Enhancer is bound to its options, takes no size or duration, and
 
   // The Animation form always sends a resolution and a duration; both are dropped.
   const request = validatedRequest(
-    { ...base, resolution: { width: 1920, height: 1080, label: "1080p" }, durationSeconds: 5 },
+    {
+      ...base,
+      resolution: { width: 1920, height: 1080, label: "1080p" },
+      durationSeconds: 5,
+      // Left in the shared prompt box by another model; the graph has no prompt input.
+      prompt: "remove the water mark",
+    },
     enhancer,
     users.owner.id,
   );
   assert.equal(request.resolution, undefined);
   assert.equal(request.durationSeconds, undefined);
+  assert.equal(request.prompt, "");
   assert.deepEqual(request.workflowOptions?.videoEnhancer, { longSide: 2560 });
 
   // A client cannot supply the plan the dispatcher writes.

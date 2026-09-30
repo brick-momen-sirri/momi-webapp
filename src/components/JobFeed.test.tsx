@@ -109,6 +109,37 @@ describe("rendering", () => {
     expect(screen.getByText(/second prompt/)).toBeInTheDocument();
   });
 
+  it("never shows a prompt on a Video Enhancer card, which cannot take one", () => {
+    // A prompt left in the shared box from another model was stored on this job
+    // and shown as if it had been applied (job_5bd902a9..., 2026-09-30).
+    renderFeed([
+      job({
+        id: "enh",
+        modelId: "video_enhancer_ltx25_cq",
+        modelType: "Video Enhancer",
+        prompt: "remove the water mark",
+        workflowOptions: {
+          videoEnhancer: {
+            longSide: 2560,
+            plan: {
+              width: 2560,
+              height: 1440,
+              frames: 121,
+              sourceWidth: 1920,
+              sourceHeight: 1080,
+              sourceFps: "24/1",
+              timing: "retime",
+              outputFps: "24/1",
+              sourceHasAudio: false,
+            },
+          },
+        },
+      }),
+    ]);
+    expect(screen.queryByText(/remove the water mark/)).toBeNull();
+    expect(screen.getByText(/Enhanced to 2560 × 1440, 121 frames at 24 fps\. The Video Enhancer takes no prompt/)).toBeInTheDocument();
+  });
+
   it("renders without crashing on an empty list", () => {
     expect(() => renderFeed([])).not.toThrow();
   });

@@ -102,12 +102,15 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   const clientRequestId = optionalClientRequestId(body.clientRequestId);
   const projectId = requiredIdentifier(body.projectId, "projectId");
   const modelId = requiredIdentifier(body.modelId, "modelId");
-  const prompt = optionalString(body.prompt, "prompt");
+  const videoEnhancer = isVideoEnhancerModelId(modelId);
+  // The enhancer's graph has no prompt input, and the Animation form shares one
+  // prompt box across models: text typed for another model rode along and was shown
+  // on the finished card as if it had been applied (job_5bd902a9..., 2026-09-30).
+  const prompt = videoEnhancer ? "" : optionalString(body.prompt, "prompt");
   const inputImages = optionalStringArray(body.inputImages, "inputImages");
   const startFrame = optionalString(body.startFrame, "startFrame");
   const endFrame = optionalString(body.endFrame, "endFrame");
   const inputVideo = optionalString(body.inputVideo, "inputVideo");
-  const videoEnhancer = isVideoEnhancerModelId(modelId);
   // The enhancer takes its size and length from the source video and its long-side
   // option; a resolution or duration on the request would mean nothing and is
   // dropped rather than rejected, since the Animation form always sends both.

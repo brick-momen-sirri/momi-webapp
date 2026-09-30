@@ -13,6 +13,7 @@ import {
   workflowOptionsForJob,
 } from "../generation/generationUtils";
 import type { SeedanceVersionId } from "../generation/seedanceVersions";
+import { isVideoEnhancerModel } from "../generation/videoEnhancer";
 import { ALL_PROJECTS_ID, incrementProjectJobCount, mergeJobs } from "../workspace/workspaceUtils";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
@@ -191,7 +192,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
               projectId: selectedProjectId,
               targetFolderId: targetFolderId || null,
               modelId: selectedModel.id,
-              prompt: isArchVizGridModel(selectedModel) ? "" : prompt.trim(),
+              prompt: isArchVizGridModel(selectedModel) || isVideoEnhancerModel(selectedModel) ? "" : prompt.trim(),
               resolution: parseResolution(selectedResolution),
               durationSeconds: selectedDurationSeconds,
               inputImages,
@@ -361,7 +362,7 @@ function submissionFingerprint(input: {
     projectId: input.selectedProjectId,
     targetFolderId: input.targetFolderId || null,
     modelId: input.selectedModel.id,
-    prompt: isArchVizGridModel(input.selectedModel) ? "" : input.prompt.trim(),
+    prompt: isArchVizGridModel(input.selectedModel) || isVideoEnhancerModel(input.selectedModel) ? "" : input.prompt.trim(),
     resolution: parseResolution(input.selectedResolution),
     durationSeconds: input.selectedDurationSeconds,
     images: input.images
