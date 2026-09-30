@@ -55,6 +55,14 @@ export type RunpodEndpoint = {
    * handler does this; other workers do not send the field and are judged as before.
    */
   reportsWorkerSuccess?: boolean;
+  /**
+   * The worker downloads an `images[]` entry sent as `{ name, url }`. Set only for
+   * the Animation endpoint, whose handler was probed doing so on 2026-09-24. The
+   * Qwen Edit, Pro Upscaler and Flux Klein Upscaler pods run an older handler that
+   * base64-decodes `image` and fails the whole job on any entry without one. Read
+   * by the Still Images materializer, which inlines the bytes when this is unset.
+   */
+  acceptsUrlInputs?: boolean;
 };
 
 /**
@@ -72,6 +80,7 @@ export function defaultRunpodEndpoint(): RunpodEndpoint {
     cancelUrl: runpodCancelUrl,
     streamUrl: runpodStreamUrl,
     healthUrl: runpodHealthUrl,
+    acceptsUrlInputs: true,
   };
 }
 

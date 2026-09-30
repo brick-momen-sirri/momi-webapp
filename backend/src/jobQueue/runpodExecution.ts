@@ -28,7 +28,7 @@ import {
   type RunpodComfyImageInput,
   type RunpodMediaResult,
 } from "../runpodComfyService.js";
-import { resolveRunpodEndpoint } from "../runpodEndpoints.js";
+import { resolveRunpodEndpoint, type RunpodEndpoint } from "../runpodEndpoints.js";
 import { stillImageRequestSlotCount, type StillImageOptions } from "../stillImageCategories.js";
 import { buildStillImageWorkflow, stillImageNodeStatusLabel } from "../stillImageWorkflow.js";
 import { materializeStillImageInputs } from "./stillImageInputMaterializer.js";
@@ -112,7 +112,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     const videoEnhancer = job.workflowOptions?.videoEnhancer;
     // LTX 2.5 CQ image-to-video runs on the enhancer's pod with the same contract.
     const ltxCqPod = Boolean(videoEnhancer) || isLtxCqI2vModelId(job.modelId);
-    const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input);
+    const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input, endpoint);
     const workflow = prepared.workflow;
     const runpodImages = prepared.runpodImages;
     const runpodVideo = prepared.runpodVideo;
@@ -490,9 +490,11 @@ export async function prepareRunpodSubmission(
   model: WorkflowModel,
   projectFolder: string,
   inputFolder: string,
+  /** The endpoint the job will be submitted to. Without one, Still slots are inlined. */
+  endpoint?: Pick<RunpodEndpoint, "acceptsUrlInputs">,
 ): Promise<PreparedSubmission> {
   const stillImage = job.workflowOptions?.stillImage;
-  if (stillImage) return prepareStillImageSubmission(job, stillImage);
+  if (stillImage) return prepareStillImageSubmission(job, stillImage, endpoint?.acceptsUrlInputs === true);
   const videoEnhancer = job.workflowOptions?.videoEnhancer;
   if (videoEnhancer) return prepareVideoEnhancerSubmission(job, videoEnhancer, inputFolder);
   if (isLtxCqI2vModelId(job.modelId)) return prepareLtxCqI2vSubmission(job, inputFolder);
@@ -539,12 +541,19 @@ async function prepareAnimationSubmission(
  * Any failure here throws before the caller reaches submission, so an oversized
  * inline image costs nothing and cannot produce a paid RunPod call.
  */
-async function prepareStillImageSubmission(job: Job, stillImage: StillImageOptions): Promise<PreparedSubmission> {
+async function prepareStillImageSubmission(
+  job: Job,
+  stillImage: StillImageOptions,
+  acceptsUrlInputs: boolean,
+): Promise<PreparedSubmission> {
   const imageCount = stillImageRequestSlotCount(stillImage);
   const materialized = await materializeStillImageInputs({
     categoryId: stillImage.categoryId,
     imageCount,
     inputImages: job.inputImages,
+    // Whether a slot may travel as a URL is a property of the target pod's
+    // handler, not of the preset.
+    acceptsUrlInputs,
   });
 
   const workflow = await buildStillImageWorkflow({

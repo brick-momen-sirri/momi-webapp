@@ -127,3 +127,15 @@ test("LTX 2.5 CQ image-to-video shares the enhancer's pod, and only that pod is 
   assert.equal(resolveRunpodEndpoint({ modelId: "brick_api_kling_v3_video" }).reportsWorkerSuccess, undefined);
   assert.equal(runpodEndpointForId("pod-pro-upscaler").reportsWorkerSuccess, undefined);
 });
+
+test("only the Animation endpoint is trusted to download URL inputs", () => {
+  // Every dedicated Still pod fails a job whose images[] entry has no `image` key,
+  // so a pod earns this flag only by a probe of its own handler.
+  assert.equal(defaultRunpodEndpoint().acceptsUrlInputs, true);
+  assert.equal(resolveRunpodEndpoint(stillImageJob("image-editing")).acceptsUrlInputs, true, "shared preset");
+  assert.equal(resolveRunpodEndpoint(stillImageJob("pro-upscaler")).acceptsUrlInputs, undefined);
+  assert.equal(resolveRunpodEndpoint(stillImageJob("qwen-edit")).acceptsUrlInputs, undefined);
+  // A resume rebuilds the endpoint from the saved id.
+  assert.equal(runpodEndpointForId("shared-animation-endpoint").acceptsUrlInputs, true);
+  assert.equal(runpodEndpointForId("pod-pro-upscaler").acceptsUrlInputs, undefined);
+});

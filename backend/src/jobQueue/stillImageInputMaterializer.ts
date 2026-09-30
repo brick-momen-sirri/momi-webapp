@@ -60,6 +60,12 @@ export async function materializeStillImageInputs(options: {
   categoryId: StillImageCategoryId;
   imageCount: number;
   inputImages: string[];
+  /**
+   * The target endpoint downloads `{ name, url }` payload entries. Off by
+   * default: every dedicated Still pod rejects them, so a load-image slot is
+   * inlined unless the caller knows the worker it is sending to can fetch.
+   */
+  acceptsUrlInputs?: boolean;
 }): Promise<StillImageMaterializedInputs> {
   const bindings = stillImageInputBindings(options.categoryId, options.imageCount);
   if (options.inputImages.length !== bindings.length) {
@@ -86,7 +92,7 @@ export async function materializeStillImageInputs(options: {
       continue;
     }
 
-    const materialized = await loadImageSlot(source, binding, perSlotBudget);
+    const materialized = await loadImageSlot(source, binding, perSlotBudget, options.acceptsUrlInputs === true);
     graphValues.push(materialized.name);
     payloadImages.push(materialized);
   }
@@ -142,10 +148,13 @@ async function loadImageSlot(
   source: string,
   binding: Extract<StillImageInputBinding, { mode: "load-image" }>,
   maxBytes: number,
+  acceptsUrlInputs: boolean,
 ): Promise<RunpodComfyImageInput> {
-  // A signed URL is fine for these: the worker downloads it and saves it under the
+  // A signed URL is fine where the worker downloads it and saves it under the
   // name the graph expects, so the deterministic name still governs routing.
-  const filePath = localMediaFilePathFromUrl(source);
+  // Only the Animation endpoint's handler does; sending one to a dedicated pod
+  // failed every Qwen Edit and upscaler job on 2026-09-30.
+  const filePath = acceptsUrlInputs ? localMediaFilePathFromUrl(source) : undefined;
   if (filePath) {
     const safePath = await requireAllowedMediaPath(filePath);
     const signedUrl = createRunpodInputUrl(safePath, "image");
