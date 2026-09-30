@@ -18,6 +18,7 @@ import openAiIcon from "../assets/model-icons/openai.png";
 import seedanceIcon from "../assets/model-icons/seedance.png";
 import veo3Icon from "../assets/model-icons/veo3.png";
 import { SEEDANCE_VERSIONS, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isLtxCqI2vModel } from "../features/generation/ltxCqImageToVideo";
 import { isVideoEnhancerModel } from "../features/generation/videoEnhancer";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { ModelType } from "../types";
@@ -96,6 +97,15 @@ const providerOptions = [
     label: "Flux 3",
     iconSrc: bflSymbolIcon,
     aliases: ["flux3", "flux 3"],
+  },
+  {
+    // The studio's own LTX 2.5 CQ pod. Shown only in a tab that has a model for
+    // it, unlike the four above, which hold their place across tabs.
+    id: "ltx",
+    label: "LTX 2.5 CQ",
+    icon: Sparkles,
+    aliases: ["ltx25_cq_i2v"],
+    onlyWhenAvailable: true,
   },
 ] as const;
 
@@ -343,19 +353,22 @@ function modelMatchesCategory(model: ModelType, categoryId: string) {
 
 function workflowCards(categoryModels: ModelType[], categoryId: string) {
   const orderedModels = orderWorkflowModels(categoryModels);
-  const providerCards = providerOptions.map((provider) => ({
-    ...provider,
-    model: bestProviderModel(orderedModels, provider.aliases),
-  }));
+  const providerCards = providerOptions
+    .map((provider) => ({
+      ...provider,
+      model: bestProviderModel(orderedModels, provider.aliases),
+    }))
+    .filter((card) => card.model || !("onlyWhenAvailable" in card));
 
-  if (providerCards.some((card) => card.model)) {
+  // The enhancer has one model and no providers to choose between.
+  if (categoryId !== "video_upscaling" && providerCards.some((card) => card.model)) {
     return providerCards;
   }
 
   const modelCards = orderedModels.map((model) => ({
     id: model.id,
     label: cleanModelLabel(model.label),
-    icon: isVideoEnhancerModel(model) ? Sparkles : ImageIcon,
+    icon: isVideoEnhancerModel(model) || isLtxCqI2vModel(model) ? Sparkles : ImageIcon,
     iconSrc: iconSrcForModel(model),
     aliases: [model.id],
     model,

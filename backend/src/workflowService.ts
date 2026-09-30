@@ -8,6 +8,7 @@ import { isPathWithinRoot } from "./pathContainment.js";
 import { applyKlingCameraStabilization, isKlingVideoClassType } from "./klingCameraStabilization.js";
 import { applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
+import { isLtxCqI2vModelId, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
 import { isVideoEnhancerModelId, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
 import { isGptImageKey, isGptImageModel, isNanoBananaModel, supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
@@ -47,7 +48,8 @@ export function getWorkflowModels() {
   // The enhancer is registered rather than scanned (see config.ts), and offered
   // only where its endpoint is configured: a host without one would list a
   // section every submission to which fails at dispatch.
-  return runpodVideoEnhancerEndpointId ? [...modelsCache, videoEnhancerWorkflowModel()] : modelsCache;
+  // LTX 2.5 CQ image-to-video runs on the same pod, so the same setting gates it.
+  return runpodVideoEnhancerEndpointId ? [...modelsCache, ltxCqI2vWorkflowModel(), videoEnhancerWorkflowModel()] : modelsCache;
 }
 
 /**
@@ -64,7 +66,8 @@ export function getWorkflowModel(id: string) {
     stillImageWorkflowModel(id) ??
     // Resolved whether or not the endpoint is configured, so a job that already
     // exists keeps its model after the setting is removed.
-    (isVideoEnhancerModelId(id) ? videoEnhancerWorkflowModel() : undefined)
+    (isVideoEnhancerModelId(id) ? videoEnhancerWorkflowModel() : undefined) ??
+    (isLtxCqI2vModelId(id) ? ltxCqI2vWorkflowModel() : undefined)
   );
 }
 

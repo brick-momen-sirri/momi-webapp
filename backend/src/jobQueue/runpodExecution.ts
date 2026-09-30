@@ -42,11 +42,13 @@ import { persistServerlessArtifacts } from "../serverlessArtifactService.js";
 import { validateRunpodImageRequirements } from "../runpodImagePreflight.js";
 import { ensureJobFolders, saveJobMetadata } from "../storageService.js";
 import type { CreditBalanceSnapshot, Job, WorkflowModel } from "../types.js";
+import { isLtxCqI2vModelId } from "../ltxCqImageToVideo.js";
 import { videoEnhancerRunpodPolicy } from "../videoEnhancer.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
 import type { ExecutionClaim } from "./executionRegistry.js";
 import { jobRemoteMediaEntries, materializeRunpodInputImages, materializeRunpodInputVideo } from "./index.js";
 import { markJobCompleted } from "./lifecycleState.js";
+import { prepareLtxCqI2vSubmission } from "./ltxCqImageToVideoSubmission.js";
 import { prepareVideoEnhancerSubmission } from "./videoEnhancerSubmission.js";
 
 export type RunpodExecutionDependencies = {
@@ -108,6 +110,8 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     // The Video Enhancer is a third route of the same kind: its own graph builder,
     // and its own input preparation because the source is re-encoded first.
     const videoEnhancer = job.workflowOptions?.videoEnhancer;
+    // LTX 2.5 CQ image-to-video runs on the enhancer's pod with the same contract.
+    const ltxCqPod = Boolean(videoEnhancer) || isLtxCqI2vModelId(job.modelId);
     const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input);
     const workflow = prepared.workflow;
     const runpodImages = prepared.runpodImages;
@@ -119,7 +123,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     // which miscounts these graphs, and the binding pass in the builder is the
     // stronger equivalent -- every slot is written or the build fails. The
     // enhancer has no LoadImage node at all, and the same binding check.
-    if (!job.runpodJobId && !stillImage && !videoEnhancer) await validateRunpodImageRequirements(workflow, job.inputImages);
+    if (!job.runpodJobId && !stillImage && !ltxCqPod) await validateRunpodImageRequirements(workflow, job.inputImages);
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
     if (await deps.settleRequestedCancellation(job, execution)) return;
@@ -212,7 +216,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
           workflow,
           images: runpodImages.images,
           videos: runpodVideo?.videos ?? [],
-          policy: videoEnhancer ? videoEnhancerRunpodPolicy() : undefined,
+          policy: ltxCqPod ? videoEnhancerRunpodPolicy() : undefined,
           shouldCancel: shouldStopRunpodWork,
           endpoint,
           onSubmitted: async ({ jobId, status }) => {
@@ -491,6 +495,7 @@ export async function prepareRunpodSubmission(
   if (stillImage) return prepareStillImageSubmission(job, stillImage);
   const videoEnhancer = job.workflowOptions?.videoEnhancer;
   if (videoEnhancer) return prepareVideoEnhancerSubmission(job, videoEnhancer, inputFolder);
+  if (isLtxCqI2vModelId(job.modelId)) return prepareLtxCqI2vSubmission(job, inputFolder);
   return prepareAnimationSubmission(job, model, projectFolder, inputFolder);
 }
 

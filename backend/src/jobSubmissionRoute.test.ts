@@ -12,6 +12,7 @@ import { isStillImageCategoryId } from "./stillImageCategories.js";
 import { isStillImageSeed } from "./stillImageSeed.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
+import { LTX_CQ_I2V_MODEL_ID, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
 import { VIDEO_ENHANCER_MODEL_ID, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 
 const users = {
@@ -822,6 +823,34 @@ test("the Video Enhancer is bound to its options, takes no size or duration, and
   assert.throws(
     () => validatedRequest({ ...validBody(), workflowOptions: { videoEnhancer: { longSide: 2560 } } }, model, users.owner.id),
     /does not take Video Enhancer options/,
+  );
+});
+
+test("LTX 2.5 CQ takes its two tested sizes, 2-5 s, saved images only and a bounded prompt", () => {
+  const ltx = ltxCqI2vWorkflowModel();
+  const saved = "/api/media?path=C%3A%5Cuploads%5Cmarina.png";
+  const base = {
+    projectId: project.id,
+    modelId: LTX_CQ_I2V_MODEL_ID,
+    prompt: "A slow dolly toward the marina.",
+    inputImages: [saved],
+    resolution: { width: 2560, height: 1440, label: "1440p" },
+    durationSeconds: 5,
+  };
+
+  assert.equal(validatedRequest(base, ltx, users.owner.id).resolution?.label, "1440p");
+  // An unlabelled 2560x1440 is recognised as 1440p too.
+  assert.equal(validatedRequest({ ...base, resolution: { width: 2560, height: 1440 } }, ltx, users.owner.id).durationSeconds, 5);
+  assert.equal(validatedRequest({ ...base, resolution: { width: 1920, height: 1080, label: "1080p" }, durationSeconds: 2 }, ltx, users.owner.id).durationSeconds, 2);
+
+  assert.throws(() => validatedRequest({ ...base, resolution: { width: 3840, height: 2160, label: "4K" } }, ltx, users.owner.id), /not supported/);
+  assert.throws(() => validatedRequest({ ...base, durationSeconds: 8 }, ltx, users.owner.id), /Duration 8s is not supported/);
+  assert.throws(() => validatedRequest({ ...base, prompt: "" }, ltx, users.owner.id), /prompt is required/i);
+  assert.throws(() => validatedRequest({ ...base, prompt: "x".repeat(12_001) }, ltx, users.owner.id), /12000 characters/);
+  assert.throws(() => validatedRequest({ ...base, inputImages: [] }, ltx, users.owner.id), /input image is required/i);
+  assert.throws(
+    () => validatedRequest({ ...base, inputImages: ["https://cdn.example/marina.png"] }, ltx, users.owner.id),
+    /uploaded to this app/,
   );
 });
 

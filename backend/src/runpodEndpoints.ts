@@ -25,9 +25,11 @@ import {
   runpodStatusUrl,
   runpodStreamUrl,
   runpodStillImageEndpointIds,
+  runpodLtxCqI2vEndpointId,
   runpodSubmissionMode,
   runpodVideoEnhancerEndpointId,
 } from "./config.js";
+import { isLtxCqI2vModelId } from "./ltxCqImageToVideo.js";
 import { stillImageRunsOnSharedEndpoint } from "./stillImageWorkflow.js";
 import type { WorkflowOptions } from "./types.js";
 
@@ -47,6 +49,12 @@ export type RunpodEndpoint = {
    */
   streamUrl: (jobId: string) => string;
   healthUrl: string;
+  /**
+   * The worker reports its own outcome as `output.success`, and a COMPLETED job
+   * without `success: true` is a failure. Set for the LTX 2.5 CQ pod, whose
+   * handler does this; other workers do not send the field and are judged as before.
+   */
+  reportsWorkerSuccess?: boolean;
 };
 
 /**
@@ -73,7 +81,11 @@ export function runpodEndpointForId(id: string): RunpodEndpoint {
   if (id && id === runpodEndpointId) return defaultRunpodEndpoint();
 
   const base = `${runpodApiRoot}/${encodeURIComponent(id)}`;
+  // By id, so a resume after a restart -- which rebuilds the endpoint from the
+  // persisted runpodEndpointId -- keeps the same success rule.
+  const ltxCqPod = id === runpodVideoEnhancerEndpointId || id === runpodLtxCqI2vEndpointId;
   return {
+    ...(ltxCqPod ? { reportsWorkerSuccess: true } : {}),
     id,
     submitUrl: `${base}/${runpodSubmissionMode === "async" ? "run" : "runsync"}`,
     statusUrl: (jobId: string) => `${base}/status/${encodeURIComponent(jobId)}`,
@@ -94,7 +106,11 @@ export function stillImageEndpointId(categoryId: string) {
  * submission, that is where the work lives, whatever the configuration has since
  * been changed to.
  */
-export function resolveRunpodEndpoint(job: { runpodEndpointId?: string; workflowOptions?: WorkflowOptions }): RunpodEndpoint {
+export function resolveRunpodEndpoint(job: {
+  runpodEndpointId?: string;
+  workflowOptions?: WorkflowOptions;
+  modelId?: string;
+}): RunpodEndpoint {
   if (job.runpodEndpointId) return runpodEndpointForId(job.runpodEndpointId);
 
   // The enhancer's graph loads ~46 GiB of LTX weights that only its own image
@@ -102,6 +118,13 @@ export function resolveRunpodEndpoint(job: { runpodEndpointId?: string; workflow
   if (job.workflowOptions?.videoEnhancer) {
     if (runpodVideoEnhancerEndpointId) return runpodEndpointForId(runpodVideoEnhancerEndpointId);
     throw new Error("No RunPod endpoint is configured for the Video Enhancer. Set RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER.");
+  }
+  // Same pod, same reason. Keyed on the model: this graph has no options of its own.
+  if (isLtxCqI2vModelId(job.modelId)) {
+    if (runpodLtxCqI2vEndpointId) return runpodEndpointForId(runpodLtxCqI2vEndpointId);
+    throw new Error(
+      "No RunPod endpoint is configured for LTX 2.5 CQ. Set RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER or RUNPOD_ENDPOINT_ID_LTX_CQ_I2V.",
+    );
   }
 
   const categoryId = job.workflowOptions?.stillImage?.categoryId;

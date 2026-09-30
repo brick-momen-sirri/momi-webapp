@@ -63,6 +63,8 @@ export const stillImageWorkflowRoot = process.env.STILL_IMAGE_WORKFLOW_ROOT ?? p
 // copy would appear in the Image Editing tab asking for an input image.
 export const videoEnhancerWorkflowRoot =
   process.env.VIDEO_ENHANCER_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-video-enhancer");
+// And the LTX 2.5 CQ image-to-video graph, for the same reason.
+export const ltxCqI2vWorkflowRoot = process.env.LTX_CQ_I2V_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-ltx-cq-i2v");
 
 export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(comfyRoot, "output", "projects");
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");
@@ -178,6 +180,11 @@ export const runpodVideoEnhancerEndpointId = process.env.RUNPOD_ENDPOINT_ID_VIDE
 // of execution, so without this the job is killed just before it finishes. 30
 // minutes is ~2.5x the longest measured run and still ends well inside
 // RUNPOD_TIMEOUT_MS, so RunPod never keeps billing for a job this app gave up on.
+// LTX 2.5 CQ image-to-video runs on the same pod -- one image carries both graphs
+// -- so it defaults to the enhancer's endpoint and needs its own id only if the two
+// are ever split.
+export const runpodLtxCqI2vEndpointId =
+  process.env.RUNPOD_ENDPOINT_ID_LTX_CQ_I2V?.trim() || runpodVideoEnhancerEndpointId;
 export const runpodVideoEnhancerExecutionTimeoutMs = positiveNumber(
   process.env.RUNPOD_VIDEO_ENHANCER_EXECUTION_TIMEOUT_MS,
   30 * 60_000,

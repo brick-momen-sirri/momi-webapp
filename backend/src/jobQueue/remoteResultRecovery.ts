@@ -6,6 +6,7 @@ import { getProject } from "../projectService.js";
 import { ensureJobFolders } from "../storageService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "../streamingMediaService.js";
 import type { Job } from "../types.js";
+import { finishLtxCqI2vResult } from "../ltxCqImageToVideoMedia.js";
 import { finishVideoEnhancerResult } from "../videoEnhancerMedia.js";
 import { jobRemoteMediaEntries, type RemoteMediaEntry } from "./remoteMedia.js";
 
@@ -112,6 +113,7 @@ async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: 
     // that is not a Video Enhancer render.
     if (entry.kind === "result" && [".mp4", ".mov", ".webm"].includes(extension)) {
       await finishVideoEnhancerResult(job, filePath);
+      await finishLtxCqI2vResult(job, filePath);
     }
     return `/api/media?path=${encodeURIComponent(filePath)}`;
   } catch {

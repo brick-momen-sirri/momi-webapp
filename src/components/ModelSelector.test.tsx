@@ -172,3 +172,54 @@ describe("Video Enhancer task", () => {
     expect(screen.getByRole("button", { name: /Video Enhancer/ })).toBeDisabled();
   });
 });
+
+describe("LTX 2.5 CQ image to video", () => {
+  const kling = model({
+    id: "brick_api_kling_v3_video",
+    label: "Kling v3 Video",
+    workflowPath: "C:/Momi-Animation/workflow/i2v/Brick_api_kling_v3_video.json",
+  });
+  const ltx = model({
+    id: "ltx25_cq_i2v",
+    label: "LTX 2.5 CQ Image to Video",
+    workflowPath: "C:/Momi-Animation/backend/workflow-ltx-cq-i2v/ltx25-cq-i2v.json",
+  });
+
+  it("joins the providers in Image to Video", async () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelector
+        models={[kling, ltx]}
+        selectedModel={kling}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "LTX 2.5 CQ" }));
+    expect(onChange).toHaveBeenCalledWith("ltx25_cq_i2v");
+    expect(screen.getByRole("button", { name: "Kling" })).toBeEnabled();
+  });
+
+  it("does not appear, even disabled, where it has no model", () => {
+    const firstLast = model({
+      id: "brick_api_kling_v3_flf2v",
+      label: "Kling v3 flf2v",
+      backendCategory: "first_last_frame_to_video",
+      workflowPath: "C:/Momi-Animation/workflow/flf2v/Brick_api_kling_v3_flf2v.json",
+    });
+    render(
+      <ModelSelector
+        models={[firstLast, ltx]}
+        selectedModel={firstLast}
+        seedanceVersion="2.0"
+        onChange={vi.fn()}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "LTX 2.5 CQ" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Kling" })).toBeEnabled();
+  });
+});

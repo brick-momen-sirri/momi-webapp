@@ -68,6 +68,7 @@ export function parseResolution(value: string) {
   if (normalized === "480p") return { width: 854, height: 480, label: normalized };
   if (normalized === "720p") return { width: 1280, height: 720, label: normalized };
   if (normalized === "1080p") return { width: 1920, height: 1080, label: normalized };
+  if (normalized === "1440p") return { width: 2560, height: 1440, label: normalized };
   if (normalized === "4K") return { width: 3840, height: 2160, label: normalized };
   const match = normalized.match(/^(\d+)\s*x\s*(\d+)$/i) ?? value.match(/(\d+)\s*x\s*(\d+)/i);
   return {
@@ -148,6 +149,7 @@ function normalizeResolutionAlias(value: string) {
   if (lower === "480p" || lower === "854x480") return "480p";
   if (lower === "720p" || lower === "1280x720") return "720p";
   if (lower === "1080p" || lower === "1920x1080" || lower === "16:9landscape") return "1080p";
+  if (lower === "1440p" || lower === "2560x1440") return "1440p";
   if (lower === "4k" || lower === "3840x2160") return "4K";
   return "1080p";
 }

@@ -1,4 +1,5 @@
 import { seedanceVersionIdFromOptions } from "./seedanceVersions.js";
+import { isLtxCqI2vModelId, ltxCqI2vCredits } from "./ltxCqImageToVideo.js";
 import { DEFAULT_VIDEO_ENHANCER_LONG_SIDE, isVideoEnhancerModelId, videoEnhancerCredits } from "./videoEnhancer.js";
 import type { CreditUsageSummary, Resolution, WorkflowModel, WorkflowOptions } from "./types.js";
 
@@ -21,6 +22,11 @@ export function estimateWorkflowCredits(
       plan?.height,
       plan?.frames,
     );
+  }
+
+  // Pod seconds by generated size and length. Before the substring rules too.
+  if (isLtxCqI2vModelId(model.id)) {
+    return ltxCqI2vCredits(resolution, durationSeconds);
   }
 
   if (key.includes("seedance")) {

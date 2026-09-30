@@ -16,6 +16,7 @@ import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImage
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
+import { isLtxCqI2vModelId, LTX_CQ_I2V_PROMPT_MAX_LENGTH } from "./ltxCqImageToVideo.js";
 import { isVideoEnhancerModelId, normalizeVideoEnhancerOptions } from "./videoEnhancer.js";
 
 export type JobSubmissionDependencies = {
@@ -173,6 +174,17 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   // Same reason, and stricter: the enhancer probes and re-encodes every source.
   if (inputVideo && videoEnhancer && !inputVideo.startsWith("data:") && !isLocalMediaReference(inputVideo)) {
     throw new JobSubmissionError("The Video Enhancer needs a video uploaded to this app, not a link.");
+  }
+  // LTX 2.5 CQ decodes and normalizes its image here before sending it, and the
+  // tested contract caps the prompt.
+  if (isLtxCqI2vModelId(modelId)) {
+    if ((prompt?.length ?? 0) > LTX_CQ_I2V_PROMPT_MAX_LENGTH) {
+      throw new JobSubmissionError(`LTX 2.5 CQ prompts are limited to ${LTX_CQ_I2V_PROMPT_MAX_LENGTH} characters.`);
+    }
+    const image = inputImages?.[0];
+    if (image && !image.startsWith("data:") && !isLocalMediaReference(image)) {
+      throw new JobSubmissionError("LTX 2.5 CQ needs an image uploaded to this app, not a link.");
+    }
   }
   if (inputImages && model.imageSlotCount && inputImages.length > model.imageSlotCount) {
     throw new JobSubmissionError(`This workflow accepts at most ${model.imageSlotCount} input image(s).`);
@@ -352,6 +364,7 @@ function assertSupportedResolution(resolution: Resolution, model: WorkflowModel)
 }
 
 function resolutionAlias(width: number, height: number) {
+  if (width === 2560 && height === 1440) return "1440p";
   if (width === 1024 && height === 1024) return "1K";
   if (width === 2048 && height === 2048) return "2K";
   if (width === 854 && height === 480) return "480p";

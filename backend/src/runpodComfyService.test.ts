@@ -178,6 +178,68 @@ test("an animation worker with no output.status is unaffected", async () => {
   assert.equal(result.media[0].source, "images");
 });
 
+test("on the LTX 2.5 CQ pod, COMPLETED without output.success is a failure", async () => {
+  // That worker's handler states its own outcome, and the handoff for it is
+  // explicit: RunPod's COMPLETED only says the container finished.
+  const ltxPod = {
+    id: "pod-ltx",
+    submitUrl: "https://api.runpod.ai/v2/pod-ltx/runsync",
+    statusUrl: (jobId: string) => `https://api.runpod.ai/v2/pod-ltx/status/${jobId}`,
+    cancelUrl: (jobId: string) => `https://api.runpod.ai/v2/pod-ltx/cancel/${jobId}`,
+    streamUrl: (jobId: string) => `https://api.runpod.ai/v2/pod-ltx/stream/${jobId}`,
+    healthUrl: "https://api.runpod.ai/v2/pod-ltx/health",
+    reportsWorkerSuccess: true,
+  };
+  const run = (output: unknown) =>
+    service.runComfyWorkflowOnRunpod({
+      workflow: {},
+      images: [],
+      endpoint: ltxPod,
+      fetchImpl: (async () => jsonResponse({ id: "j", status: "COMPLETED", output })) as unknown as typeof fetch,
+    });
+
+  await assert.rejects(
+    run({ success: false, error: "Workflow validation failed" }),
+    /did not report success: Workflow validation failed/,
+  );
+  await assert.rejects(run({}), /did not report success\./);
+  await assert.rejects(
+    run({
+      success: true,
+      error: "upload failed",
+      videos: [{ filename: "a.mp4", type: "s3_url", data: "https://r2.example/a.mp4" }],
+    }),
+    /upload failed/,
+  );
+
+  const ok = await run({ success: true, videos: [{ filename: "a.mp4", type: "s3_url", data: "https://r2.example/a.mp4" }] });
+  assert.equal(ok.media.length, 1);
+  assert.equal(ok.media[0].isVideo, true);
+});
+
+test("a request policy is sent beside the input, and only when given", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return jsonResponse({
+      id: "j",
+      status: "COMPLETED",
+      output: { images: [{ filename: "a.png", url: "https://cdn.example/a.png" }] },
+    });
+  };
+
+  await service.runComfyWorkflowOnRunpod({
+    workflow: {},
+    images: [],
+    policy: { executionTimeout: 1_800_000, ttl: 2_700_000 },
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+  await service.runComfyWorkflowOnRunpod({ workflow: {}, images: [], fetchImpl: fetchImpl as typeof fetch });
+
+  assert.deepEqual(bodies[0].policy, { executionTimeout: 1_800_000, ttl: 2_700_000 });
+  assert.equal("policy" in bodies[1], false);
+});
+
 test("omitting the endpoint keeps using the shared animation endpoint", async () => {
   const calls: string[] = [];
   const fetchImpl = async (url: string | URL | Request) => {

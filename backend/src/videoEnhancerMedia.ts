@@ -2,11 +2,7 @@
 // way the worker's named mode would have, and putting the result back at the
 // source frame rate afterwards. See videoEnhancer.ts for why this is ours to do.
 
-import { execFile } from "node:child_process";
-import path from "node:path";
-import { promisify } from "node:util";
-
-import { ffmpegPath, ffprobePath } from "./config.js";
+import { ffmpegErrorMessage, ffprobeJson, partPath, positiveInteger, runFfmpeg } from "./ffmpegTools.js";
 import { renameWithRetry, rmWithRetry } from "./fsRetry.js";
 import { localMediaFilePathFromUrl } from "./jobQueue/providerInputs.js";
 import { resolveAllowedExistingMediaPath } from "./mediaPathPolicy.js";
@@ -17,23 +13,6 @@ import {
   type VideoEnhancerPlan,
   type VideoEnhancerSourceProbe,
 } from "./videoEnhancer.js";
-
-const execFileAsync = promisify(execFile);
-const FFMPEG_TIMEOUT_MS = 15 * 60_000;
-
-type ProbeStream = {
-  codec_type?: string;
-  width?: number;
-  height?: number;
-  avg_frame_rate?: string;
-  r_frame_rate?: string;
-  nb_frames?: string;
-  nb_read_packets?: string;
-  duration?: string;
-  sample_aspect_ratio?: string;
-};
-
-type ProbeResult = { streams?: ProbeStream[]; format?: { duration?: string } };
 
 export type VideoEnhancerSource = VideoEnhancerSourceProbe & {
   /** Sample aspect ratio. Anything but 1 is squared up during preparation. */
@@ -155,7 +134,7 @@ export async function prepareVideoEnhancerInput(
     return outputPath;
   } catch (error) {
     await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
-    throw new Error(`Could not prepare the input video for the Video Enhancer: ${errorMessage(error)}`);
+    throw new Error(`Could not prepare the input video for the Video Enhancer: ${ffmpegErrorMessage(error)}`);
   }
 }
 
@@ -224,7 +203,7 @@ export async function finishVideoEnhancerResult(job: Pick<Job, "id" | "inputVide
   } catch (error) {
     await rmWithRetry(temporaryPath, { force: true }).catch(() => undefined);
     console.warn(
-      `[video-enhancer] ${job.id}: kept the 30 fps render as returned; restoring the source frame rate failed: ${errorMessage(error)}`,
+      `[video-enhancer] ${job.id}: kept the 30 fps render as returned; restoring the source frame rate failed: ${ffmpegErrorMessage(error)}`,
     );
     return false;
   }
@@ -255,41 +234,7 @@ async function countVideoPackets(filePath: string) {
   return positiveInteger(info.streams?.[0]?.nb_read_packets);
 }
 
-async function ffprobeJson(args: string[]): Promise<ProbeResult> {
-  const { stdout } = await execFileAsync(ffprobePath, ["-v", "error", "-of", "json", ...args], {
-    timeout: FFMPEG_TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  return JSON.parse(stdout) as ProbeResult;
-}
-
-async function runFfmpeg(args: string[]) {
-  await execFileAsync(ffmpegPath, ["-y", "-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
-    timeout: FFMPEG_TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-}
-
-function partPath(filePath: string) {
-  const extension = path.extname(filePath) || ".mp4";
-  return `${filePath.slice(0, filePath.length - path.extname(filePath).length)}.${process.pid}.${Date.now()}.part${extension}`;
-}
-
 function parseAspectRatio(value: string | undefined) {
   const [width, height] = (value ?? "").split(":").map(Number);
   return width > 0 && height > 0 ? width / height : undefined;
-}
-
-function positiveInteger(value: string | number | undefined) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function errorMessage(error: unknown) {
-  if (error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string" && error.stderr.trim()) {
-    return error.stderr.trim().split(/\r?\n/).slice(-3).join(" ");
-  }
-  return error instanceof Error ? error.message : String(error);
 }

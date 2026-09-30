@@ -265,6 +265,23 @@ function workerReportedFailure(output: unknown): string | undefined {
   return `RunPod worker reported status "${record.status}"${detail ? `: ${detail}` : " with no detail."}`;
 }
 
+/**
+ * For a worker that reports `output.success`: COMPLETED is RunPod's verdict on the
+ * container, not on the render, so anything short of `success: true` with no
+ * `error` is a failed job -- including an empty output.
+ */
+function workerWithheldSuccess(output: unknown): string | undefined {
+  const record = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
+  const error = typeof record.error === "string" && record.error.trim() ? record.error.trim() : undefined;
+  if (record.success === true && !error) return undefined;
+  const detail = [record.error, record.message, record.details]
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ")
+    .slice(0, 500);
+  return `RunPod worker did not report success${detail ? `: ${detail}` : "."}`;
+}
+
 export function normalizeRunpodCreditUsage(raw: unknown): CreditUsageSummary | undefined {
   if (!raw) return undefined;
 
@@ -430,7 +447,9 @@ async function resolveRunpodResponse(
     // the job fine, but the graph did not. Without this the job would be recorded
     // as succeeding with no media, which is what made the first live Still Images
     // failure so hard to read.
-    const workerFailure = workerReportedFailure(current.output);
+    const workerFailure =
+      workerReportedFailure(current.output) ??
+      (endpoint.reportsWorkerSuccess && status === "COMPLETED" ? workerWithheldSuccess(current.output) : undefined);
     if (workerFailure) {
       throw new RunpodComfyError(workerFailure, {
         response: current,

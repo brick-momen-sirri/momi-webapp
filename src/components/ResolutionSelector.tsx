@@ -29,6 +29,7 @@ const resolutionOptions = [
   { value: "480p", label: "480p", width: 854, height: 480 },
   { value: "720p", label: "720p", width: 1280, height: 720 },
   { value: "1080p", label: "1080p", width: 1920, height: 1080 },
+  { value: "1440p", label: "1440p", width: 2560, height: 1440 },
   { value: "4K", label: "4K", width: 3840, height: 2160 },
   { value: "1024x1024", label: "1024x1024", width: 1024, height: 1024 },
   { value: "1024x1536", label: "1024x1536", width: 1024, height: 1536 },

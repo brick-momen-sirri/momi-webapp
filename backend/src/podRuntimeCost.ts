@@ -25,6 +25,7 @@
 // prices scraped off a page, they are what was charged.
 
 import { runpodApiKey } from "./config.js";
+import { isLtxCqI2vModelId } from "./ltxCqImageToVideo.js";
 import type { Job, RunpodJobTiming } from "./types.js";
 
 /**
@@ -138,7 +139,7 @@ export type PodRuntimeCost = {
  * not billed. Note that a cold start lands inside the worker's own accounting
  * rather than here, so this is a floor on the true cost, not a ceiling.
  */
-export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming">): PodRuntimeCost | undefined {
+export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming" | "modelId">): PodRuntimeCost | undefined {
   if (!runsOnOwnPod(job)) return undefined;
 
   const executionMs = job.runpodTiming?.executionMs;
@@ -159,12 +160,12 @@ export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming"
  * Whether the job ran on one of the studio's own GPU endpoints, billed by the
  * second, rather than relaying to a provider that returns its own usage.
  */
-export function runsOnOwnPod(job: Pick<Job, "workflowOptions">) {
-  return Boolean(job.workflowOptions?.stillImage || job.workflowOptions?.videoEnhancer);
+export function runsOnOwnPod(job: Pick<Job, "workflowOptions" | "modelId">) {
+  return Boolean(job.workflowOptions?.stillImage || job.workflowOptions?.videoEnhancer || isLtxCqI2vModelId(job.modelId));
 }
 
 /** Just the credits, for callers that only need the figure. */
-export function podRuntimeCredits(job: Pick<Job, "workflowOptions" | "runpodTiming">) {
+export function podRuntimeCredits(job: Pick<Job, "workflowOptions" | "runpodTiming" | "modelId">) {
   return podRuntimeCost(job)?.credits;
 }
 

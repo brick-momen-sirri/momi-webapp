@@ -1,3 +1,4 @@
+import { isLtxCqI2vModel, ltxCqI2vCredits } from "../features/generation/ltxCqImageToVideo";
 import { isVideoEnhancerModel, videoEnhancerCredits } from "../features/generation/videoEnhancer";
 import type { ModelType } from "../types";
 
@@ -41,6 +42,11 @@ export function estimateModelCredits(
   // side. Before the substring rules, which "enhance" and "upscal" would match.
   if (isVideoEnhancerModel(model)) {
     return videoEnhancerCredits(options.videoEnhancerLongSide ?? 2560);
+  }
+
+  // Mirrors ltxCqI2vCredits on the backend: pod seconds at the generated size.
+  if (isLtxCqI2vModel(model)) {
+    return ltxCqI2vCredits(resolution, duration);
   }
 
   if (key.includes("seedance")) {
