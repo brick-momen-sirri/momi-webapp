@@ -12,6 +12,13 @@ process.env.COMFY_ORG_API_KEY = "comfy-key-test";
 process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES = "512";
 process.env.RUNPOD_INPUT_BASE_URL = "";
 process.env.PUBLIC_API_BASE_URL = "";
+// Blanked rather than omitted, like RUNPOD_INPUT_BASE_URL: env.ts fills any key
+// process.env lacks from the host's .env, and on a host with an input bucket
+// configured a saved-file input would be uploaded to it -- a real network write
+// from a unit test -- and come back as a presigned URL instead of inline data.
+process.env.RUNPOD_INPUT_BUCKET_ENDPOINT_URL = "";
+process.env.RUNPOD_INPUT_BUCKET_ACCESS_KEY_ID = "";
+process.env.RUNPOD_INPUT_BUCKET_SECRET_ACCESS_KEY = "";
 
 import test from "node:test";
 import assert from "node:assert/strict";

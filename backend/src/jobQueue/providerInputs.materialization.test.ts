@@ -26,6 +26,13 @@ process.env.LOCAL_PROJECTS_ROOT = path.join(tempDir, "projects");
 process.env.BRICK_PROJECTS_ROOT = path.join(tempDir, "brick");
 process.env.COMFY_ROOT = path.join(tempDir, "comfy");
 process.env.RUNPOD_INPUT_BASE_URL = "";
+// Blanked rather than omitted, like RUNPOD_INPUT_BASE_URL: env.ts fills any key
+// process.env lacks from the host's .env, and on a host with an input bucket
+// configured a saved-file input would be uploaded to it -- a real network write
+// from a unit test -- and come back as a presigned URL instead of inline data.
+process.env.RUNPOD_INPUT_BUCKET_ENDPOINT_URL = "";
+process.env.RUNPOD_INPUT_BUCKET_ACCESS_KEY_ID = "";
+process.env.RUNPOD_INPUT_BUCKET_SECRET_ACCESS_KEY = "";
 process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES = "1024";
 
 const uploadRequests: string[] = [];
