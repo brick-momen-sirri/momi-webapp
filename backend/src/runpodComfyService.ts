@@ -70,6 +70,12 @@ type RunpodComfyInput = {
   // Omitted means the shared Animation endpoint. Still image jobs pass their
   // preset's own pod -- see runpodEndpoints.ts.
   endpoint?: RunpodEndpoint;
+  /**
+   * RunPod's per-request execution policy, in milliseconds. Omitted leaves the
+   * endpoint's own configuration in force, which is every job but the Video
+   * Enhancer's -- see videoEnhancerRunpodPolicy.
+   */
+  policy?: { executionTimeout?: number; ttl?: number };
 };
 
 type ResumeRunpodComfyInput = {
@@ -129,6 +135,7 @@ export async function runComfyWorkflowOnRunpod({
   onSubmitted,
   onPoll,
   endpoint = defaultRunpodEndpoint(),
+  policy,
 }: RunpodComfyInput): Promise<RunpodComfyResult> {
   assertRunpodConfig();
   throwIfCancellationRequested(shouldCancel);
@@ -140,6 +147,7 @@ export async function runComfyWorkflowOnRunpod({
       images: inputFiles,
       comfy_org_api_key: comfyOrgApiKey,
     },
+    ...(policy ? { policy } : {}),
   });
 
   assertRunpodRequestBodySize(body);

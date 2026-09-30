@@ -26,6 +26,7 @@ import {
   runpodStreamUrl,
   runpodStillImageEndpointIds,
   runpodSubmissionMode,
+  runpodVideoEnhancerEndpointId,
 } from "./config.js";
 import { stillImageRunsOnSharedEndpoint } from "./stillImageWorkflow.js";
 import type { WorkflowOptions } from "./types.js";
@@ -95,6 +96,13 @@ export function stillImageEndpointId(categoryId: string) {
  */
 export function resolveRunpodEndpoint(job: { runpodEndpointId?: string; workflowOptions?: WorkflowOptions }): RunpodEndpoint {
   if (job.runpodEndpointId) return runpodEndpointForId(job.runpodEndpointId);
+
+  // The enhancer's graph loads ~46 GiB of LTX weights that only its own image
+  // carries, so like a local-GPU still image preset it never falls back.
+  if (job.workflowOptions?.videoEnhancer) {
+    if (runpodVideoEnhancerEndpointId) return runpodEndpointForId(runpodVideoEnhancerEndpointId);
+    throw new Error("No RunPod endpoint is configured for the Video Enhancer. Set RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER.");
+  }
 
   const categoryId = job.workflowOptions?.stillImage?.categoryId;
   if (!categoryId) return defaultRunpodEndpoint();

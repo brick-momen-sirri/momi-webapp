@@ -10,7 +10,13 @@ import {
   isCreditExemptJob,
 } from "../creditUsageAccounting.js";
 import { logMemory } from "../memoryLogger.js";
-import { mergeRunpodTiming, POD_RUNTIME_SOURCE, podRuntimeCost, podRuntimePricingConfigured } from "../podRuntimeCost.js";
+import {
+  mergeRunpodTiming,
+  POD_RUNTIME_SOURCE,
+  podRuntimeCost,
+  podRuntimePricingConfigured,
+  runsOnOwnPod,
+} from "../podRuntimeCost.js";
 import { resolveRunpodWorkerGpu } from "../runpodWorkerGpu.js";
 import { projectFolderName } from "../projectFolderName.js";
 import { getProject } from "../projectService.js";
@@ -36,10 +42,12 @@ import { persistServerlessArtifacts } from "../serverlessArtifactService.js";
 import { validateRunpodImageRequirements } from "../runpodImagePreflight.js";
 import { ensureJobFolders, saveJobMetadata } from "../storageService.js";
 import type { CreditBalanceSnapshot, Job, WorkflowModel } from "../types.js";
+import { videoEnhancerRunpodPolicy } from "../videoEnhancer.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
 import type { ExecutionClaim } from "./executionRegistry.js";
 import { jobRemoteMediaEntries, materializeRunpodInputImages, materializeRunpodInputVideo } from "./index.js";
 import { markJobCompleted } from "./lifecycleState.js";
+import { prepareVideoEnhancerSubmission } from "./videoEnhancerSubmission.js";
 
 export type RunpodExecutionDependencies = {
   isExecutionCurrent: (execution: ExecutionClaim) => boolean;
@@ -97,6 +105,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     // preflight, snapshot, submission-state persistence, the resume path -- is the
     // shared lifecycle, unchanged.
     const stillImage = job.workflowOptions?.stillImage;
+    // The Video Enhancer is a third route of the same kind: its own graph builder,
+    // and its own input preparation because the source is re-encoded first.
+    const videoEnhancer = job.workflowOptions?.videoEnhancer;
     const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input);
     const workflow = prepared.workflow;
     const runpodImages = prepared.runpodImages;
@@ -106,8 +117,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     // only new submissions so a deploy cannot strand an acknowledged RunPod job.
     // Skipped for still images: that check counts LoadImage nodes by class name,
     // which miscounts these graphs, and the binding pass in the builder is the
-    // stronger equivalent -- every slot is written or the build fails.
-    if (!job.runpodJobId && !stillImage) await validateRunpodImageRequirements(workflow, job.inputImages);
+    // stronger equivalent -- every slot is written or the build fails. The
+    // enhancer has no LoadImage node at all, and the same binding check.
+    if (!job.runpodJobId && !stillImage && !videoEnhancer) await validateRunpodImageRequirements(workflow, job.inputImages);
     await saveWorkflowSnapshot(folders.workflowSnapshotPath, workflow);
     job.workflowSnapshotPath = folders.workflowSnapshotPath;
     if (await deps.settleRequestedCancellation(job, execution)) return;
@@ -200,6 +212,7 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
           workflow,
           images: runpodImages.images,
           videos: runpodVideo?.videos ?? [],
+          policy: videoEnhancer ? videoEnhancerRunpodPolicy() : undefined,
           shouldCancel: shouldStopRunpodWork,
           endpoint,
           onSubmitted: async ({ jobId, status }) => {
@@ -416,7 +429,7 @@ function recordRunpodTiming(job: Job, observation: { delayMs?: number; execution
  */
 async function recordRunpodWorkerGpu(job: Job, workerId: string | undefined) {
   if (!workerId || job.runpodTiming?.gpuTypeId) return;
-  if (!job.workflowOptions?.stillImage || !podRuntimePricingConfigured()) return;
+  if (!runsOnOwnPod(job) || !podRuntimePricingConfigured()) return;
 
   const gpu = await resolveRunpodWorkerGpu(workerId);
   if (!gpu) return;
@@ -425,7 +438,7 @@ async function recordRunpodWorkerGpu(job: Job, workerId: string | undefined) {
 }
 
 /**
- * Price the pod time a Still Images job used, when it can be measured.
+ * Price the pod time a Still Images or Video Enhancer job used, when it can be measured.
  *
  * Left alone when something already measured this job's spend -- the company
  * balance delta, where that is enabled, watches real money leave the account over a
@@ -475,9 +488,10 @@ export async function prepareRunpodSubmission(
   inputFolder: string,
 ): Promise<PreparedSubmission> {
   const stillImage = job.workflowOptions?.stillImage;
-  return stillImage
-    ? prepareStillImageSubmission(job, stillImage)
-    : prepareAnimationSubmission(job, model, projectFolder, inputFolder);
+  if (stillImage) return prepareStillImageSubmission(job, stillImage);
+  const videoEnhancer = job.workflowOptions?.videoEnhancer;
+  if (videoEnhancer) return prepareVideoEnhancerSubmission(job, videoEnhancer, inputFolder);
+  return prepareAnimationSubmission(job, model, projectFolder, inputFolder);
 }
 
 /** The existing path, moved verbatim so the still image branch sits beside it. */

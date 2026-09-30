@@ -23,6 +23,7 @@ export type PersistedGenerationSettings = {
   seedanceVideoEditing?: boolean;
   seedanceGenerateAudio?: boolean;
   klingCameraStabilization?: boolean;
+  videoEnhancerLongSide?: number;
   imageToVideo16By9Cropping?: boolean;
 };
 
@@ -56,6 +57,7 @@ export function readPersistedGenerationSettings(): PersistedGenerationSettings {
       // The opposite way round: only an explicit false turns it off, so a stored
       // preference from before the switch starts stabilized.
       klingCameraStabilization: parsed.klingCameraStabilization !== false,
+      videoEnhancerLongSide: typeof parsed.videoEnhancerLongSide === "number" ? parsed.videoEnhancerLongSide : undefined,
       imageToVideo16By9Cropping:
         typeof parsed.imageToVideo16By9Cropping === "boolean" ? parsed.imageToVideo16By9Cropping : undefined,
     };

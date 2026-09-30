@@ -113,3 +113,62 @@ describe("Seedance model version", () => {
     expect(onSeedanceVersionChange).toHaveBeenCalledWith("2.5");
   });
 });
+
+describe("Video Enhancer task", () => {
+  const enhancer = model({
+    id: "video_enhancer_ltx25_cq",
+    label: "Video Enhancer",
+    backendCategory: "video_upscaling",
+    workflowPath: "C:/Momi-Animation/backend/workflow-video-enhancer/ltx25-cq-v2.json",
+    requiresImage: false,
+    requiresVideo: true,
+    imageSlotCount: 0,
+  });
+
+  it("opens the enhancer from its own tab", async () => {
+    const flux = model();
+    const onChange = vi.fn();
+    render(
+      <ModelSelector
+        models={[flux, enhancer]}
+        selectedModel={flux}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Video Enhancer/ }));
+    expect(onChange).toHaveBeenCalledWith("video_enhancer_ltx25_cq");
+  });
+
+  it("offers only the enhancer, without the Flux placeholder", () => {
+    render(
+      <ModelSelector
+        models={[enhancer]}
+        selectedModel={enhancer}
+        seedanceVersion="2.0"
+        onChange={vi.fn()}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Video Enhancer" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Flux 3" })).toBeNull();
+  });
+
+  it("is disabled where no enhancer endpoint is configured", () => {
+    const flux = model();
+    render(
+      <ModelSelector
+        models={[flux]}
+        selectedModel={flux}
+        seedanceVersion="2.0"
+        onChange={vi.fn()}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Video Enhancer/ })).toBeDisabled();
+  });
+});

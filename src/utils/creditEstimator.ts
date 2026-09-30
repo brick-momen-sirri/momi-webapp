@@ -1,3 +1,4 @@
+import { isVideoEnhancerModel, videoEnhancerCredits } from "../features/generation/videoEnhancer";
 import type { ModelType } from "../types";
 
 /**
@@ -22,6 +23,8 @@ export type CreditEstimateOptions = {
   upscale?: string;
   /** Whether a tiled upscale cleans each tile with SeedVR first. */
   upscaleMode?: string;
+  /** The Video Enhancer's long side; its price follows the frame area. */
+  videoEnhancerLongSide?: number;
 };
 
 export function estimateModelCredits(
@@ -33,6 +36,12 @@ export function estimateModelCredits(
 ) {
   const key = `${model.id} ${model.label} ${model.backendCategory ?? ""} ${model.workflowPath ?? ""}`.toLowerCase();
   const duration = durationOrDefault(durationSeconds, model.defaultDurationSeconds, key);
+
+  // Mirrors the backend estimate: pod seconds for a 16:9 source at the picked long
+  // side. Before the substring rules, which "enhance" and "upscal" would match.
+  if (isVideoEnhancerModel(model)) {
+    return videoEnhancerCredits(options.videoEnhancerLongSide ?? 2560);
+  }
 
   if (key.includes("seedance")) {
     return seedanceCreditRange(key, duration, resolution, options.seedanceVersion).maxCredits;

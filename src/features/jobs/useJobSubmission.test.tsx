@@ -81,6 +81,7 @@ function useSubmissionHarness(overrides: HarnessOverrides = {}) {
     seedanceVideoEditing: false,
     seedanceGenerateAudio: false,
     klingCameraStabilization: true,
+    videoEnhancerLongSide: 2560,
     setJobs,
     setProjects,
     setBackendJobsTotal: setTotal,

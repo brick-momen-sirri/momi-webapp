@@ -3,6 +3,7 @@ process.env.RUNPOD_API_KEY = "runpod-key-test";
 process.env.COMFY_ORG_API_KEY = "comfy-key-test";
 process.env.RUNPOD_ENDPOINT_ID_PRO_UPSCALER = "pod-pro-upscaler";
 process.env.RUNPOD_ENDPOINT_ID_QWEN_EDIT = "pod-qwen-edit";
+process.env.RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER = "pod-video-enhancer";
 // Blanked rather than merely omitted so the "no endpoint configured" path is
 // tested against the fixture and not against whatever the host's .env happens to
 // hold: env.ts skips any key already present in process.env, so an absent key
@@ -105,4 +106,11 @@ test("stillImageEndpointId reports configured presets and empty for the rest", (
   assert.equal(stillImageEndpointId("qwen-edit"), "pod-qwen-edit");
   assert.equal(stillImageEndpointId("general-enhancement"), "");
   assert.equal(stillImageEndpointId("not-a-preset"), "");
+});
+
+test("a Video Enhancer job goes to its own pod, and a persisted endpoint still wins", () => {
+  const enhancer = { workflowOptions: { videoEnhancer: { longSide: 2560 as const } } };
+  assert.equal(resolveRunpodEndpoint(enhancer).id, "pod-video-enhancer");
+  assert.equal(resolveRunpodEndpoint(enhancer).cancelUrl("job-1"), "https://api.runpod.ai/v2/pod-video-enhancer/cancel/job-1");
+  assert.equal(resolveRunpodEndpoint({ ...enhancer, runpodEndpointId: "pod-earlier" }).id, "pod-earlier");
 });

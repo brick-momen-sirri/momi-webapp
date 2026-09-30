@@ -1,4 +1,5 @@
 import type { StillImageOptions } from "./stillImageCategories.js";
+import type { VideoEnhancerOptions } from "./videoEnhancer.js";
 
 export type ComfyServerStatus = "offline" | "idle" | "busy" | "error";
 
@@ -251,6 +252,9 @@ export type WorkflowOptions = {
   // presence is what jobSection() reads to tell the two workspaces apart, so it
   // must never be set on an Animation job.
   stillImage?: StillImageOptions;
+  // Present exactly on Video Enhancer jobs. Routes the job to the enhancer's own
+  // endpoint, and after dispatch carries the plan the result is restored with.
+  videoEnhancer?: VideoEnhancerOptions;
 };
 
 export type CreateJobRequest = {

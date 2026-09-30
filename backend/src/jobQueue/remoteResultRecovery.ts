@@ -6,6 +6,7 @@ import { getProject } from "../projectService.js";
 import { ensureJobFolders } from "../storageService.js";
 import { responseBodyToNodeStream, writeStreamAtomically } from "../streamingMediaService.js";
 import type { Job } from "../types.js";
+import { finishVideoEnhancerResult } from "../videoEnhancerMedia.js";
 import { jobRemoteMediaEntries, type RemoteMediaEntry } from "./remoteMedia.js";
 
 type RemoteResultRecoveryOptions = {
@@ -51,7 +52,7 @@ export class RemoteResultRecovery {
           if (!localUrl) {
             const attempts = this.failureCounts.get(entry.url) ?? 0;
             if (attempts >= 24) continue;
-            localUrl = await downloadRemoteResultMedia(entry, folders.output, job.id, fetchImpl);
+            localUrl = await downloadRemoteResultMedia(entry, folders.output, job, fetchImpl);
             if (!localUrl) {
               this.failureCounts.set(entry.url, attempts + 1);
               failed += 1;
@@ -91,7 +92,8 @@ export function resultExtension(url: URL, contentType: string) {
   return ".bin";
 }
 
-async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: string, jobId: string, fetchImpl: typeof fetch) {
+async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: string, job: Job, fetchImpl: typeof fetch) {
+  const jobId = job.id;
   try {
     const url = new URL(entry.url);
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(120000) });
@@ -106,6 +108,11 @@ async function downloadRemoteResultMedia(entry: RemoteMediaEntry, outputFolder: 
       return undefined;
     }
     await writeStreamAtomically(responseBodyToNodeStream(response), filePath, runpodOutputMaxBytes);
+    // The same restore the first download would have done; a no-op for any job
+    // that is not a Video Enhancer render.
+    if (entry.kind === "result" && [".mp4", ".mov", ".webm"].includes(extension)) {
+      await finishVideoEnhancerResult(job, filePath);
+    }
     return `/api/media?path=${encodeURIComponent(filePath)}`;
   } catch {
     return undefined;

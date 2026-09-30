@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { serverlessWorkflowRoot, workflowMappingsPath, workflowRoots } from "./config.js";
+import { runpodVideoEnhancerEndpointId, serverlessWorkflowRoot, workflowMappingsPath, workflowRoots } from "./config.js";
 import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
@@ -8,6 +8,7 @@ import { isPathWithinRoot } from "./pathContainment.js";
 import { applyKlingCameraStabilization, isKlingVideoClassType } from "./klingCameraStabilization.js";
 import { applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
+import { isVideoEnhancerModelId, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
 import { isGptImageKey, isGptImageModel, isNanoBananaModel, supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type {
@@ -43,7 +44,10 @@ export async function loadWorkflowModels() {
 }
 
 export function getWorkflowModels() {
-  return modelsCache;
+  // The enhancer is registered rather than scanned (see config.ts), and offered
+  // only where its endpoint is configured: a host without one would list a
+  // section every submission to which fails at dispatch.
+  return runpodVideoEnhancerEndpointId ? [...modelsCache, videoEnhancerWorkflowModel()] : modelsCache;
 }
 
 /**
@@ -55,7 +59,13 @@ export function getWorkflowModels() {
  * pipeline can still look up a preset by id.
  */
 export function getWorkflowModel(id: string) {
-  return modelsCache.find((model) => model.id === id) ?? stillImageWorkflowModel(id);
+  return (
+    modelsCache.find((model) => model.id === id) ??
+    stillImageWorkflowModel(id) ??
+    // Resolved whether or not the endpoint is configured, so a job that already
+    // exists keeps its model after the setting is removed.
+    (isVideoEnhancerModelId(id) ? videoEnhancerWorkflowModel() : undefined)
+  );
 }
 
 export async function loadWorkflowPrompt(

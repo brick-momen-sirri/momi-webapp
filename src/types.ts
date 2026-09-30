@@ -376,6 +376,23 @@ export type WorkflowOptions = {
     /** Present only for the crop/layer based Image Editing preset. */
     edit?: StillImageEditWorkflow;
   };
+  // Present exactly on Video Enhancer jobs; routes them to the LTX 2.5 CQ pod. The
+  // plan is written by the backend at dispatch, once it has probed the source.
+  videoEnhancer?: {
+    longSide: number;
+    seed?: number;
+    plan?: {
+      width: number;
+      height: number;
+      frames: number;
+      sourceWidth: number;
+      sourceHeight: number;
+      sourceFps: string;
+      timing: "retime" | "resample";
+      outputFps: string;
+      sourceHasAudio: boolean;
+    };
+  };
 };
 
 export type ModelType = {

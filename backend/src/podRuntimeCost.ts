@@ -60,6 +60,12 @@ const MEASURED_GPU_USD_PER_SECOND: Readonly<Record<string, number>> = {
   "NVIDIA A40": 0.0003221,
   // $0.656-0.675/h
   "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb": 0.0001844,
+  // The Video Enhancer endpoint's GPUs, from its own billing on 2026-09-29/30:
+  // $1.663/h in both daily buckets (3,090 billed seconds). The worker itself
+  // reports 1.09/h for the MIG slice, low again as with 1g.24gb above.
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb": 0.000462,
+  // $1.664/h, one bucket of 320 billed seconds on the same endpoint.
+  "NVIDIA RTX 6000 Ada Generation": 0.0004621,
 };
 
 /**
@@ -133,7 +139,7 @@ export type PodRuntimeCost = {
  * rather than here, so this is a floor on the true cost, not a ceiling.
  */
 export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming">): PodRuntimeCost | undefined {
-  if (!job.workflowOptions?.stillImage) return undefined;
+  if (!runsOnOwnPod(job)) return undefined;
 
   const executionMs = job.runpodTiming?.executionMs;
   if (typeof executionMs !== "number" || !Number.isFinite(executionMs) || executionMs <= 0) return undefined;
@@ -147,6 +153,14 @@ export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming"
   // as 0 would be read as "not costed" rather than "cost about nothing".
   const credits = Math.max(1, Math.round(usd * CREDITS_PER_USD));
   return { credits, usd, usdPerSecond, gpuTypeId };
+}
+
+/**
+ * Whether the job ran on one of the studio's own GPU endpoints, billed by the
+ * second, rather than relaying to a provider that returns its own usage.
+ */
+export function runsOnOwnPod(job: Pick<Job, "workflowOptions">) {
+  return Boolean(job.workflowOptions?.stillImage || job.workflowOptions?.videoEnhancer);
 }
 
 /** Just the credits, for callers that only need the figure. */

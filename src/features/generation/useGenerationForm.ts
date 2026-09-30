@@ -27,6 +27,12 @@ import {
   supportsSeedanceGenerateAudio,
 } from "./generationUtils";
 import {
+  isVideoEnhancerModel,
+  normalizeVideoEnhancerLongSide,
+  videoEnhancerTimeLabel,
+  type VideoEnhancerLongSide,
+} from "./videoEnhancer";
+import {
   defaultSeedanceVideoEditing,
   normalizeSeedanceVersion,
   seedanceEffectiveModel,
@@ -66,6 +72,9 @@ export function useGenerationForm(options: GenerationFormOptions) {
   // where drift and jitter are the defect rather than the style.
   const [klingCameraStabilization, setKlingCameraStabilization] = useState(initialSettings.klingCameraStabilization ?? true);
   const [selectedDurationSeconds, setSelectedDurationSeconds] = useState(initialSettings.selectedDurationSeconds ?? 8);
+  const [videoEnhancerLongSide, setVideoEnhancerLongSide] = useState<VideoEnhancerLongSide>(
+    normalizeVideoEnhancerLongSide(initialSettings.videoEnhancerLongSide),
+  );
   const [prompt, setPrompt] = useState(initialSettings.prompt ?? "");
   const [archVizGridOptions, setArchVizGridOptions] = useState<ArchVizGridOptions>(defaultArchVizGridOptions);
   const [saveNumber, setSaveNumber] = useState(normalizeSaveNumber(initialSettings.saveNumber));
@@ -95,14 +104,27 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const selectedModel = useMemo(
     () => ({
       ...versionedModelBase,
+      // Render time moves by minutes with the long side, so the card follows it.
+      estimatedTime: isVideoEnhancerModel(versionedModelBase)
+        ? videoEnhancerTimeLabel(videoEnhancerLongSide)
+        : versionedModelBase.estimatedTime,
       cost: estimateModelCredits(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
         seedanceVersion: selectedSeedanceVersion,
+        videoEnhancerLongSide,
       }),
       costLabel: estimateModelCreditLabel(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
         seedanceVersion: selectedSeedanceVersion,
+        videoEnhancerLongSide,
       }),
     }),
-    [imageOutputCount, selectedDurationSeconds, selectedResolution, selectedSeedanceVersion, versionedModelBase],
+    [
+      imageOutputCount,
+      selectedDurationSeconds,
+      selectedResolution,
+      selectedSeedanceVersion,
+      versionedModelBase,
+      videoEnhancerLongSide,
+    ],
   );
   const selectedModelSupportsVideoEditing = seedanceSupportsVideoEditing(selectedModel, seedanceVersion(selectedSeedanceVersion));
   // Unlike video editing, every Seedance version and task declares generate_audio,
@@ -159,6 +181,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
       seedanceGenerateAudio,
       klingCameraStabilization,
       selectedDurationSeconds,
+      videoEnhancerLongSide,
       selectedProjectId,
       targetFolderId,
       prompt,
@@ -182,6 +205,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
     selectedSeedanceRatio,
     selectedSeedanceVersion,
     targetFolderId,
+    videoEnhancerLongSide,
   ]);
 
   function handleModelChange(modelId: string) {
@@ -223,6 +247,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
     setKlingCameraStabilization,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
+    videoEnhancerLongSide,
+    setVideoEnhancerLongSide,
     prompt,
     setPrompt,
     archVizGridOptions,

@@ -16,6 +16,7 @@ import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImage
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
+import { isVideoEnhancerModelId, normalizeVideoEnhancerOptions } from "./videoEnhancer.js";
 
 export type JobSubmissionDependencies = {
   getProject: (id: string) => Project | undefined;
@@ -94,15 +95,19 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
   const startFrame = optionalString(body.startFrame, "startFrame");
   const endFrame = optionalString(body.endFrame, "endFrame");
   const inputVideo = optionalString(body.inputVideo, "inputVideo");
-  const resolution = optionalResolution(body.resolution);
-  const workflowOptions = optionalWorkflowOptions(body.workflowOptions);
+  const videoEnhancer = isVideoEnhancerModelId(modelId);
+  // The enhancer takes its size and length from the source video and its long-side
+  // option; a resolution or duration on the request would mean nothing and is
+  // dropped rather than rejected, since the Animation form always sends both.
+  const resolution = videoEnhancer ? undefined : optionalResolution(body.resolution);
+  const workflowOptions = bindVideoEnhancerOptions(modelId, optionalWorkflowOptions(body.workflowOptions));
   // Seedance's limits come from the picked version, not from the workflow file: 2.5
   // runs to 30s and drops 4K. Parsed before the two checks below so both see the
   // same limits the picker offered, rather than the file's inferred 2.0 ones.
   const effectiveModel = seedanceEffectiveModel(model, workflowOptions);
   assertSeedanceOptionsFitVersion(model, workflowOptions);
   assertKlingOptionsFitModel(model, workflowOptions);
-  const durationSeconds = optionalDuration(body.durationSeconds, effectiveModel);
+  const durationSeconds = videoEnhancer ? undefined : optionalDuration(body.durationSeconds, effectiveModel);
   const targetFolderId = optionalFolderId(body.targetFolderId);
 
   // Still image presets carry their own input rules, and they are the stricter
@@ -164,6 +169,10 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
     !isLocalMediaReference(inputVideo)
   ) {
     throw new JobSubmissionError(remoteVideoInputRejection(model));
+  }
+  // Same reason, and stricter: the enhancer probes and re-encodes every source.
+  if (inputVideo && videoEnhancer && !inputVideo.startsWith("data:") && !isLocalMediaReference(inputVideo)) {
+    throw new JobSubmissionError("The Video Enhancer needs a video uploaded to this app, not a link.");
   }
   if (inputImages && model.imageSlotCount && inputImages.length > model.imageSlotCount) {
     throw new JobSubmissionError(`This workflow accepts at most ${model.imageSlotCount} input image(s).`);
@@ -359,7 +368,16 @@ function normalizeResolution(value: string) {
 function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   if (value == null) return undefined;
   const options = plainRecord(value, "workflowOptions");
-  const allowedKeys = new Set(["archVizGrid", "nanoBanana", "gptImage", "seedance", "kling", "save", "stillImage"]);
+  const allowedKeys = new Set([
+    "archVizGrid",
+    "nanoBanana",
+    "gptImage",
+    "seedance",
+    "kling",
+    "save",
+    "stillImage",
+    "videoEnhancer",
+  ]);
   const unknown = Object.keys(options).find((key) => !allowedKeys.has(key));
   if (unknown) throw new JobSubmissionError(`Unsupported provider-specific workflow option: ${unknown}.`);
 
@@ -404,6 +422,13 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
     }
   }
   if (options.archVizGrid != null) plainRecord(options.archVizGrid, "ArchViz grid options");
+  if (options.videoEnhancer != null) {
+    try {
+      options.videoEnhancer = normalizeVideoEnhancerOptions(options.videoEnhancer);
+    } catch (error) {
+      throw new JobSubmissionError(error instanceof Error ? error.message : "Invalid Video Enhancer options.");
+    }
+  }
   if (options.save != null) plainRecord(options.save, "save options");
 
   if (options.stillImage == null) return options as WorkflowOptions;
@@ -416,6 +441,24 @@ function optionalWorkflowOptions(value: unknown): WorkflowOptions | undefined {
   } catch (error) {
     throw new JobSubmissionError(error instanceof Error ? error.message : "Invalid still image options.");
   }
+}
+
+/**
+ * Tie workflowOptions.videoEnhancer to the enhancer model, in both directions.
+ *
+ * The endpoint is resolved from the options and the graph from the model, as with
+ * still image presets, so the two must agree: options on another model would send
+ * that model's graph to the LTX pod, and the enhancer model without them would send
+ * the CQ graph to the shared Animation endpoint. Missing options are filled with
+ * the defaults rather than refused -- the long side is the only setting.
+ */
+function bindVideoEnhancerOptions(modelId: string, options: WorkflowOptions | undefined): WorkflowOptions | undefined {
+  if (!isVideoEnhancerModelId(modelId)) {
+    if (options?.videoEnhancer) throw new JobSubmissionError(`modelId ${modelId} does not take Video Enhancer options.`);
+    return options;
+  }
+  if (options?.stillImage) throw new JobSubmissionError("The Video Enhancer is not a still image preset.");
+  return { ...options, videoEnhancer: options?.videoEnhancer ?? normalizeVideoEnhancerOptions(undefined) };
 }
 
 function plainRecord(value: unknown, label: string) {

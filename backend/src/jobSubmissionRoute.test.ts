@@ -12,6 +12,7 @@ import { isStillImageCategoryId } from "./stillImageCategories.js";
 import { isStillImageSeed } from "./stillImageSeed.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
+import { VIDEO_ENHANCER_MODEL_ID, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 
 const users = {
   owner: user("usr_owner", "owner@example.com"),
@@ -782,6 +783,45 @@ test("Kling O3 refuses a linked video but accepts saved media", () => {
   assert.equal(
     validatedRequest({ ...base, modelId: permissive.id, inputVideo: linked }, permissive, users.owner.id).inputVideo,
     linked,
+  );
+});
+
+test("the Video Enhancer is bound to its options, takes no size or duration, and needs saved media", () => {
+  const enhancer = videoEnhancerWorkflowModel();
+  const saved = "/api/media?path=C%3A%5Cuploads%5Cclip.mp4";
+  const base = { projectId: project.id, modelId: VIDEO_ENHANCER_MODEL_ID, inputVideo: saved };
+
+  // The Animation form always sends a resolution and a duration; both are dropped.
+  const request = validatedRequest(
+    { ...base, resolution: { width: 1920, height: 1080, label: "1080p" }, durationSeconds: 5 },
+    enhancer,
+    users.owner.id,
+  );
+  assert.equal(request.resolution, undefined);
+  assert.equal(request.durationSeconds, undefined);
+  assert.deepEqual(request.workflowOptions?.videoEnhancer, { longSide: 2560 });
+
+  // A client cannot supply the plan the dispatcher writes.
+  const chosen = validatedRequest(
+    { ...base, workflowOptions: { videoEnhancer: { longSide: 1920, plan: { width: 1 } } } },
+    enhancer,
+    users.owner.id,
+  );
+  assert.deepEqual(chosen.workflowOptions?.videoEnhancer, { longSide: 1920 });
+
+  assert.throws(() => validatedRequest({ ...base, inputVideo: undefined }, enhancer, users.owner.id), /input video is required/i);
+  assert.throws(
+    () => validatedRequest({ ...base, inputVideo: "https://cdn.example/clip.mp4" }, enhancer, users.owner.id),
+    /uploaded to this app/i,
+  );
+  assert.throws(
+    () => validatedRequest({ ...base, workflowOptions: { videoEnhancer: { longSide: 4096 } } }, enhancer, users.owner.id),
+    /longSide/,
+  );
+  // Options on another model would send that model's graph to the LTX pod.
+  assert.throws(
+    () => validatedRequest({ ...validBody(), workflowOptions: { videoEnhancer: { longSide: 2560 } } }, model, users.owner.id),
+    /does not take Video Enhancer options/,
   );
 });
 

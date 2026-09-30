@@ -58,6 +58,11 @@ export const workflowRoots = process.env.WORKFLOW_ROOTS
 // local-GPU preset graphs in the Animation model picker. Presets are addressed by
 // name from the registry instead of being discovered.
 export const stillImageWorkflowRoot = process.env.STILL_IMAGE_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-still-images");
+// The Video Enhancer graph is kept out of workflowRoots for the same reason, and
+// one more: filename inference reads "enhance" as an image upscaler, so a scanned
+// copy would appear in the Image Editing tab asking for an input image.
+export const videoEnhancerWorkflowRoot =
+  process.env.VIDEO_ENHANCER_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-video-enhancer");
 
 export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(comfyRoot, "output", "projects");
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");
@@ -163,6 +168,19 @@ export const runpodStillImageEndpointIds: Readonly<Record<string, string>> = Obj
     categoryId,
     process.env[`RUNPOD_ENDPOINT_ID_${categoryId.replaceAll("-", "_").toUpperCase()}`]?.trim() ?? "",
   ]).filter(([, endpoint]) => endpoint),
+);
+// The Video Enhancer runs on its own endpoint: the LTX 2.5 CQ worker image, which
+// carries ~46 GiB of weights no other worker has. Unset refuses the job at
+// dispatch, as an unset still image pod does.
+export const runpodVideoEnhancerEndpointId = process.env.RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER?.trim() ?? "";
+// Sent as the request's own RunPod policy. The endpoint is configured with a
+// 10-minute execution timeout and a 2560x1440 / 121-frame run takes ~11.5 minutes
+// of execution, so without this the job is killed just before it finishes. 30
+// minutes is ~2.5x the longest measured run and still ends well inside
+// RUNPOD_TIMEOUT_MS, so RunPod never keeps billing for a job this app gave up on.
+export const runpodVideoEnhancerExecutionTimeoutMs = positiveNumber(
+  process.env.RUNPOD_VIDEO_ENHANCER_EXECUTION_TIMEOUT_MS,
+  30 * 60_000,
 );
 export const runpodSubmissionMode: "sync" | "async" =
   (process.env.RUNPOD_SUBMISSION_MODE ?? "").trim().toLowerCase() === "async" ? "async" : "sync";

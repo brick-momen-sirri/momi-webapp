@@ -1,5 +1,6 @@
 import { Eye } from "lucide-react";
 import { seedanceDurationGated, seedanceVersion, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isVideoEnhancerModel, type VideoEnhancerLongSide } from "../features/generation/videoEnhancer";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
@@ -14,6 +15,7 @@ import { ResultDestinationControl } from "./ResultDestinationControl";
 import { SaveNumberControl } from "./SaveNumberControl";
 import { SeedanceAudioControl } from "./SeedanceAudioControl";
 import { SeedanceVideoEditingControl } from "./SeedanceVideoEditingControl";
+import { VideoEnhancerControls } from "./VideoEnhancerControls";
 import { VideoUploader } from "./VideoUploader";
 
 type LeftSettingsPanelProps = {
@@ -34,6 +36,7 @@ type LeftSettingsPanelProps = {
   klingCameraStabilization: boolean;
   showKlingCameraStabilization: boolean;
   selectedDurationSeconds: number;
+  videoEnhancerLongSide: VideoEnhancerLongSide;
   prompt: string;
   archVizGridOptions: ArchVizGridOptions;
   saveNumber: string;
@@ -57,6 +60,7 @@ type LeftSettingsPanelProps = {
   onSeedanceGenerateAudioChange: (enabled: boolean) => void;
   onKlingCameraStabilizationChange: (enabled: boolean) => void;
   onDurationChange: (seconds: number) => void;
+  onVideoEnhancerLongSideChange: (longSide: VideoEnhancerLongSide) => void;
   onPromptChange: (prompt: string) => void;
   onArchVizGridOptionsChange: (options: ArchVizGridOptions) => void;
   onTargetFolderChange: (folderId: string) => void;
@@ -87,6 +91,7 @@ export function LeftSettingsPanel({
   klingCameraStabilization,
   showKlingCameraStabilization,
   selectedDurationSeconds,
+  videoEnhancerLongSide,
   prompt,
   archVizGridOptions,
   saveNumber,
@@ -110,6 +115,7 @@ export function LeftSettingsPanel({
   onSeedanceGenerateAudioChange,
   onKlingCameraStabilizationChange,
   onDurationChange,
+  onVideoEnhancerLongSideChange,
   onPromptChange,
   onArchVizGridOptionsChange,
   onTargetFolderChange,
@@ -121,7 +127,11 @@ export function LeftSettingsPanel({
   onGenerate,
   onCancelSubmission,
 }: LeftSettingsPanelProps) {
-  const showResolution = selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel);
+  // The enhancer takes its size, length and content from the source video, so
+  // the generation controls it would ignore are not shown at all.
+  const videoEnhancer = isVideoEnhancerModel(selectedModel);
+  const showResolution =
+    !videoEnhancer && (selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel));
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
   const use16By9Cropping = !show16By9CropToggle || enable16By9Cropping;
   const promptImages = use16By9Cropping ? images : images.map((image) => (image ? { ...image, croppedUrl: undefined } : image));
@@ -150,12 +160,14 @@ export function LeftSettingsPanel({
           onImageOutputCountChange={onImageOutputCountChange}
         />
       ) : null}
-      <DurationSelector
-        selectedModel={selectedModel}
-        value={selectedDurationSeconds}
-        onChange={onDurationChange}
-        adminOnlyNote={seedanceDurationNote(selectedModel, selectedSeedanceVersion, allowSeedance4K)}
-      />
+      {videoEnhancer ? null : (
+        <DurationSelector
+          selectedModel={selectedModel}
+          value={selectedDurationSeconds}
+          onChange={onDurationChange}
+          adminOnlyNote={seedanceDurationNote(selectedModel, selectedSeedanceVersion, allowSeedance4K)}
+        />
+      )}
       {viewOnly ? (
         <p
           role="status"
@@ -173,29 +185,36 @@ export function LeftSettingsPanel({
           added inside is covered without being remembered. ImageUploader still needs
           its own flag for drop and paste, which are not form-control events. */}
       <fieldset disabled={viewOnly} className="min-w-0 space-y-3 disabled:opacity-60">
-        <ImageUploader
-          images={images}
-          onChange={onImagesChange}
-          disabled={viewOnly}
-          selectedResolution={selectedResolution}
-          requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
-          imageSlotCount={
-            selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)
-          }
-          requiresLandscape={Boolean(selectedModel.requiresLandscape)}
-          enable16By9Cropping={enable16By9Cropping}
-          show16By9CropToggle={show16By9CropToggle}
-          onEnable16By9CroppingChange={onEnable16By9CroppingChange}
-          textOnly={(selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages}
-        />
+        {videoEnhancer ? null : (
+          <ImageUploader
+            images={images}
+            onChange={onImagesChange}
+            disabled={viewOnly}
+            selectedResolution={selectedResolution}
+            requiresTwoImages={Boolean(selectedModel.requiresTwoImages)}
+            imageSlotCount={
+              selectedModel.imageSlotCount ?? (selectedModel.requiresTwoImages ? 2 : selectedModel.requiresImage ? 1 : 0)
+            }
+            requiresLandscape={Boolean(selectedModel.requiresLandscape)}
+            enable16By9Cropping={enable16By9Cropping}
+            show16By9CropToggle={show16By9CropToggle}
+            onEnable16By9CroppingChange={onEnable16By9CroppingChange}
+            textOnly={
+              (selectedModel.imageSlotCount ?? 0) === 0 && !selectedModel.requiresImage && !selectedModel.requiresTwoImages
+            }
+          />
+        )}
         {selectedModel.requiresVideo ? <VideoUploader video={video} onChange={onVideoChange} /> : null}
+        {videoEnhancer ? (
+          <VideoEnhancerControls value={videoEnhancerLongSide} onChange={onVideoEnhancerLongSideChange} video={video} />
+        ) : null}
         {showSeedanceVideoEditing ? (
           <SeedanceVideoEditingControl value={seedanceVideoEditing} onChange={onSeedanceVideoEditingChange} />
         ) : null}
         {showSeedanceGenerateAudio ? (
           <SeedanceAudioControl value={seedanceGenerateAudio} onChange={onSeedanceGenerateAudioChange} />
         ) : null}
-        {showArchVizGridControls ? (
+        {videoEnhancer ? null : showArchVizGridControls ? (
           <ArchVizGridControls value={archVizGridOptions} onChange={onArchVizGridOptionsChange} />
         ) : (
           <PromptBox

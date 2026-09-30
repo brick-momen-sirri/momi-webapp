@@ -19,6 +19,7 @@ import {
   supportsKlingCameraStabilization,
 } from "./klingCameraStabilization.js";
 import type { CreateJobRequest, WorkflowModel } from "./types.js";
+import { isVideoEnhancerModelId } from "./videoEnhancer.js";
 
 await loadWorkflowModels();
 
@@ -42,6 +43,9 @@ test("workflow discovery produces unique, internally consistent production model
   for (const model of models) {
     assert.equal(getWorkflowModel(model.id), model);
     assert.ok(path.isAbsolute(model.workflowPath));
+    // Registered in code rather than inferred from a file, and sized by its
+    // source video, so the discovery invariants below do not describe it.
+    if (isVideoEnhancerModelId(model.id)) continue;
     assert.ok(model.supportedResolutions?.length);
     assert.ok(model.supportedResolutions?.includes(model.defaultResolution ?? model.supportedResolutions[0]));
     assert.equal(model.requiresPrompt, model.requiredInputs.includes("prompt"));

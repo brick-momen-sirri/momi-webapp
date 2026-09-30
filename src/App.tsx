@@ -58,6 +58,7 @@ import {
 } from "./features/jobs/jobReuse";
 import { useJobActions } from "./features/jobs/useJobActions";
 import { useJobSubmission } from "./features/jobs/useJobSubmission";
+import { isVideoEnhancerModel, reusableVideoEnhancerLongSide } from "./features/generation/videoEnhancer";
 import {
   readPersistedGenerationSettings,
   readRememberedResultFolder,
@@ -182,6 +183,8 @@ function App() {
     setKlingCameraStabilization,
     selectedDurationSeconds,
     setSelectedDurationSeconds,
+    videoEnhancerLongSide,
+    setVideoEnhancerLongSide,
     prompt,
     setPrompt,
     archVizGridOptions,
@@ -295,6 +298,7 @@ function App() {
     seedanceVideoEditing,
     seedanceGenerateAudio,
     klingCameraStabilization,
+    videoEnhancerLongSide,
     setJobs,
     setProjects,
     setBackendJobsTotal,
@@ -644,6 +648,12 @@ function App() {
       restored.add("camera stabilization");
     }
 
+    const enhancerLongSide = reusableVideoEnhancerLongSide(job.workflowOptions);
+    if (enhancerLongSide && isVideoEnhancerModel(targetModel)) {
+      setVideoEnhancerLongSide(enhancerLongSide);
+      restored.add("enhanced size");
+    }
+
     if (hasInputImageMetadata(job)) {
       const slotCount = reusableModel ? imageSlotCountForModel(reusableModel) : job.inputImages.length;
       const nextImages = await rehydrateJobInputImages(job, slotCount);
@@ -713,6 +723,7 @@ function App() {
                 klingCameraStabilization={klingCameraStabilization}
                 showKlingCameraStabilization={selectedModelSupportsCameraStabilization}
                 selectedDurationSeconds={selectedDurationSeconds}
+                videoEnhancerLongSide={videoEnhancerLongSide}
                 prompt={prompt}
                 archVizGridOptions={archVizGridOptions}
                 saveNumber={saveNumber}
@@ -736,6 +747,7 @@ function App() {
                 onSeedanceGenerateAudioChange={setSeedanceGenerateAudio}
                 onKlingCameraStabilizationChange={setKlingCameraStabilization}
                 onDurationChange={(seconds) => setSelectedDurationSeconds(normalizeDurationSeconds(seconds, selectedModel))}
+                onVideoEnhancerLongSideChange={setVideoEnhancerLongSide}
                 onPromptChange={setPrompt}
                 onArchVizGridOptionsChange={setArchVizGridOptions}
                 onTargetFolderChange={setTargetFolderId}

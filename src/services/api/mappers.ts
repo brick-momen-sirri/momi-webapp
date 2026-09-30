@@ -15,7 +15,8 @@ export function mapModel(model: BackendWorkflowModel): ModelType {
     cost: Math.max(0, Math.round(model.estimatedCredits ?? 0)),
     estimatedTime: model.estimatedTime ?? "Queued",
     requiresTwoImages: model.requiresStartEndFrames,
-    requiresLandscape: category === "video",
+    // The Video Enhancer keeps whatever aspect its source has.
+    requiresLandscape: category === "video" && model.category !== "video_upscaling",
     supportsAudio: category === "video",
     requiresPrompt: model.requiresPrompt,
     requiresImage: model.requiresImage,

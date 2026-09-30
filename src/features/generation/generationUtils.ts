@@ -3,6 +3,7 @@ import { isSeedanceWorkflowModel, KLING_PROMPT_CHARACTER_LIMIT } from "../../ser
 import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, UploadedVideo, WorkflowOptions } from "../../types";
 import { createClientId } from "../../utils/id";
 import { ALL_PROJECTS_ID } from "../workspace/workspaceUtils";
+import { isVideoEnhancerModel, normalizeVideoEnhancerLongSide } from "./videoEnhancer";
 import {
   DEFAULT_SEEDANCE_VERSION,
   normalizeSeedanceVersion,
@@ -241,6 +242,7 @@ export function workflowOptionsForJob({
   seedanceVideoEditing,
   seedanceGenerateAudio,
   klingCameraStabilization,
+  videoEnhancerLongSide,
 }: {
   model: SeedanceModelFields;
   archVizGrid: ArchVizGridOptions;
@@ -252,6 +254,8 @@ export function workflowOptionsForJob({
   seedanceVideoEditing: boolean;
   seedanceGenerateAudio: boolean;
   klingCameraStabilization: boolean;
+  /** Only read for the Video Enhancer, whose one setting it is. */
+  videoEnhancerLongSide?: number;
 }): WorkflowOptions {
   const normalizedSaveNumber = normalizeSaveNumber(saveNumber);
   return {
@@ -262,6 +266,10 @@ export function workflowOptionsForJob({
     ...(isGptImageModel(model) ? { gptImage: { outputCount: imageOutputCount } } : {}),
     ...seedanceWorkflowOptions(model, seedanceVersionId, seedanceRatio, seedanceVideoEditing, seedanceGenerateAudio),
     ...(supportsKlingCameraStabilization(model) ? { kling: { cameraStabilization: klingCameraStabilization } } : {}),
+    // Its presence is what routes the job to the enhancer's own pod.
+    ...(isVideoEnhancerModel(model)
+      ? { videoEnhancer: { longSide: normalizeVideoEnhancerLongSide(videoEnhancerLongSide) } }
+      : {}),
     save: {
       cameraNumber: normalizedSaveNumber,
       shotNumber: normalizedSaveNumber,

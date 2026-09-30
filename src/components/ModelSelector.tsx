@@ -8,6 +8,7 @@ import {
   PenTool,
   Scissors,
   SlidersHorizontal,
+  Sparkles,
   Video,
 } from "lucide-react";
 import type { DragEvent } from "react";
@@ -17,6 +18,7 @@ import openAiIcon from "../assets/model-icons/openai.png";
 import seedanceIcon from "../assets/model-icons/seedance.png";
 import veo3Icon from "../assets/model-icons/veo3.png";
 import { SEEDANCE_VERSIONS, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isVideoEnhancerModel } from "../features/generation/videoEnhancer";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { ModelType } from "../types";
 import { cn } from "../utils/classNames";
@@ -59,6 +61,15 @@ const taskCategories = [
     hint: "Edit or upscale",
     icon: PenTool,
   },
+  {
+    // The backend category of the Video Enhancer model. Listed only where its
+    // endpoint is configured, so elsewhere this tab shows disabled.
+    id: "video_upscaling",
+    label: "Video Enhancer",
+    shortLabel: "Enhance",
+    hint: "Upscale footage up to 1440p",
+    icon: Sparkles,
+  },
 ] as const;
 
 const providerOptions = [
@@ -92,7 +103,7 @@ export function ModelSelector({ models, selectedModel, seedanceVersion, onChange
   const selectedCategory = categoryForModel(selectedModel) ?? taskCategories[0];
   const CategoryIcon = selectedCategory.icon;
   const categoryModels = models.filter((model) => modelMatchesCategory(model, selectedCategory.id));
-  const workflowOptions = workflowCards(categoryModels);
+  const workflowOptions = workflowCards(categoryModels, selectedCategory.id);
 
   function activateFromResultDrag(event: DragEvent<HTMLElement>, model?: ModelType) {
     if (!model || !hasResultImageDragData(event.dataTransfer)) {
@@ -122,7 +133,7 @@ export function ModelSelector({ models, selectedModel, seedanceVersion, onChange
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Task category</p>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          {taskCategories.map((category) => {
+          {taskCategories.map((category, index) => {
             const Icon = category.icon;
             const selected = category.id === selectedCategory.id;
             const categoryModel = firstModelForCategory(models, category.id);
@@ -139,6 +150,8 @@ export function ModelSelector({ models, selectedModel, seedanceVersion, onChange
                 aria-pressed={selected}
                 className={cn(
                   "group flex min-h-[58px] items-center gap-2 rounded-md border px-2.5 py-2 text-left transition",
+                  // An odd tab out spans the row rather than leaving a hole beside it.
+                  index === taskCategories.length - 1 && taskCategories.length % 2 === 1 ? "col-span-2" : "",
                   selected
                     ? "border-accent bg-accent text-white shadow-card"
                     : "border-line bg-white text-stone-700 hover:border-accent hover:bg-mist",
@@ -314,7 +327,7 @@ function categoryForModel(model: ModelType) {
 
 function firstModelForCategory(models: ModelType[], categoryId: string) {
   const categoryModels = models.filter((model) => modelMatchesCategory(model, categoryId));
-  const cards = workflowCards(categoryModels);
+  const cards = workflowCards(categoryModels, categoryId);
   return cards.find((card) => card.model)?.model ?? categoryModels[0];
 }
 
@@ -328,7 +341,7 @@ function modelMatchesCategory(model: ModelType, categoryId: string) {
   return model.category === "video";
 }
 
-function workflowCards(categoryModels: ModelType[]) {
+function workflowCards(categoryModels: ModelType[], categoryId: string) {
   const orderedModels = orderWorkflowModels(categoryModels);
   const providerCards = providerOptions.map((provider) => ({
     ...provider,
@@ -342,12 +355,14 @@ function workflowCards(categoryModels: ModelType[]) {
   const modelCards = orderedModels.map((model) => ({
     id: model.id,
     label: cleanModelLabel(model.label),
-    icon: ImageIcon,
+    icon: isVideoEnhancerModel(model) ? Sparkles : ImageIcon,
     iconSrc: iconSrcForModel(model),
     aliases: [model.id],
     model,
   }));
-  const pendingFluxCard = providerCards.find((card) => card.id === "flux");
+  // The placeholder belongs to image editing, where Flux 3 is expected; the
+  // enhancer has one model and no provider to wait for.
+  const pendingFluxCard = categoryId === "video_upscaling" ? undefined : providerCards.find((card) => card.id === "flux");
   return pendingFluxCard ? [...modelCards, pendingFluxCard] : modelCards;
 }
 

@@ -1,4 +1,5 @@
 import { seedanceVersionIdFromOptions } from "./seedanceVersions.js";
+import { DEFAULT_VIDEO_ENHANCER_LONG_SIDE, isVideoEnhancerModelId, videoEnhancerCredits } from "./videoEnhancer.js";
 import type { CreditUsageSummary, Resolution, WorkflowModel, WorkflowOptions } from "./types.js";
 
 export function estimateWorkflowCredits(
@@ -10,6 +11,17 @@ export function estimateWorkflowCredits(
   const key = `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase();
   const resolutionLabel = resolution?.label ?? (resolution ? `${resolution.width}x${resolution.height}` : "1080p");
   const duration = durationOrDefault(durationSeconds, model.defaultDurationSeconds, key);
+
+  // Before every substring rule: "enhance" and "upscal" match other presets.
+  if (isVideoEnhancerModelId(model.id)) {
+    const plan = workflowOptions?.videoEnhancer?.plan;
+    return videoEnhancerCredits(
+      workflowOptions?.videoEnhancer?.longSide ?? DEFAULT_VIDEO_ENHANCER_LONG_SIDE,
+      plan?.width,
+      plan?.height,
+      plan?.frames,
+    );
+  }
 
   if (key.includes("seedance")) {
     return seedanceCreditRange(key, duration, resolutionLabel, seedanceVersionIdFromOptions(workflowOptions)).maxCredits;

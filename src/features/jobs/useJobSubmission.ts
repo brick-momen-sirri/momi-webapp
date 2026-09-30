@@ -43,6 +43,7 @@ type JobSubmissionOptions = {
   seedanceVideoEditing: boolean;
   seedanceGenerateAudio: boolean;
   klingCameraStabilization: boolean;
+  videoEnhancerLongSide: number;
   setJobs: Dispatch<SetStateAction<Job[]>>;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setBackendJobsTotal: Dispatch<SetStateAction<number>>;
@@ -88,6 +89,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
       seedanceVideoEditing,
       seedanceGenerateAudio,
       klingCameraStabilization,
+      videoEnhancerLongSide,
       setJobs,
       setProjects,
       setBackendJobsTotal,
@@ -124,6 +126,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
           seedanceVideoEditing,
           seedanceGenerateAudio,
           klingCameraStabilization,
+          videoEnhancerLongSide,
         });
         const fingerprint = submissionFingerprint({
           accountId: account.id,
@@ -334,6 +337,7 @@ function fingerprintForCurrentOptions(options: JobSubmissionOptions) {
       seedanceVideoEditing: options.seedanceVideoEditing,
       seedanceGenerateAudio: options.seedanceGenerateAudio,
       klingCameraStabilization: options.klingCameraStabilization,
+      videoEnhancerLongSide: options.videoEnhancerLongSide,
     }),
   });
 }

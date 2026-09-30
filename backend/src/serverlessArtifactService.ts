@@ -12,6 +12,7 @@ import { responseBodyToNodeStream, writeStreamAtomically } from "./streamingMedi
 import { warmPlayableVideo } from "./playableVideoService.js";
 import { warmThumbnails } from "./thumbnailService.js";
 import { compositeStillImageEditResult } from "./stillImageEditComposite.js";
+import { finishVideoEnhancerResult } from "./videoEnhancerMedia.js";
 import type { RunpodMediaResult } from "./runpodComfyService.js";
 import type { Job, Project, Resolution, WorkflowModel } from "./types.js";
 
@@ -153,6 +154,9 @@ async function persistOneArtifact(
     // the editable layer payload, then turn the user-facing result back into the
     // full original-resolution composite before resolution/thumbnail inspection.
     if (assetType === "image") await compositeStillImageEditResult(context.job, target.filePath);
+    // Likewise the Video Enhancer returns 30 fps with silent audio; put it back
+    // on the source's clock and soundtrack before anything measures the file.
+    if (assetType === "video") await finishVideoEnhancerResult(context.job, target.filePath);
     const resolution = await detectMediaResolution(target.filePath, assetType).catch(() => undefined);
     // Same reason the resolution is read here: the file has just been written, so
     // this is the one moment its size is free. Still image results are the largest
