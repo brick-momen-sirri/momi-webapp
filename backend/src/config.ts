@@ -231,6 +231,29 @@ export const mediaAccessTokenSecret =
 // revoked before they expire. The frontend refreshes well before this elapses.
 export const mediaAccessTokenTtlMs = positiveNumber(process.env.MEDIA_ACCESS_TOKEN_TTL_MS, 30 * 60 * 1000);
 export const runpodInputUrlTtlMs = positiveNumber(process.env.RUNPOD_INPUT_URL_TTL_MS, runpodTimeoutMs + 15 * 60_000);
+
+// --- RunPod inputs via object storage ---
+// The alternative to inlining media as base64: upload it and send the worker a
+// presigned GET instead. Unset means inline, exactly as before.
+//
+// Endpoint is the bucket URL, path style, matching the BUCKET_ENDPOINT_URL the
+// worker template already carries for its outputs -- e.g.
+// https://<account>.r2.cloudflarestorage.com/az-ai-staging. Region is "auto" for
+// R2; AWS S3 needs its real region.
+//
+// Deliberately absent from ecosystem.config.cjs: src/env.ts only fills keys that
+// process.env does not already define, so a `process.env.X || ""` line there
+// would shadow the value in .env with an empty string and silently put every
+// input back on the inline path -- the same trap that killed the Flux Klein
+// preset on 2026-09-08.
+export const runpodInputBucketEndpoint = (process.env.RUNPOD_INPUT_BUCKET_ENDPOINT_URL ?? "").trim().replace(/\/$/, "");
+export const runpodInputBucketAccessKeyId = (process.env.RUNPOD_INPUT_BUCKET_ACCESS_KEY_ID ?? "").trim();
+export const runpodInputBucketSecretAccessKey = (process.env.RUNPOD_INPUT_BUCKET_SECRET_ACCESS_KEY ?? "").trim();
+export const runpodInputBucketRegion = (process.env.RUNPOD_INPUT_BUCKET_REGION ?? "auto").trim() || "auto";
+export const runpodInputBucketPrefix = (process.env.RUNPOD_INPUT_BUCKET_PREFIX ?? "momi-inputs")
+  .trim()
+  .replace(/^\/+|\/+$/g, "");
+
 export const runpodInlineMediaMaxBytes = positiveNumber(process.env.RUNPOD_INLINE_MEDIA_MAX_BYTES, 6 * 1024 * 1024);
 export const runpodRequestBodyMaxBytes = positiveNumber(process.env.RUNPOD_REQUEST_BODY_MAX_BYTES, 9 * 1024 * 1024);
 export const runpodInlineImageAutoCompress = !["0", "false", "no", "off"].includes(

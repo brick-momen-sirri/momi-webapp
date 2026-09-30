@@ -8,10 +8,12 @@
 //
 // The two provider paths differ in a way worth knowing before editing:
 //   - RunPod cannot see this host's disk. Inputs go out as a signed URL when
-//     RUNPOD_INPUT_BASE_URL is reachable, and are otherwise inlined as base64 in
-//     the JSON request -- which is why the size assertions below are load-bearing:
+//     RUNPOD_INPUT_BASE_URL is reachable, then as a presigned object-storage URL
+//     when a bucket is configured, and are otherwise inlined as base64 in the
+//     JSON request -- which is why the size assertions below are load-bearing:
 //     RunPod rejects bodies over 20MiB, so an oversized inline input must fail
-//     here with an actionable message rather than at the provider.
+//     here with an actionable message rather than at the provider. Only the
+//     inline path has a size ceiling; a URL input has none.
 //   - Local ComfyUI shares the filesystem, so inputs are uploaded to the worker
 //     and referenced by the returned name.
 import path from "node:path";
@@ -23,6 +25,7 @@ import { isAllowedMediaPath, resolveAllowedExistingMediaPath } from "../mediaPat
 import type { RunpodComfyImageInput } from "../runpodComfyService.js";
 import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "../runpodImageInlineService.js";
 import { createRunpodInputUrl, type RunpodInputKind } from "../runpodInputUrlService.js";
+import { uploadRunpodObjectInput } from "../runpodObjectInputService.js";
 import { prepareRunpodInlineVideoFile } from "../runpodVideoInlineService.js";
 import {
   prepareRunpodVideoFile,
@@ -123,6 +126,16 @@ async function runpodFileInput(
   const signedUrl = createRunpodInputUrl(safeFilePath, kind);
   if (signedUrl) {
     return { name, url: signedUrl };
+  }
+
+  // Object storage before inlining: the worker downloads a presigned URL itself,
+  // so the bytes never enter the request body and none of the size assertions
+  // below apply. An upload failure is deliberately not swallowed -- falling back
+  // to inline would silently re-impose the re-encode this path exists to avoid,
+  // and the caller's error is more useful than a quietly degraded render.
+  const objectUrl = await uploadRunpodObjectInput(safeFilePath, kind);
+  if (objectUrl) {
+    return { name, url: objectUrl };
   }
 
   if (kind === "image") {

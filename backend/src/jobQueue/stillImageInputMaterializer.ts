@@ -25,6 +25,7 @@ import { resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
 import type { RunpodComfyImageInput } from "../runpodComfyService.js";
 import { parseImageDataUrl, prepareRunpodInlineImageInput, runpodInlineImageByteBudget } from "../runpodImageInlineService.js";
 import { createRunpodInputUrl } from "../runpodInputUrlService.js";
+import { uploadRunpodObjectInput } from "../runpodObjectInputService.js";
 import { stillImageInputBindings, type StillImageInputBinding } from "../stillImageWorkflow.js";
 import type { StillImageCategoryId } from "../stillImageCategories.js";
 import { localMediaFilePathFromUrl, mimeTypeFromMediaPath } from "./providerInputs.js";
@@ -149,6 +150,13 @@ async function loadImageSlot(
     const safePath = await requireAllowedMediaPath(filePath);
     const signedUrl = createRunpodInputUrl(safePath, "image");
     if (signedUrl) return { name: binding.filename, url: signedUrl };
+
+    // The slot that most needs this: an oversized still is otherwise re-encoded
+    // to fit the inline budget, which is what caps edit sharpness on a
+    // whole-image pass. A presigned URL sends the original bytes untouched, so
+    // the name stays exactly what the graph expects.
+    const objectUrl = await uploadRunpodObjectInput(safePath, "image");
+    if (objectUrl) return { name: binding.filename, url: objectUrl };
   }
 
   const resolved = await readSlotBytes(source, binding);
