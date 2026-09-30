@@ -64,6 +64,8 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     {},
   );
   const [backendRuntime, setBackendRuntime] = useState<BackendRuntime>();
+  // The pause message while an update is deployed, undefined while generation is open.
+  const [maintenanceMessage, setMaintenanceMessage] = useState<string>();
   const [comfyServers, setComfyServers] = useState<ComfyServer[]>([]);
   const [podStatus, setPodStatus] = useState<PodStatusResponse>();
   const [backendAvailable, setBackendAvailable] = useState(false);
@@ -134,6 +136,13 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     }
 
     void loadBackendData();
+    // Once now, rather than waiting a full tick: a page opened during a pause should
+    // not offer a Generate button for its first twelve seconds.
+    void fetchBackendSnapshot()
+      .then((snapshot) => {
+        if (mounted) setMaintenanceMessage(snapshot.maintenance?.enabled ? snapshot.maintenance.message : undefined);
+      })
+      .catch(() => undefined);
     let tick = 0;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
@@ -148,6 +157,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
       void fetchBackendSnapshot()
         .then((snapshot) => {
           if (!mounted) return;
+          setMaintenanceMessage(snapshot.maintenance?.enabled ? snapshot.maintenance.message : undefined);
           if (snapshot.credits && typeof snapshot.credits.creditsLeft === "number") {
             setBackendCreditsRemaining(Math.floor(snapshot.credits.creditsLeft));
           }
@@ -266,6 +276,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     backendCreditsRemaining,
     monthlyUsageByUser,
     backendRuntime,
+    maintenanceMessage,
     comfyServers,
     podStatus,
     backendAvailable,

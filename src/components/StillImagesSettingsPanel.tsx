@@ -69,6 +69,8 @@ type StillImagesSettingsPanelProps = {
   onTargetFolderChange: (folderId: string) => void;
   onSaveNumberChange: (value: string) => void;
   onGenerate: () => void;
+  /** The server's pause message while an update is deployed; disables Generate. */
+  maintenanceMessage?: string;
   onNewEditLayer?: () => void;
   onSelectEditLayer?: (layerId: string, target?: StillImageEditTarget) => void;
   onEditTargetChange?: (target: StillImageEditTarget) => void;
@@ -116,6 +118,7 @@ export function StillImagesSettingsPanel({
   onTargetFolderChange,
   onSaveNumberChange,
   onGenerate,
+  maintenanceMessage,
   onNewEditLayer = () => undefined,
   onSelectEditLayer = () => undefined,
   onEditTargetChange = () => undefined,
@@ -182,7 +185,7 @@ export function StillImagesSettingsPanel({
   const slotLabels = stillImageSlotLabels(category, state);
   const requiredImagesReady = Array.from({ length: uploadSlotCount }, (_, index) => state.images[index]).every(Boolean);
   const regionReady = !paintsItsOwnSlots || hasPaintedRegion(state.mask);
-  const readyToGenerate = requiredImagesReady && regionReady && Boolean(selectedProject);
+  const readyToGenerate = !maintenanceMessage && requiredImagesReady && regionReady && Boolean(selectedProject);
   const editMode = state.editMode ?? "inpaint";
   // Enhance is submitted as a General Enhancement job, whose prompt is optional
   // guidance for the captioner rather than an instruction. Only Inpaint has
@@ -507,11 +510,13 @@ export function StillImagesSettingsPanel({
                 error={editorError}
                 canGenerate={editorCanGenerate}
                 disabledReason={
-                  !selectedProject
-                    ? "Select a project before generating."
-                    : !editorPromptReady
-                      ? "Describe the edit first."
-                      : undefined
+                  maintenanceMessage
+                    ? maintenanceMessage
+                    : !selectedProject
+                      ? "Select a project before generating."
+                      : !editorPromptReady
+                        ? "Describe the edit first."
+                        : undefined
                 }
                 onModeChange={onEditModeChange}
                 onPromptChange={onPromptChange}

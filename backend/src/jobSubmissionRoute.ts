@@ -17,6 +17,7 @@ import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImage
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
 import { isLtxCqI2vModelId, LTX_CQ_I2V_PROMPT_MAX_LENGTH } from "./ltxCqImageToVideo.js";
+import { readMaintenanceState, type MaintenanceState } from "./maintenanceMode.js";
 import { isVideoEnhancerModelId, normalizeVideoEnhancerOptions } from "./videoEnhancer.js";
 
 export type JobSubmissionDependencies = {
@@ -27,6 +28,8 @@ export type JobSubmissionDependencies = {
   isDemoAccount: (user: User) => boolean;
   validateMedia: (request: CreateJobRequest, project: Project, user: User) => Promise<void>;
   createJob: (request: CreateJobRequest) => Promise<Job | { job: Job; replayed: boolean }>;
+  /** Injected for tests; production reads the switch file. */
+  readMaintenance?: () => MaintenanceState;
 };
 
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
@@ -35,6 +38,14 @@ const NANO_BANANA_ASPECT_RATIOS = new Set(["auto", "1:1", "2:3", "3:2", "3:4", "
 export function createJobSubmissionHandler(deps: JobSubmissionDependencies): RequestHandler {
   return async (req, res) => {
     try {
+      // Before anything else, admins included: the point is an empty queue for a
+      // dispatcher restart, and one admin job would hold that up as well as any.
+      // 503 says "come back shortly", and the message is what the artist sees.
+      const maintenance = (deps.readMaintenance ?? readMaintenanceState)();
+      if (maintenance.enabled) {
+        return res.status(503).json({ error: maintenance.message, code: "maintenance" });
+      }
+
       const user = getRequestUser(req);
       if (deps.isDemoAccount(user)) {
         return res.status(403).json({ error: "Demo accounts are view-only and cannot generate tasks." });

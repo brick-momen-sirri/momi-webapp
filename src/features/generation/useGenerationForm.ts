@@ -48,10 +48,21 @@ type GenerationFormOptions = {
   selectedProject?: Project;
   targetFolderId: string;
   creditsRemaining: number;
+  /** The server's pause message while an update is deployed. */
+  maintenanceMessage?: string;
 };
 
 export function useGenerationForm(options: GenerationFormOptions) {
-  const { initialSettings, models, account, selectedProjectId, selectedProject, targetFolderId, creditsRemaining } = options;
+  const {
+    initialSettings,
+    models,
+    account,
+    selectedProjectId,
+    selectedProject,
+    targetFolderId,
+    creditsRemaining,
+    maintenanceMessage,
+  } = options;
   const [selectedModelId, setSelectedModelId] = useState(initialSettings.selectedModelId ?? "google_veo");
   const [selectedResolution, setSelectedResolution] = useState(initialSettings.selectedResolution ?? "1080p");
   const [selectedNanoBananaAspectRatio, setSelectedNanoBananaAspectRatio] = useState(
@@ -138,6 +149,7 @@ export function useGenerationForm(options: GenerationFormOptions) {
   const use16By9Cropping = !selectedModelSupportsCropToggle || enableImageToVideo16By9Cropping;
   const viewOnlyProject = hasViewOnlyProjectAccess(account, selectedProject);
   const disabledReason = getDisabledReason({
+    maintenanceMessage,
     isDemoAccount: Boolean(account && isDemoAccount(account)),
     hasViewOnlyProjectAccess: viewOnlyProject,
     insufficientCredits: creditsRemaining < selectedModel.cost,

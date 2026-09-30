@@ -10,6 +10,7 @@ import { JobFeed } from "./components/JobFeed";
 import { Layout } from "./components/Layout";
 import { LeftSettingsPanel } from "./components/LeftSettingsPanel";
 import { MainSectionNavigation, type MainSection } from "./components/MainSectionNavigation";
+import { MaintenanceBanner } from "./components/MaintenanceBanner";
 import { PodStatusIndicator } from "./components/PodStatusIndicator";
 import { RightProjectPanel } from "./components/RightProjectPanel";
 import { StillImagesSettingsPanel } from "./components/StillImagesSettingsPanel";
@@ -144,6 +145,7 @@ function App() {
     backendCreditsRemaining,
     monthlyUsageByUser,
     backendRuntime,
+    maintenanceMessage,
     comfyServers,
     podStatus,
     backendAvailable,
@@ -219,6 +221,7 @@ function App() {
     selectedProject,
     targetFolderId,
     creditsRemaining,
+    maintenanceMessage,
   });
   useEffect(() => {
     if (!models.length) return;
@@ -340,6 +343,10 @@ function App() {
   const [reopeningEditDocument, setReopeningEditDocument] = useState<string | undefined>(undefined);
   const handleStillImagesGenerate = () => {
     if (!selectedProjectId) return;
+    if (maintenanceMessage) {
+      showToast(maintenanceMessage, "info");
+      return;
+    }
     void stillImagesSubmission.submit({
       projectId: selectedProjectId,
       categoryId: stillImagesForm.selectedCategoryId,
@@ -703,6 +710,7 @@ function App() {
       <Layout
         left={
           <div className="space-y-3">
+            <MaintenanceBanner message={maintenanceMessage} />
             <MainSectionNavigation value={mainSection} onChange={setMainSection} />
             {mainSection === "animation" ? (
               <LeftSettingsPanel
@@ -777,6 +785,7 @@ function App() {
                 onTargetFolderChange={setTargetFolderId}
                 onSaveNumberChange={stillImagesForm.setSaveNumber}
                 onGenerate={handleStillImagesGenerate}
+                maintenanceMessage={maintenanceMessage}
                 onNewEditLayer={stillImagesForm.startNewEditLayer}
                 onSelectEditLayer={stillImagesForm.selectEditLayer}
                 onEditTargetChange={stillImagesForm.setEditTarget}

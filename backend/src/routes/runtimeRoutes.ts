@@ -8,6 +8,7 @@ import { readWindowsClipboardImage } from "../clipboardService.js";
 import { monthlyUsageForUser } from "../creditDashboardService.js";
 import { getCredits } from "../creditService.js";
 
+import { readMaintenanceState } from "../maintenanceMode.js";
 import { getPodStatus } from "../podStatusService.js";
 
 export const runtimeRouter = express.Router();
@@ -38,6 +39,9 @@ runtimeRouter.get("/api/snapshot", async (req, res) => {
     monthlyUsage: monthlyUsageForUser(currentUser),
     runtime: runtimeInfo(),
     podStatus,
+    // Rides on the poll every open page already makes, so a pause reaches everyone
+    // within one tick without a request of its own.
+    maintenance: readMaintenanceState(),
   });
 });
 

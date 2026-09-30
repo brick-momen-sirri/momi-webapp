@@ -347,7 +347,16 @@ export type ComfyPoolActionResult = {
 
 export type BackendClipboardImage = { name: string; type: string; dataUrl: string; source: string };
 
+/** The server's generation pause; see backend/src/maintenanceMode.ts. */
+export type BackendMaintenance = {
+  enabled: boolean;
+  message: string;
+  startedAt?: string;
+};
+
 export type BackendSnapshot = {
+  /** Absent from servers older than the pause switch. */
+  maintenance?: BackendMaintenance;
   credits: { creditsLeft: number | null; creditsUsed?: number; currency?: string; updatedAt?: string; source: string } | null;
   monthlyUsage: BackendMonthlyUsage;
   runtime: BackendRuntime;

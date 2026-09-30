@@ -88,6 +88,10 @@ export const jobsStorePath = process.env.JOBS_STORE_PATH?.trim() || path.join(ba
 export const jobStoreDriver: "json" | "sqlite" =
   (process.env.JOB_STORE_DRIVER ?? "").trim().toLowerCase() === "sqlite" ? "sqlite" : "json";
 export const jobsSqlitePath = process.env.JOBS_SQLITE_PATH?.trim() || path.join(backendRoot, "data", "jobs.sqlite");
+// The generation pause switch; see maintenanceMode.ts. Beside the stores so every
+// API worker and the dispatcher read the same file.
+export const maintenanceStatePath =
+  process.env.MAINTENANCE_STATE_PATH?.trim() || path.join(backendRoot, "data", "maintenance.json");
 // Web/worker split, Stage A: write each job change as a single SQLite row
 // instead of the debounced whole-array replaceAll. Only meaningful with the
 // SQLite driver. Off by default — this is dormant prep for the topology split

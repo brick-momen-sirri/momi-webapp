@@ -13,6 +13,7 @@ import { isStillImageSeed } from "./stillImageSeed.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
 import { LTX_CQ_I2V_MODEL_ID, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
+import type { MaintenanceState } from "./maintenanceMode.js";
 import { VIDEO_ENHANCER_MODEL_ID, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 
 const users = {
@@ -148,7 +149,11 @@ let currentUser = users.owner;
 let creationError: Error | undefined;
 let replayCreation = false;
 
+// Injected so these tests never read the host's real pause switch.
+let maintenance: MaintenanceState = { enabled: false, message: "" };
+
 const handler = createJobSubmissionHandler({
+  readMaintenance: () => maintenance,
   getProject: (id) => (id === project.id ? project : undefined),
   getWorkflowModel: (id) =>
     [model, seedanceModel, seedanceFirstLastModel, klingVideoModel, klingFirstLastModel].find((candidate) => candidate.id === id) ??
@@ -284,6 +289,25 @@ test("allows a project editor but refuses a viewer and hides the project from an
 
   currentUser = users.outsider;
   assert.deepEqual(await call(validBody()), { status: 404, body: { error: "Project not found" } });
+});
+
+test("a paused app refuses every submission, admins included, before any other check", async () => {
+  maintenance = { enabled: true, message: "An update is about to start. Please wait a few minutes." };
+  try {
+    for (const user of [users.owner, users.admin, users.demo]) {
+      currentUser = user;
+      assert.deepEqual(await call(validBody()), {
+        status: 503,
+        body: { error: "An update is about to start. Please wait a few minutes.", code: "maintenance" },
+      });
+    }
+    assert.equal(createRequests.length, 0);
+    assert.equal(mediaChecks.length, 0);
+  } finally {
+    maintenance = { enabled: false, message: "" };
+  }
+  currentUser = users.owner;
+  assert.equal((await call(validBody())).status, 201);
 });
 
 test("refuses demo users before any queue or media operation", async () => {

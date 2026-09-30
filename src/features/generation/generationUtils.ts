@@ -14,6 +14,8 @@ import {
 } from "./seedanceVersions";
 
 type DisabledReasonInput = {
+  /** Set while an update is being deployed; wins over everything else. */
+  maintenanceMessage?: string;
   isDemoAccount: boolean;
   hasViewOnlyProjectAccess: boolean;
   insufficientCredits: boolean;
@@ -28,6 +30,7 @@ type DisabledReasonInput = {
 };
 
 export function getDisabledReason({
+  maintenanceMessage,
   isDemoAccount,
   hasViewOnlyProjectAccess,
   insufficientCredits,
@@ -40,6 +43,7 @@ export function getDisabledReason({
   promptOverflowCharacters,
   requiredImages,
 }: DisabledReasonInput) {
+  if (maintenanceMessage) return maintenanceMessage;
   if (isDemoAccount) return "Demo accounts are view-only and cannot generate tasks.";
   // Grouped with the demo check rather than ordered by form completeness: both
   // are refusals the server will make regardless of what else the artist fixes.
