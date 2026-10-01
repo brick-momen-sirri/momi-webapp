@@ -1,16 +1,33 @@
 import fs from "node:fs/promises";
 import { BackendHttpError } from "./httpError.js";
-import { seedancePromptOpenAIModel, seedancePromptWorkflowPath } from "./config.js";
+import {
+  seedance25PromptSkillPath,
+  seedancePromptOpenAIModel,
+  seedancePromptRouterMaxTokens,
+  seedancePromptRouterModel,
+  seedancePromptWorkflowPath,
+} from "./config.js";
+import { anthropicImageBlock, runClaudeWithComfyRouter, type AnthropicContentBlock } from "./comfyRouterClaudeService.js";
 import { beginRunpodBillableOperation } from "./runpodActivityTracker.js";
 import { runComfyWorkflowOnRunpod, type RunpodComfyImageInput } from "./runpodComfyService.js";
 import { describeImageWithRunpod } from "./runpodService.js";
+import type { SeedanceVersionId } from "./seedanceVersions.js";
 import type { CreditUsageSummary } from "./types.js";
 import type { ComfyGraph, ComfyNode } from "./comfyGraph.js";
 
 export type SeedancePromptWorkflowResult = {
   text: string;
   runpodJobId?: string;
-  runpodStatus: string;
+  runpodStatus?: string;
+  provider?: "runpod-workflow" | "comfy-router";
+  model?: string;
+  routerResponseId?: string;
+  routerUsage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
   textArtifacts: Array<{
     text: string;
     filename?: string;
@@ -26,12 +43,14 @@ export type SeedancePromptWorkflowResult = {
 type RunSeedancePromptWorkflowInput = {
   prompt: string;
   imagesBase64: string[];
+  seedanceVersion?: SeedanceVersionId;
   fetchImpl?: typeof fetch;
 };
 
 export async function runSeedancePromptWorkflow({
   prompt,
   imagesBase64,
+  seedanceVersion = "2.0",
   fetchImpl = fetch,
 }: RunSeedancePromptWorkflowInput): Promise<SeedancePromptWorkflowResult> {
   const cleanPrompt = prompt.trim();
@@ -40,6 +59,14 @@ export async function runSeedancePromptWorkflow({
   }
 
   const images = imagesBase64.map((image, index) => seedancePromptImageInput(image, index));
+  if (seedanceVersion !== "2.0") {
+    return runSeedance25Prompt({
+      prompt: cleanPrompt,
+      imagesBase64,
+      fetchImpl,
+    });
+  }
+
   if (!images.length) {
     throw new BackendHttpError("Upload at least one reference image before generating a Seedance prompt.", { statusCode: 400 });
   }
@@ -84,6 +111,7 @@ export async function runSeedancePromptWorkflow({
 
     return {
       text,
+      provider: "runpod-workflow",
       runpodJobId: result.jobId,
       runpodStatus: result.status,
       textArtifacts: result.textArtifacts,
@@ -92,6 +120,61 @@ export async function runSeedancePromptWorkflow({
   } finally {
     endBillableOperation();
   }
+}
+
+async function runSeedance25Prompt({
+  prompt,
+  imagesBase64,
+  fetchImpl,
+}: {
+  prompt: string;
+  imagesBase64: string[];
+  fetchImpl: typeof fetch;
+}): Promise<SeedancePromptWorkflowResult> {
+  const skillInstructions = await fs.readFile(seedance25PromptSkillPath, "utf8");
+  const assetInventory = imagesBase64.length
+    ? [
+        `The complete reference inventory contains ${imagesBase64.length} image${imagesBase64.length === 1 ? "" : "s"}, labeled @Image1 through @Image${imagesBase64.length} in upload order.`,
+        "Inspect each attached image, assign an explicit role to every image you use, and list every unassigned image under 【Unused Assets】.",
+      ]
+    : ["No reference assets were provided. Treat this as text-to-video only and do not invent asset references."];
+  const content: AnthropicContentBlock[] = [
+    {
+      type: "text",
+      text: ["Create one submission-ready Seedance 2.5 prompt by following the system skill exactly.", ...assetInventory].join(
+        "\n",
+      ),
+    },
+  ];
+
+  imagesBase64.forEach((image, index) => {
+    content.push({ type: "text", text: `Reference asset @Image${index + 1}:` });
+    content.push(anthropicImageBlock(image, index));
+  });
+  content.push({ type: "text", text: `User request:\n${prompt}` });
+
+  const result = await runClaudeWithComfyRouter({
+    model: seedancePromptRouterModel,
+    system: skillInstructions,
+    content,
+    maxTokens: seedancePromptRouterMaxTokens,
+    fetchImpl,
+  });
+
+  return {
+    text: result.text,
+    provider: "comfy-router",
+    model: result.model,
+    routerResponseId: result.responseId,
+    routerUsage: result.usage,
+    textArtifacts: [
+      {
+        text: result.text,
+        source: "comfy-router",
+        type: "text/plain",
+      },
+    ],
+  };
 }
 
 export function prepareSeedancePromptWorkflow(

@@ -117,6 +117,15 @@ describe("refusing to spend a request", () => {
     expect(promptCallCount()).toBe(0);
   });
 
+  it("allows text-only Seedance 2.5 prompt generation", async () => {
+    stubFetch({ body: { text: "A slow text-only flythrough." } });
+    await expect(generateSeedancePromptWithWorkflow([], { userPrompt: "a flythrough", seedanceVersion: "2.5" })).resolves.toBe(
+      "A slow text-only flythrough.",
+    );
+    expect(promptRequest().body.imagesBase64).toEqual([]);
+    expect(promptRequest().body.seedanceVersion).toBe("2.5");
+  });
+
   it("will not improve an empty prompt", async () => {
     await expect(improvePromptWithQwen({ text: "  ", mode: "video" })).rejects.toThrow(/write a prompt first/i);
     expect(promptCallCount()).toBe(0);
@@ -222,13 +231,17 @@ describe("failed responses", () => {
 describe("workflow-backed prompt generation", () => {
   it("sends the trimmed idea to the Seedance workflow endpoint", async () => {
     stubFetch({ body: { text: "SCENE CONTEXT: a flythrough" } });
-    await expect(generateSeedancePromptWithWorkflow([image()], { userPrompt: "  a flythrough  " })).resolves.toContain(
-      "SCENE CONTEXT",
-    );
+    await expect(
+      generateSeedancePromptWithWorkflow([image()], {
+        userPrompt: "  a flythrough  ",
+        seedanceVersion: "2.5",
+      }),
+    ).resolves.toContain("SCENE CONTEXT");
 
     const { url, body } = promptRequest();
     expect(url).toContain("/api/prompt/seedance-workflow");
     expect(body.prompt).toBe("a flythrough");
+    expect(body.seedanceVersion).toBe("2.5");
   });
 
   it("treats a textless Seedance response as a failure", async () => {

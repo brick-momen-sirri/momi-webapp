@@ -6,6 +6,7 @@ import { runKlingPromptWorkflow } from "../klingPromptWorkflowService.js";
 import { improveTextPromptLocally } from "../promptFallback.js";
 import { describeImageWithRunpod } from "../runpodService.js";
 import { runSeedancePromptWorkflow } from "../seedancePromptWorkflowService.js";
+import { isSeedanceVersionId } from "../seedanceVersions.js";
 
 export const promptRouter = express.Router();
 
@@ -39,6 +40,10 @@ promptRouter.post("/api/prompt/describe-image", async (req, res) => {
 promptRouter.post("/api/prompt/seedance-workflow", async (req, res) => {
   try {
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    const requestedVersion = req.body?.seedanceVersion;
+    if (requestedVersion !== undefined && !isSeedanceVersionId(requestedVersion)) {
+      return res.status(400).json({ error: "seedanceVersion must be 2.0, 2.5, or 2.5-draft." });
+    }
     const imageBase64 = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64 : "";
     const imagesBase64 = Array.isArray(req.body?.imagesBase64)
       ? req.body.imagesBase64.filter((item: unknown) => typeof item === "string" && item.trim())
@@ -48,6 +53,7 @@ promptRouter.post("/api/prompt/seedance-workflow", async (req, res) => {
     const result = await runSeedancePromptWorkflow({
       prompt,
       imagesBase64: referenceImages,
+      seedanceVersion: isSeedanceVersionId(requestedVersion) ? requestedVersion : "2.0",
     });
 
     res.json(result);

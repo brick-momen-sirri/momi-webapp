@@ -137,6 +137,87 @@ test("runs the Seedance prompt workflow and reads the returned text artifact", a
   assert.equal(payload.input.images[0].image, "data:image/png;base64,AAA=");
 });
 
+test("uses the pinned Seedance 2.5 skill with Claude Opus 5.5 through Comfy Router", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return jsonResponse({
+      id: "msg_seedance_25",
+      model: "claude-opus-5-5",
+      role: "assistant",
+      type: "message",
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: "【Generation Goal】\nGenerate a continuous architectural reveal using @Image1 and @Image2.",
+        },
+      ],
+      usage: { input_tokens: 1200, output_tokens: 42 },
+    });
+  };
+
+  const result = await service.runSeedancePromptWorkflow({
+    prompt: "Reveal the entrance, then orbit toward the garden.",
+    imagesBase64: ["data:image/png;base64,AAA=", "data:image/jpeg;base64,BBB="],
+    seedanceVersion: "2.5",
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "https://api.comfy.org/v2/models/anthropic/claude-opus-5-5");
+  const headers = new Headers(calls[0]?.init?.headers);
+  assert.equal(headers.get("X-API-Key"), "comfy-key-test");
+  assert.ok(headers.get("Idempotency-Key"));
+
+  const payload = JSON.parse(String(calls[0]?.init?.body));
+  assert.equal(payload.max_tokens, 4096);
+  assert.match(payload.system[0].text, /Seedance 2\.5 Prompt Optimizer/);
+  assert.doesNotMatch(payload.system[0].text, /Self-update before triggering/);
+  assert.deepEqual(payload.system[0].cache_control, { type: "ephemeral" });
+  assert.equal(payload.messages[0].role, "user");
+  assert.match(payload.messages[0].content[0].text, /complete reference inventory contains 2 images/i);
+  assert.equal(payload.messages[0].content[2].source.media_type, "image/png");
+  assert.equal(payload.messages[0].content[2].source.data, "AAA=");
+  assert.equal(payload.messages[0].content[4].source.media_type, "image/jpeg");
+  assert.equal(payload.messages[0].content[4].source.data, "BBB=");
+  assert.match(payload.messages[0].content[5].text, /Reveal the entrance/);
+
+  assert.match(result.text, /architectural reveal/);
+  assert.equal(result.provider, "comfy-router");
+  assert.equal(result.model, "claude-opus-5-5");
+  assert.equal(result.routerResponseId, "msg_seedance_25");
+  assert.equal(result.routerUsage?.output_tokens, 42);
+  assert.equal(result.textArtifacts[0]?.source, "comfy-router");
+});
+
+test("supports text-only Seedance 2.5 prompting without inventing asset references", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return jsonResponse({
+      id: "msg_seedance_text_only",
+      model: "claude-opus-5-5",
+      content: [{ type: "text", text: "A pavilion emerges through morning mist." }],
+    });
+  };
+
+  const result = await service.runSeedancePromptWorkflow({
+    prompt: "A pavilion emerges through morning mist.",
+    imagesBase64: [],
+    seedanceVersion: "2.5",
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+
+  const messages = requestBody?.messages as Array<{ content: Array<{ type: string; text?: string }> }>;
+  assert.match(messages[0]?.content[0]?.text ?? "", /text-to-video only/i);
+  assert.equal(
+    messages[0]?.content.some((block) => block.type === "image"),
+    false,
+  );
+  assert.equal(result.text, "A pavilion emerges through morning mist.");
+});
+
 test("falls back to the prompt helper when the Seedance workflow returns no text artifact", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {

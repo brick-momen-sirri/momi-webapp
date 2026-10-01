@@ -77,6 +77,13 @@ export const seedancePromptWorkflowPath =
   process.env.SEEDANCE_PROMPT_WORKFLOW_PATH ??
   path.join(workspaceRoot, "workflow", "prompt_generation", "Seedance_prompt_generation.json");
 export const seedancePromptOpenAIModel = process.env.SEEDANCE_PROMPT_OPENAI_MODEL?.trim() ?? "gpt5.5-pro";
+export const seedance25PromptSkillPath =
+  process.env.SEEDANCE_25_PROMPT_SKILL_PATH ??
+  path.join(workspaceRoot, "workflow", "prompt_generation", "skills", "sd25-pe", "SKILL.md");
+export const seedancePromptRouterModel = process.env.SEEDANCE_PROMPT_ROUTER_MODEL?.trim() || "anthropic/claude-opus-5-5";
+export const seedancePromptRouterMaxTokens = Math.floor(
+  positiveNumber(process.env.SEEDANCE_PROMPT_ROUTER_MAX_TOKENS, 4096),
+);
 export const klingPromptWorkflowPath =
   process.env.KLING_PROMPT_WORKFLOW_PATH ??
   path.join(workspaceRoot, "workflow", "prompt_generation", "Kling_image_to_video_prompt_generation.json");

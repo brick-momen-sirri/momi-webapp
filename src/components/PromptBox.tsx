@@ -7,6 +7,7 @@ import {
   improvePromptWithQwen,
 } from "../services/promptApi";
 import { isKlingWorkflowModel, isSeedanceWorkflowModel, KLING_PROMPT_CHARACTER_LIMIT } from "../services/promptRules";
+import type { SeedanceVersionId } from "../features/generation/seedanceVersions";
 import type { ModelType, UploadedImage } from "../types";
 
 type PromptBoxProps = {
@@ -14,6 +15,7 @@ type PromptBoxProps = {
   onChange: (value: string) => void;
   images: UploadedImage[];
   selectedModel: ModelType;
+  seedanceVersion?: SeedanceVersionId;
   // Undefined hides the switch: only Kling 3.0 image-to-video has a negative prompt
   // for it to append to, and a switch that does nothing should not be on screen.
   cameraStabilization?: boolean;
@@ -103,6 +105,7 @@ export function PromptBox({
   onChange,
   images,
   selectedModel,
+  seedanceVersion,
   cameraStabilization,
   onCameraStabilizationChange,
 }: PromptBoxProps) {
@@ -133,7 +136,8 @@ export function PromptBox({
 
   async function describeImage() {
     const image = images.find(Boolean);
-    if (!image) {
+    const usesSeedance25Prompting = isSeedanceWorkflow && seedanceVersion !== undefined && seedanceVersion !== "2.0";
+    if (!image && !usesSeedance25Prompting) {
       setDescriptionError("Upload an image first.");
       return;
     }
@@ -144,6 +148,7 @@ export function PromptBox({
       if (isSeedanceWorkflow) {
         const seedancePrompt = await generateSeedancePromptWithWorkflow(images, {
           userPrompt: value,
+          seedanceVersion,
         });
         onChange(seedancePrompt);
         return;
@@ -395,7 +400,7 @@ export function PromptBox({
         </div>
       ) : null}
 
-      <div className={`mt-3 grid gap-2 ${isVideoWorkflow ? "grid-cols-2" : "grid-cols-1"}`}>
+      <div className={`mt-3 grid gap-2 ${isVideoWorkflow && !isSeedanceWorkflow ? "grid-cols-2" : "grid-cols-1"}`}>
         {isVideoWorkflow ? (
           <button
             type="button"
@@ -413,15 +418,17 @@ export function PromptBox({
                   : "Generate video prompt"}
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void improvePrompt()}
-          disabled={isImproving}
-          className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-line bg-stone-50 px-3 text-xs font-semibold text-stone-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
-        >
-          <Wand2 className="h-3.5 w-3.5 text-ember" />
-          {isImproving ? "Improving..." : isImageEditingWorkflow ? "Improve this prompt" : "Improve prompt"}
-        </button>
+        {!isSeedanceWorkflow ? (
+          <button
+            type="button"
+            onClick={() => void improvePrompt()}
+            disabled={isImproving}
+            className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-line bg-stone-50 px-3 text-xs font-semibold text-stone-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
+          >
+            <Wand2 className="h-3.5 w-3.5 text-ember" />
+            {isImproving ? "Improving..." : isImageEditingWorkflow ? "Improve this prompt" : "Improve prompt"}
+          </button>
+        ) : null}
       </div>
       {descriptionError ? (
         <p className="mt-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">

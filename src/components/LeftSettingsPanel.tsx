@@ -228,6 +228,7 @@ export function LeftSettingsPanel({
             onChange={onPromptChange}
             images={promptImages}
             selectedModel={selectedModel}
+            seedanceVersion={selectedSeedanceVersion}
             cameraStabilization={showKlingCameraStabilization ? klingCameraStabilization : undefined}
             onCameraStabilizationChange={onKlingCameraStabilizationChange}
           />

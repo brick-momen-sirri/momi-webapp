@@ -1,4 +1,5 @@
 import type { UploadedImage } from "../types";
+import type { SeedanceVersionId } from "../features/generation/seedanceVersions";
 import { getStoredAuthToken } from "./backendApi";
 import { decodeImageBlob } from "./imageBlobDecoder";
 
@@ -97,14 +98,18 @@ export async function describeUploadedImages(
   return cleanParagraph(data.text);
 }
 
-export async function generateSeedancePromptWithWorkflow(images: UploadedImage[], options: { userPrompt: string }) {
+export async function generateSeedancePromptWithWorkflow(
+  images: UploadedImage[],
+  options: { userPrompt: string; seedanceVersion?: SeedanceVersionId },
+) {
   const userPrompt = options.userPrompt.trim();
+  const seedanceVersion = options.seedanceVersion ?? "2.0";
   if (!userPrompt) {
     throw new Error("Write the initial Seedance idea first.");
   }
 
   const usableImages = images.filter(Boolean).slice(0, 4);
-  if (!usableImages.length) {
+  if (!usableImages.length && seedanceVersion === "2.0") {
     throw new Error("Upload at least one reference image before generating a Seedance prompt.");
   }
 
@@ -115,6 +120,7 @@ export async function generateSeedancePromptWithWorkflow(images: UploadedImage[]
     credentials: "include",
     body: JSON.stringify({
       prompt: userPrompt,
+      seedanceVersion,
       imageBase64: imagesBase64[0],
       imagesBase64,
     }),
