@@ -273,6 +273,47 @@ describe("LTX 2.5 CQ image to video", () => {
     expect(screen.getByRole("button", { name: "Kling" })).toBeEnabled();
   });
 
+  it("offers First & Last Frame in Frame to Video, labelled experimental", async () => {
+    const kling = model({
+      id: "brick_api_kling_v3_flf2v",
+      label: "Kling v3 flf2v",
+      backendCategory: "first_last_frame_to_video",
+      workflowPath: "C:/Momi-Animation/workflow/flf2v/Brick_api_kling_v3_flf2v.json",
+    });
+    const flf = model({
+      id: "ltx25_cq_flf2v",
+      label: "LTX 2.5 CQ First & Last Frame (Experimental)",
+      description: "Experimental. The frames in between can bend or distort architecture -- exact geometry is not preserved.",
+      backendCategory: "first_last_frame_to_video",
+      workflowPath: "C:/Momi-Animation/backend/workflow-ltx-cq-i2v/ltx25-cq-flf.json",
+    });
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ModelSelector
+        models={[kling, flf, ltx]}
+        selectedModel={kling}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "LTX 2.5 CQ" }));
+    expect(onChange).toHaveBeenCalledWith("ltx25_cq_flf2v");
+
+    rerender(
+      <ModelSelector
+        models={[kling, flf, ltx]}
+        selectedModel={flf}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("LTX 2.5 CQ First & Last Frame (Experimental)")).toBeInTheDocument();
+    expect(screen.getByText(/exact geometry is not preserved/)).toBeInTheDocument();
+  });
+
   it("does not appear, even disabled, where it has no model", () => {
     const firstLast = model({
       id: "brick_api_kling_v3_flf2v",

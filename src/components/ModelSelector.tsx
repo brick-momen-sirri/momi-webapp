@@ -19,6 +19,7 @@ import openAiIcon from "../assets/model-icons/openai.png";
 import seedanceIcon from "../assets/model-icons/seedance.png";
 import veo3Icon from "../assets/model-icons/veo3.png";
 import { SEEDANCE_VERSIONS, type SeedanceVersionId } from "../features/generation/seedanceVersions";
+import { isLtxCqFlfModel } from "../features/generation/ltxCqFirstLastFrame";
 import { isLtxCqI2vModel } from "../features/generation/ltxCqImageToVideo";
 import {
   familyDefaultModel,
@@ -114,12 +115,13 @@ const providerOptions = [
     aliases: ["minimax"],
   },
   {
-    // The studio's own LTX 2.5 CQ pod. Shown only in a tab that has a model for
-    // it, unlike the four above, which hold their place across tabs.
+    // The studio's own LTX 2.5 CQ pod: Image to Video, and First & Last Frame in
+    // Frame to Video. Shown only in a tab that has a model for it, unlike the four
+    // above, which hold their place across tabs.
     id: "ltx",
     label: "LTX 2.5 CQ",
     icon: Sparkles,
-    aliases: ["ltx25_cq_i2v"],
+    aliases: ["ltx25_cq_i2v", "ltx25_cq_flf2v"],
     onlyWhenAvailable: true,
   },
 ] as const;
@@ -457,7 +459,7 @@ function workflowCards(categoryModels: ModelType[], categoryId: string, selected
   const modelCards = cardModels.map((model) => ({
     id: partnerModelFamily(model.id)?.id ?? model.id,
     label: partnerModelFamily(model.id)?.label ?? cleanModelLabel(model.label),
-    icon: isVideoEnhancerModel(model) || isLtxCqI2vModel(model) ? Sparkles : ImageIcon,
+    icon: isVideoEnhancerModel(model) || isLtxCqI2vModel(model) || isLtxCqFlfModel(model) ? Sparkles : ImageIcon,
     iconSrc: iconSrcForModel(model),
     aliases: [model.id],
     model,

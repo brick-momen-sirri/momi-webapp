@@ -1,6 +1,7 @@
 import { draftFinalKindFromModelId } from "./draftFinalModels.js";
 import { partnerModelOutputCount, partnerModelUsd } from "./partnerModels.js";
 import { seedanceVersionIdFromOptions } from "./seedanceVersions.js";
+import { isLtxCqFlfModelId, ltxCqFlfCredits } from "./ltxCqFirstLastFrame.js";
 import { isLtxCqI2vModelId, ltxCqI2vCredits } from "./ltxCqImageToVideo.js";
 import { DEFAULT_VIDEO_ENHANCER_LONG_SIDE, isVideoEnhancerModelId, videoEnhancerCredits } from "./videoEnhancer.js";
 import type { CreditUsageSummary, Resolution, WorkflowModel, WorkflowOptions } from "./types.js";
@@ -55,6 +56,9 @@ export function estimateWorkflowCredits(
   // Pod seconds by generated size and length. Before the substring rules too.
   if (isLtxCqI2vModelId(model.id)) {
     return ltxCqI2vCredits(resolution, durationSeconds);
+  }
+  if (isLtxCqFlfModelId(model.id)) {
+    return ltxCqFlfCredits(resolution, durationSeconds);
   }
 
   if (key.includes("seedance")) {

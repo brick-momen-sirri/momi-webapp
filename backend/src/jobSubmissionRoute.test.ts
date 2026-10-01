@@ -12,6 +12,7 @@ import { isStillImageCategoryId } from "./stillImageCategories.js";
 import { isStillImageSeed } from "./stillImageSeed.js";
 import { stillImageModelId, stillImageWorkflowModel } from "./stillImageModels.js";
 import type { CreateJobRequest, Job, Project, User, WorkflowModel } from "./types.js";
+import { LTX_CQ_FLF_MODEL_ID, ltxCqFlfWorkflowModel } from "./ltxCqFirstLastFrame.js";
 import { LTX_CQ_I2V_MODEL_ID, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
 import type { MaintenanceState } from "./maintenanceMode.js";
 import { VIDEO_ENHANCER_MODEL_ID, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
@@ -883,6 +884,48 @@ test("LTX 2.5 CQ takes its two tested sizes, 2-5 s, saved images only and a boun
     () => validatedRequest({ ...base, inputImages: ["https://cdn.example/marina.png"] }, ltx, users.owner.id),
     /uploaded to this app/,
   );
+});
+
+test("LTX 2.5 CQ First & Last Frame needs both saved frames, in order, a prompt and a tested preset", () => {
+  const flf = ltxCqFlfWorkflowModel();
+  const first = "/api/media?path=C%3A%5Cuploads%5Clobby.png";
+  const last = "/api/media?path=C%3A%5Cuploads%5Cterrace.jpg";
+  const base = {
+    projectId: project.id,
+    modelId: LTX_CQ_FLF_MODEL_ID,
+    prompt: "The camera glides from the lobby to the terrace.",
+    inputImages: [first, last],
+    startFrame: first,
+    endFrame: last,
+    resolution: { width: 1280, height: 720, label: "720p" },
+    durationSeconds: 5,
+  };
+
+  const request = validatedRequest(base, flf, users.owner.id);
+  assert.deepEqual([request.startFrame, request.endFrame, request.inputImages], [first, last, [first, last]]);
+  assert.equal(request.userId, users.owner.id, "the job belongs to whoever submitted it");
+  for (const resolution of [
+    { width: 1920, height: 1080, label: "1080p" },
+    { width: 2560, height: 1440, label: "1440p" },
+  ]) {
+    assert.equal(validatedRequest({ ...base, resolution }, flf, users.owner.id).resolution?.label, resolution.label);
+  }
+  // A client that names the frames only as start/end is fine too.
+  const { inputImages: _ignored, ...framesOnly } = base;
+  assert.equal(validatedRequest(framesOnly, flf, users.owner.id).inputImages, undefined);
+
+  assert.throws(() => validatedRequest({ ...base, startFrame: undefined, inputImages: undefined }, flf, users.owner.id), /start frame is required/);
+  assert.throws(() => validatedRequest({ ...base, endFrame: undefined, inputImages: undefined }, flf, users.owner.id), /end frame is required/);
+  assert.throws(() => validatedRequest({ ...base, prompt: "" }, flf, users.owner.id), /prompt is required/i);
+  assert.throws(() => validatedRequest({ ...base, prompt: "x".repeat(12_001) }, flf, users.owner.id), /12000 characters/);
+  assert.throws(() => validatedRequest({ ...base, resolution: { width: 3840, height: 2160, label: "4K" } }, flf, users.owner.id), /not supported/);
+  assert.throws(() => validatedRequest({ ...base, durationSeconds: 10 }, flf, users.owner.id), /Duration 10s is not supported/);
+  assert.throws(
+    () => validatedRequest({ ...base, endFrame: "https://cdn.example/terrace.jpg", inputImages: undefined }, flf, users.owner.id),
+    /last frame uploaded to this app/,
+  );
+  assert.throws(() => validatedRequest({ ...base, inputImages: [last, first] }, flf, users.owner.id), /first frame followed by the last/);
+  assert.throws(() => validatedRequest({ ...base, inputImages: [first] }, flf, users.owner.id), /first frame followed by the last/);
 });
 
 async function call(body: unknown) {

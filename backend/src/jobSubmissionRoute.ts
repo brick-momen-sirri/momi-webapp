@@ -18,6 +18,7 @@ import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
 import { DraftFinalError, draftFinalRequest } from "./draftFinal.js";
 import { isDraftFinalModelId } from "./draftFinalModels.js";
+import { isLtxCqFlfModelId, LTX_CQ_FLF_PROMPT_MAX_LENGTH } from "./ltxCqFirstLastFrame.js";
 import { isLtxCqI2vModelId, LTX_CQ_I2V_PROMPT_MAX_LENGTH } from "./ltxCqImageToVideo.js";
 import { readMaintenanceState, type MaintenanceState } from "./maintenanceMode.js";
 import { isVideoEnhancerModelId, normalizeVideoEnhancerOptions } from "./videoEnhancer.js";
@@ -246,6 +247,25 @@ export function validatedRequest(body: Record<string, unknown>, model: WorkflowM
     const image = inputImages?.[0];
     if (image && !image.startsWith("data:") && !isLocalMediaReference(image)) {
       throw new JobSubmissionError("LTX 2.5 CQ needs an image uploaded to this app, not a link.");
+    }
+  }
+  // First & Last Frame normalizes both images here too, and the job's inputImages
+  // are read as [first, last] at dispatch, so the two ways a client can name them
+  // must agree. The start/end requirement itself is the generic check above.
+  if (isLtxCqFlfModelId(modelId)) {
+    if ((prompt?.length ?? 0) > LTX_CQ_FLF_PROMPT_MAX_LENGTH) {
+      throw new JobSubmissionError(`LTX 2.5 CQ prompts are limited to ${LTX_CQ_FLF_PROMPT_MAX_LENGTH} characters.`);
+    }
+    for (const [frame, label] of [
+      [startFrame, "first"],
+      [endFrame, "last"],
+    ] as const) {
+      if (frame && !frame.startsWith("data:") && !isLocalMediaReference(frame)) {
+        throw new JobSubmissionError(`LTX 2.5 CQ needs the ${label} frame uploaded to this app, not a link.`);
+      }
+    }
+    if (inputImages && (inputImages.length !== 2 || inputImages[0] !== startFrame || inputImages[1] !== endFrame)) {
+      throw new JobSubmissionError("inputImages must be the first frame followed by the last frame.");
     }
   }
   if (inputImages && model.imageSlotCount && inputImages.length > model.imageSlotCount) {

@@ -1,3 +1,4 @@
+import { isLtxCqFlfModel, ltxCqFlfCredits } from "../features/generation/ltxCqFirstLastFrame";
 import { isLtxCqI2vModel, ltxCqI2vCredits } from "../features/generation/ltxCqImageToVideo";
 import { partnerModelUsd, partnerModelVariant } from "../features/generation/partnerModels";
 import { isVideoEnhancerModel, videoEnhancerCredits } from "../features/generation/videoEnhancer";
@@ -50,6 +51,9 @@ export function estimateModelCredits(
   // Mirrors ltxCqI2vCredits on the backend: pod seconds at the generated size.
   if (isLtxCqI2vModel(model)) {
     return ltxCqI2vCredits(resolution, duration);
+  }
+  if (isLtxCqFlfModel(model)) {
+    return ltxCqFlfCredits(resolution, duration);
   }
 
   // Mirrors the backend: a variant priced in partnerModels.json is quoted from its

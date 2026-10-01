@@ -29,7 +29,7 @@ import {
   runpodSubmissionMode,
   runpodVideoEnhancerEndpointId,
 } from "./config.js";
-import { isLtxCqI2vModelId } from "./ltxCqImageToVideo.js";
+import { isLtxCqPodModelId } from "./ltxCqFirstLastFrame.js";
 import { stillImageRunsOnSharedEndpoint } from "./stillImageWorkflow.js";
 import type { WorkflowOptions } from "./types.js";
 
@@ -128,8 +128,9 @@ export function resolveRunpodEndpoint(job: {
     if (runpodVideoEnhancerEndpointId) return runpodEndpointForId(runpodVideoEnhancerEndpointId);
     throw new Error("No RunPod endpoint is configured for the Video Enhancer. Set RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER.");
   }
-  // Same pod, same reason. Keyed on the model: this graph has no options of its own.
-  if (isLtxCqI2vModelId(job.modelId)) {
+  // Same pod, same reason, for both its generation graphs. Keyed on the model:
+  // neither has options of its own.
+  if (isLtxCqPodModelId(job.modelId)) {
     if (runpodLtxCqI2vEndpointId) return runpodEndpointForId(runpodLtxCqI2vEndpointId);
     throw new Error(
       "No RunPod endpoint is configured for LTX 2.5 CQ. Set RUNPOD_ENDPOINT_ID_VIDEO_ENHANCER or RUNPOD_ENDPOINT_ID_LTX_CQ_I2V.",

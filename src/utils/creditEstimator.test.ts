@@ -266,3 +266,15 @@ describe("resolution parsing", () => {
     expect(estimateModelCredits(veo, 5, "potato")).toBe(estimateModelCredits(veo, 5, "1080p"));
   });
 });
+
+describe("LTX 2.5 CQ First & Last Frame", () => {
+  // Same anchors as backend/src/ltxCqFirstLastFrame.test.ts: each preset's measured
+  // pod time at 121 frames (59 s, 118 s, 280.5 s) plus a minute of overhead.
+  it("quotes each preset's measured pod time", () => {
+    const flf = model({ id: "ltx25_cq_flf2v", label: "LTX 2.5 CQ First & Last Frame (Experimental)", defaultDurationSeconds: 5 });
+    expect([estimateModelCredits(flf, 5, "720p"), estimateModelCredits(flf, 5, "1080p"), estimateModelCredits(flf, 5, "1440p")]).toEqual([
+      12, 18, 34,
+    ]);
+    expect(estimateModelCredits(flf, 2, "1080p")).toBeLessThan(estimateModelCredits(flf, 5, "1080p"));
+  });
+});

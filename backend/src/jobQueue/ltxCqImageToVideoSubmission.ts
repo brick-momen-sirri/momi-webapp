@@ -37,10 +37,10 @@ export async function prepareLtxCqI2vSubmission(job: Job, inputFolder: string): 
     return { workflow, runpodImages: { images: [], imageNames: [imageName] }, runpodVideo: undefined };
   }
 
-  const sourcePath = await localSourcePath(job.inputImages[0]);
+  const sourcePath = await ltxCqLocalSourcePath(job.inputImages[0], "an input image");
   await fs.mkdir(inputFolder, { recursive: true });
   const preparedPath = await prepareLtxCqI2vImage(sourcePath, path.join(inputFolder, `${job.id}_ltx_cq_input.png`));
-  const image = await imageInput(preparedPath, imageName);
+  const image = await ltxCqImageInput(preparedPath, imageName);
 
   const workflow = await ltxCqI2vWorkflow(plan, prompt, imageName, outputPrefix);
   return { workflow, runpodImages: { images: [image], imageNames: [imageName] }, runpodVideo: undefined };
@@ -55,29 +55,37 @@ async function ltxCqI2vWorkflow(plan: LtxCqI2vPlan, prompt: string, imageName: s
  * By URL where one is available, which is how every input on this host now goes.
  * Inline base64 -- the transport the handoff's GPU runs used -- stays as the
  * fallback, but only whole: the PNG is never re-encoded to fit, since the model
- * would then condition on the compression.
+ * would then condition on the compression. `inlineBudgetBytes` is what is left of
+ * the inline limit when an earlier image of the same request already used some.
+ *
+ * Shared with First & Last Frame, which sends two images this way.
  */
-async function imageInput(filePath: string, name: string): Promise<RunpodComfyImageInput> {
+export async function ltxCqImageInput(
+  filePath: string,
+  name: string,
+  inlineBudgetBytes = runpodInlineMediaMaxBytes,
+): Promise<RunpodComfyImageInput> {
   const url = createRunpodInputUrl(filePath, "image") ?? (await uploadRunpodObjectInput(filePath, "image"));
   if (url) return { name, url };
 
   const png = await fs.readFile(filePath);
-  if (png.byteLength > runpodInlineMediaMaxBytes) {
+  if (png.byteLength > inlineBudgetBytes) {
     throw new Error(
       `The normalized input image is ${(png.byteLength / 1024 / 1024).toFixed(1)} MB, over the ` +
-        `${(runpodInlineMediaMaxBytes / 1024 / 1024).toFixed(1)} MB inline limit. Configure RUNPOD_INPUT_BASE_URL or ` +
-        "the RUNPOD_INPUT_BUCKET_* settings so it can be sent by URL.",
+        `${(inlineBudgetBytes / 1024 / 1024).toFixed(1)} MB left of the inline limit. Configure RUNPOD_INPUT_BASE_URL ` +
+        "or the RUNPOD_INPUT_BUCKET_* settings so it can be sent by URL.",
     );
   }
   return { name, image: `data:image/png;base64,${png.toString("base64")}` };
 }
 
-async function localSourcePath(inputImage: string | undefined) {
-  if (!inputImage) throw new Error("LTX 2.5 CQ needs an input image.");
+/** `what` names the image for the artist: "an input image", "a first frame". */
+export async function ltxCqLocalSourcePath(inputImage: string | undefined, what: string) {
+  if (!inputImage) throw new Error(`LTX 2.5 CQ needs ${what}.`);
   // Normalized here, so it has to be bytes this host holds. The submission route
   // already refuses a link.
   const filePath = localMediaFilePathFromUrl(inputImage);
   const resolved = filePath ? await resolveAllowedExistingMediaPath(filePath) : undefined;
-  if (!resolved) throw new Error("LTX 2.5 CQ's input image is missing or is not saved media in this app.");
+  if (!resolved) throw new Error(`LTX 2.5 CQ's ${what.replace(/^an? /, "")} is missing or is not saved media in this app.`);
   return resolved;
 }

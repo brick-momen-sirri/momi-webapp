@@ -48,6 +48,7 @@ import { detectMediaResolution } from "../mediaResolutionService.js";
 import { resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
 import { partnerRateCreditUsage } from "../partnerCreditFallback.js";
 import { partnerModelResolution } from "../partnerModels.js";
+import { assertLtxCqFlfDelivered, isLtxCqFlfModelId, isLtxCqPodModelId } from "../ltxCqFirstLastFrame.js";
 import { isLtxCqI2vModelId } from "../ltxCqImageToVideo.js";
 import { videoEnhancerRunpodPolicy } from "../videoEnhancer.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
@@ -55,6 +56,7 @@ import type { ExecutionClaim } from "./executionRegistry.js";
 import { jobRemoteMediaEntries, materializeRunpodInputImages, materializeRunpodInputVideo } from "./index.js";
 import { localMediaFilePathFromUrl } from "./providerInputs.js";
 import { markJobCompleted } from "./lifecycleState.js";
+import { prepareLtxCqFlfSubmission } from "./ltxCqFirstLastFrameSubmission.js";
 import { prepareLtxCqI2vSubmission } from "./ltxCqImageToVideoSubmission.js";
 import { prepareVideoEnhancerSubmission } from "./videoEnhancerSubmission.js";
 
@@ -117,8 +119,9 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     // The Video Enhancer is a third route of the same kind: its own graph builder,
     // and its own input preparation because the source is re-encoded first.
     const videoEnhancer = job.workflowOptions?.videoEnhancer;
-    // LTX 2.5 CQ image-to-video runs on the enhancer's pod with the same contract.
-    const ltxCqPod = Boolean(videoEnhancer) || isLtxCqI2vModelId(job.modelId);
+    // LTX 2.5 CQ image-to-video and first/last-frame run on the enhancer's pod with
+    // the same contract.
+    const ltxCqPod = Boolean(videoEnhancer) || isLtxCqPodModelId(job.modelId);
     const prepared = await prepareRunpodSubmission(job, model, projectFolder, folders.input, endpoint);
     const workflow = prepared.workflow;
     const runpodImages = prepared.runpodImages;
@@ -280,6 +283,10 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
       selectedMedia,
     });
     logMemory("after-runpod-download", job.id);
+    // First & Last Frame is complete only once its video is stored, cropped and
+    // checked; a render left at its remote URL fails the job instead of completing
+    // it for a later recovery pass.
+    if (isLtxCqFlfModelId(job.modelId)) assertLtxCqFlfDelivered(artifacts.selectedArtifacts);
     job.resultUrls = artifacts.resultUrls;
     job.resultRemoteRefs = artifacts.resultRemoteRefs;
     job.thumbnailUrls = artifacts.thumbnailUrls;
@@ -529,6 +536,7 @@ export async function prepareRunpodSubmission(
   const videoEnhancer = job.workflowOptions?.videoEnhancer;
   if (videoEnhancer) return prepareVideoEnhancerSubmission(job, videoEnhancer, inputFolder);
   if (isLtxCqI2vModelId(job.modelId)) return prepareLtxCqI2vSubmission(job, inputFolder);
+  if (isLtxCqFlfModelId(job.modelId)) return prepareLtxCqFlfSubmission(job, inputFolder);
   if (isDraftFinalModelId(job.modelId)) return prepareDraftFinalSubmission(job, model, inputFolder);
   return prepareAnimationSubmission(job, model, projectFolder, inputFolder);
 }

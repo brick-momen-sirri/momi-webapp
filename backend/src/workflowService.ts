@@ -15,6 +15,7 @@ import {
 } from "./partnerModels.js";
 import { applySeedanceDraftCapture, applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
+import { isLtxCqFlfModelId, ltxCqFlfWorkflowModel } from "./ltxCqFirstLastFrame.js";
 import { isLtxCqI2vModelId, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
 import { isVideoEnhancerModelId, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
 import { assertNoEmbeddedMedia, readJsonFile, redactEmbeddedMedia } from "./storageService.js";
@@ -55,8 +56,11 @@ export function getWorkflowModels() {
   // The enhancer is registered rather than scanned (see config.ts), and offered
   // only where its endpoint is configured: a host without one would list a
   // section every submission to which fails at dispatch.
-  // LTX 2.5 CQ image-to-video runs on the same pod, so the same setting gates it.
-  return runpodVideoEnhancerEndpointId ? [...modelsCache, ltxCqI2vWorkflowModel(), videoEnhancerWorkflowModel()] : modelsCache;
+  // LTX 2.5 CQ image-to-video and first/last-frame run on the same pod, so the
+  // same setting gates them.
+  return runpodVideoEnhancerEndpointId
+    ? [...modelsCache, ltxCqI2vWorkflowModel(), ltxCqFlfWorkflowModel(), videoEnhancerWorkflowModel()]
+    : modelsCache;
 }
 
 /**
@@ -75,6 +79,7 @@ export function getWorkflowModel(id: string) {
     // exists keeps its model after the setting is removed.
     (isVideoEnhancerModelId(id) ? videoEnhancerWorkflowModel() : undefined) ??
     (isLtxCqI2vModelId(id) ? ltxCqI2vWorkflowModel() : undefined) ??
+    (isLtxCqFlfModelId(id) ? ltxCqFlfWorkflowModel() : undefined) ??
     // A final is offered on its draft's card, never in the picker; see draftFinalModels.ts.
     draftFinalWorkflowModel(id)
   );

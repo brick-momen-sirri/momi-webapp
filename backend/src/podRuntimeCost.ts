@@ -25,7 +25,7 @@
 // prices scraped off a page, they are what was charged.
 
 import { runpodApiKey } from "./config.js";
-import { isLtxCqI2vModelId } from "./ltxCqImageToVideo.js";
+import { isLtxCqPodModelId } from "./ltxCqFirstLastFrame.js";
 import type { Job, RunpodJobTiming } from "./types.js";
 
 /**
@@ -161,7 +161,7 @@ export function podRuntimeCost(job: Pick<Job, "workflowOptions" | "runpodTiming"
  * second, rather than relaying to a provider that returns its own usage.
  */
 export function runsOnOwnPod(job: Pick<Job, "workflowOptions" | "modelId">) {
-  return Boolean(job.workflowOptions?.stillImage || job.workflowOptions?.videoEnhancer || isLtxCqI2vModelId(job.modelId));
+  return Boolean(job.workflowOptions?.stillImage || job.workflowOptions?.videoEnhancer || isLtxCqPodModelId(job.modelId));
 }
 
 /** Just the credits, for callers that only need the figure. */
