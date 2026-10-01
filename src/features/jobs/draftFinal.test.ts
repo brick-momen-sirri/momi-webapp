@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Job } from "../../types";
-import { draftExpiryText, draftFinalModelId, draftFinalPlan, finalsForDraft } from "./draftFinal";
+import {
+  draftCountdown,
+  draftCountdownShortText,
+  draftExpiryText,
+  draftFinalModelId,
+  draftFinalPlan,
+  finalsForDraft,
+  hasDraftCountdown,
+} from "./draftFinal";
 
 const NOW = Date.parse("2026-09-30T12:00:00.000Z");
 
@@ -57,5 +65,44 @@ describe("draft finals", () => {
     const newer = job({ id: "f2", createdAt: "2026-09-30T11:20:00.000Z", workflowOptions: { draftFinal: { sourceJobId: "job_draft" } } });
     const unrelated = job({ id: "f3", workflowOptions: { draftFinal: { sourceJobId: "job_other" } } });
     expect(finalsForDraft(job(), [older, unrelated, newer]).map((item) => item.id)).toEqual(["f2", "f1"]);
+  });
+  describe("countdown", () => {
+    // The draft finished at 11:00 and BytePlus keeps it until 11:00 a week later;
+    // Momi stops 30 minutes early, so the clock runs to 10:30.
+    it("counts down to the moment the button stops offering the final", () => {
+      const countdown = draftCountdown(job().draft, NOW)!;
+      expect(new Date(countdown.deadline).toISOString()).toBe("2026-10-07T10:30:00.000Z");
+      expect(countdown).toMatchObject({ phase: "fresh", days: 6, hours: 22, minutes: 30, seconds: 0 });
+      expect(countdown.fraction).toBeGreaterThan(0.98);
+      expect(draftCountdownShortText(countdown)).toBe("6d 22h");
+      // The plan quotes the same moment, so the tooltip and the clock agree.
+      expect(draftFinalPlan(job(), NOW)?.expiresAt).toBe("2026-10-07T10:30:00.000Z");
+    });
+
+    it("turns amber under three days and ember on the last day", () => {
+      expect(draftCountdown(job().draft, Date.parse("2026-10-04T12:00:00.000Z"))?.phase).toBe("soon");
+      const lastDay = draftCountdown(job().draft, Date.parse("2026-10-07T09:49:30.000Z"))!;
+      expect(lastDay).toMatchObject({ phase: "urgent", days: 0, hours: 0, minutes: 40, seconds: 30 });
+      expect(draftCountdownShortText(lastDay)).toBe("40m");
+      expect(draftCountdownShortText(draftCountdown(job().draft, Date.parse("2026-10-07T10:29:40.000Z"))!)).toBe("<1m");
+    });
+
+    it("reaches zero exactly when the final is refused", () => {
+      const deadline = Date.parse("2026-10-07T10:30:00.000Z");
+      expect(draftCountdown(job().draft, deadline - 1)?.phase).toBe("urgent");
+      expect(draftFinalPlan(job(), deadline - 1)?.refusal).toBeUndefined();
+      const expired = draftCountdown(job().draft, deadline)!;
+      expect(expired).toMatchObject({ phase: "expired", remainingMs: 0, fraction: 0 });
+      expect(draftCountdownShortText(expired)).toBe("Expired");
+      expect(draftFinalPlan(job(), deadline)?.refusal).toMatch(/7 days/);
+    });
+
+    it("is only shown on a finished Seedance draft", () => {
+      expect(hasDraftCountdown(job())).toBe(true);
+      expect(hasDraftCountdown(job({ status: "running" }))).toBe(false);
+      expect(hasDraftCountdown(job({ draft: { kind: "minimax-h3-768p", createdAt: "2026-09-30T11:00:00.000Z" } }))).toBe(false);
+      expect(draftCountdown({ kind: "minimax-h3-768p", createdAt: "2026-09-30T11:00:00.000Z" }, NOW)).toBeUndefined();
+      expect(hasDraftCountdown(job({ workflowOptions: { draftFinal: { sourceJobId: "job_x" } } }))).toBe(false);
+    });
   });
 });

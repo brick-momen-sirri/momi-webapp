@@ -2,6 +2,7 @@ import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Sparkles, Star
 import type { Job, Project, User } from "../types";
 import { canCancelJob } from "../features/jobs/cancellation";
 import { draftExpiryText, draftFinalPlan } from "../features/jobs/draftFinal";
+import { useNow } from "../utils/useNow";
 import { MoveResultMenu } from "./MoveResultMenu";
 
 type JobActionsProps = {
@@ -52,14 +53,16 @@ export function JobActions({
   // Draft -> Review -> Final: an approved preview offers its expensive render here.
   // An expired or id-less draft still shows the button, disabled, so the reason is
   // visible on hover instead of the option silently disappearing.
-  const finalPlan = !archiveView && onRenderDraftFinal ? draftFinalPlan(job) : undefined;
+  // Refreshed each minute on an expiring draft, so the button turns off when its countdown ends.
+  const now = useNow(60_000, Boolean(job.draft?.expiresAt));
+  const finalPlan = !archiveView && onRenderDraftFinal ? draftFinalPlan(job, now) : undefined;
   const finalInFlight = draftFinalStatus === "queued" || draftFinalStatus === "sending" || draftFinalStatus === "running";
   const finalTitle = finalPlan
     ? (finalPlan.refusal ??
       [
         `Render the ${finalPlan.label} from this draft (~${finalPlan.credits.toLocaleString()} credits)`,
         draftFinalStatus === "completed" ? "a final is already in Results" : finalInFlight ? "a final is already on its way" : "",
-        draftExpiryText(finalPlan.expiresAt) ?? "",
+        draftExpiryText(finalPlan.expiresAt, now) ?? "",
       ]
         .filter(Boolean)
         .join(" · "))

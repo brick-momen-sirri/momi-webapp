@@ -19,6 +19,8 @@ import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import { cn } from "../utils/classNames";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { jobFolderLabel } from "../features/projects/folderTree";
+import { hasDraftCountdown } from "../features/jobs/draftFinal";
+import { DraftCountdown } from "./DraftCountdown";
 import { JobActions } from "./JobActions";
 import { resultCardElementId } from "../utils/resultCard";
 import { JobMetadata } from "./JobMetadata";
@@ -258,6 +260,12 @@ export function JobCard({
       </div>
 
       <div className="py-4">
+        {/* Only where the final can be rendered from: the Animation feed, outside the archive. */}
+        {onRenderDraftFinal && !archiveView && hasDraftCountdown(job) ? (
+          <div className="mb-4">
+            <DraftCountdown job={job} finalStatus={draftFinalStatus} />
+          </div>
+        ) : null}
         <section className="input-section rounded-lg border border-line bg-white/60 p-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-stone-500">
             <Images className="h-3.5 w-3.5" />

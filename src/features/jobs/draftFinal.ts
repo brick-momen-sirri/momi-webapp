@@ -33,7 +33,10 @@ export type DraftFinalPlan = {
   credits: number;
   /** Why it cannot be rendered now, when it cannot. */
   refusal?: string;
-  /** When the provider stops accepting the draft, when it expires at all. */
+  /**
+   * When the final stops being offered, when the draft expires at all: the
+   * provider's expiry less the safety margin, the same moment its countdown ends.
+   */
   expiresAt?: string;
 };
 
@@ -52,19 +55,86 @@ export function draftFinalPlan(job: Job, now = Date.now()): DraftFinalPlan | und
 
   const label = draft.kind === "seedance-2.5-draft" ? "1080p final" : "2K final";
   const credits = estimateDraftFinalCredits(draft.kind, job.durationSeconds, job.backendCategory);
-  const plan: DraftFinalPlan = { modelId, label, credits, expiresAt: draft.expiresAt };
+  const countdown = draftCountdown(draft, now);
+  const plan: DraftFinalPlan = {
+    modelId,
+    label,
+    credits,
+    expiresAt: countdown ? new Date(countdown.deadline).toISOString() : draft.expiresAt,
+  };
 
   if (job.status !== "completed") return { ...plan, refusal: "Only a completed draft can be finalized." };
   if (draft.kind === "seedance-2.5-draft") {
-    const expiresAt = Date.parse(draft.expiresAt ?? "");
-    if (!draft.taskId || !Number.isFinite(expiresAt)) {
+    if (!draft.taskId || !countdown) {
       return { ...plan, refusal: "This draft did not return a task id, so it cannot be finalized." };
     }
-    if (now > expiresAt - SEEDANCE_SAFETY_MS) {
+    if (countdown.phase === "expired") {
       return { ...plan, refusal: "Seedance drafts can be finalized for 7 days. Render a new draft." };
     }
   }
   return plan;
+}
+
+export type DraftCountdownPhase = "fresh" | "soon" | "urgent" | "expired";
+
+export type DraftCountdown = {
+  phase: DraftCountdownPhase;
+  /** The last moment a final can be started: the provider's expiry less the safety margin. */
+  deadline: number;
+  remainingMs: number;
+  /** The share of the draft's window still left: 1 when it has just finished, 0 at the deadline. */
+  fraction: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+};
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * How long a Seedance draft has left, for the countdown on its card.
+ *
+ * It runs to the moment the button stops offering the final rather than to
+ * BytePlus's own expiry, so the clock reaching zero and the button disabling are
+ * the same event. Drafts that never expire (MiniMax) have no countdown.
+ */
+export function draftCountdown(draft: JobDraft | undefined, now = Date.now()): DraftCountdown | undefined {
+  if (draft?.kind !== "seedance-2.5-draft") return undefined;
+  const expiresAt = Date.parse(draft.expiresAt ?? "");
+  if (!Number.isFinite(expiresAt)) return undefined;
+
+  const deadline = expiresAt - SEEDANCE_SAFETY_MS;
+  const start = Date.parse(draft.createdAt);
+  const windowMs = Number.isFinite(start) && deadline > start ? deadline - start : 7 * 24 * HOUR_MS;
+  const remainingMs = Math.max(0, deadline - now);
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const phase: DraftCountdownPhase =
+    remainingMs <= 0 ? "expired" : remainingMs < 24 * HOUR_MS ? "urgent" : remainingMs < 72 * HOUR_MS ? "soon" : "fresh";
+
+  return {
+    phase,
+    deadline,
+    remainingMs,
+    fraction: Math.min(1, remainingMs / windowMs),
+    days: Math.floor(totalSeconds / 86_400),
+    hours: Math.floor(totalSeconds / 3_600) % 24,
+    minutes: Math.floor(totalSeconds / 60) % 60,
+    seconds: totalSeconds % 60,
+  };
+}
+
+/** Whether a job shows a countdown at all: a finished Seedance draft that is not itself a final. */
+export function hasDraftCountdown(job: Job) {
+  return job.status === "completed" && job.draft?.kind === "seedance-2.5-draft" && !job.workflowOptions?.draftFinal;
+}
+
+/** "6d 23h", "23h 41m", "41m": the countdown in the space a grid tile has. */
+export function draftCountdownShortText(countdown: DraftCountdown) {
+  if (countdown.phase === "expired") return "Expired";
+  if (countdown.days > 0) return `${countdown.days}d ${countdown.hours}h`;
+  if (countdown.hours > 0) return `${countdown.hours}h ${countdown.minutes}m`;
+  return countdown.minutes > 0 ? `${countdown.minutes}m` : "<1m";
 }
 
 /** The finals already started from this draft, newest first, from the jobs in view. */

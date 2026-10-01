@@ -12,7 +12,9 @@
 import { Film, Hash, ImageIcon, Loader2, TriangleAlert } from "lucide-react";
 import { THUMBNAIL_WIDTH, thumbnailMediaUrl } from "../services/backendApi";
 import type { Job } from "../types";
+import { hasDraftCountdown } from "../features/jobs/draftFinal";
 import { resultCardElementId } from "../utils/resultCard";
+import { DraftCountdownChip } from "./DraftCountdown";
 import { JobStatusBadge } from "./ResultViewControls";
 
 type ResultTileProps = {
@@ -52,6 +54,7 @@ export function ResultTile({ job, label, chip, onOpen }: ResultTileProps) {
               decoding="async"
               className="h-full w-full object-cover"
             />
+            {hasDraftCountdown(job) ? <DraftCountdownChip job={job} /> : null}
             {isVideo ? (
               <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                 <Film className="h-2.5 w-2.5" />

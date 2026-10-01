@@ -574,3 +574,288 @@ html[data-theme="dark"] .scrollbar-thin {
   content-visibility: auto;
   contain-intrinsic-size: auto 720px;
 }
+
+/*
+ * Seedance draft countdown (DraftCountdown.tsx).
+ *
+ * One colour per phase, carried as custom properties so the dial, the digits and
+ * the wash all move together: teal while there is time, amber under three days,
+ * ember on the last day, grey once it has expired. The phase changes the colour
+ * only -- nothing about the strip's size -- so a card never shifts as it ticks.
+ */
+.draft-clock {
+  --clock: #0e9f8f;
+  --clock-soft: rgba(17, 184, 165, 0.1);
+  --clock-tile: rgba(17, 184, 165, 0.12);
+  --clock-line: rgba(17, 184, 165, 0.34);
+  --clock-track: rgba(39, 36, 31, 0.08);
+  --clock-ink: #27241f;
+  --clock-muted: #78716c;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--clock-line);
+  border-radius: 12px;
+  background:
+    radial-gradient(120% 140% at 0% 50%, var(--clock-soft), transparent 60%),
+    #ffffff;
+  color: var(--clock-ink);
+}
+
+.draft-clock[data-phase="soon"] {
+  --clock: #d97706;
+  --clock-soft: rgba(245, 158, 11, 0.13);
+  --clock-tile: rgba(245, 158, 11, 0.14);
+  --clock-line: rgba(217, 119, 6, 0.38);
+}
+
+.draft-clock[data-phase="urgent"] {
+  --clock: #e8552a;
+  --clock-soft: rgba(255, 107, 53, 0.16);
+  --clock-tile: rgba(255, 107, 53, 0.14);
+  --clock-line: rgba(232, 85, 42, 0.48);
+}
+
+.draft-clock[data-phase="expired"] {
+  --clock: #a8a29e;
+  --clock-soft: rgba(120, 113, 108, 0.08);
+  --clock-tile: rgba(120, 113, 108, 0.1);
+  --clock-line: #e7e2d8;
+}
+
+.draft-clock-ring {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+}
+
+.draft-clock-ring svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.draft-clock-ring-track {
+  fill: none;
+  stroke: var(--clock-track);
+  stroke-width: 5;
+}
+
+.draft-clock-ring-arc {
+  fill: none;
+  stroke: var(--clock);
+  stroke-width: 5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear, stroke 600ms ease;
+}
+
+.draft-clock-ring-notch {
+  stroke: var(--clock);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+
+.draft-clock-ring-centre {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.draft-clock-ring-number {
+  font-size: 19px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--clock);
+}
+
+.draft-clock-ring-unit {
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clock-muted);
+}
+
+.draft-clock-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--clock);
+}
+
+.draft-clock-digits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.draft-clock-unit {
+  display: flex;
+  min-width: 46px;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 6px 3px;
+  border-radius: 8px;
+  background: var(--clock-tile);
+  overflow: hidden;
+}
+
+.draft-clock-value {
+  display: block;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  animation: draft-clock-tick 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.draft-clock-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clock-muted);
+}
+
+.draft-clock-expired {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--clock);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.draft-clock-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--clock-muted);
+}
+
+@keyframes draft-clock-tick {
+  from {
+    opacity: 0;
+    transform: translateY(-45%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The last day breathes, so the one draft about to be lost is the one that catches the eye. */
+@keyframes draft-clock-breathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    filter: drop-shadow(0 0 5px var(--clock));
+  }
+}
+
+.draft-clock[data-phase="urgent"] .draft-clock-ring-arc {
+  animation: draft-clock-breathe 2.4s ease-in-out infinite;
+}
+
+/* Grid tile chip: over a poster frame, so it is always dark glass. */
+.draft-chip {
+  --clock: #2dd4bf;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  background: rgba(12, 12, 11, 0.72);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(4px);
+}
+
+.draft-chip[data-phase="soon"] {
+  --clock: #fbbf24;
+}
+
+.draft-chip[data-phase="urgent"] {
+  --clock: #ff8a5c;
+}
+
+.draft-chip[data-phase="expired"] {
+  --clock: #a8a29e;
+  color: #d6d3d1;
+}
+
+.draft-chip svg {
+  transform: rotate(-90deg);
+}
+
+.draft-chip-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 2;
+}
+
+.draft-chip-arc {
+  fill: none;
+  stroke: var(--clock);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+html[data-theme="dark"] .draft-clock {
+  --clock-track: rgba(244, 241, 234, 0.1);
+  --clock-ink: #f4f1ea;
+  --clock-muted: #a8a29e;
+  background:
+    radial-gradient(120% 140% at 0% 50%, var(--clock-soft), transparent 60%),
+    #181816;
+}
+
+html[data-theme="dark"] .draft-clock[data-phase="fresh"] {
+  --clock: #2dd4bf;
+}
+
+html[data-theme="dark"] .draft-clock[data-phase="soon"] {
+  --clock: #fbbf24;
+}
+
+html[data-theme="dark"] .draft-clock[data-phase="urgent"] {
+  --clock: #ff8a5c;
+}
+
+html[data-theme="dark"] .draft-clock[data-phase="expired"] {
+  --clock-line: #34322d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draft-clock-value,
+  .draft-clock[data-phase="urgent"] .draft-clock-ring-arc {
+    animation: none;
+  }
+
+  .draft-clock-ring-arc {
+    transition: none;
+  }
+}
