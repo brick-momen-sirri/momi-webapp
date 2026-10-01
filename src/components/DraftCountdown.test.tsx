@@ -37,18 +37,18 @@ describe("draft countdown", () => {
     render(<DraftCountdown job={draftJob()} />);
     const timer = screen.getByRole("timer");
     expect(timer).toHaveAttribute("data-phase", "fresh");
-    expect(timer).toHaveTextContent(/06\s*days\s*22\s*hrs\s*30\s*min\s*00\s*sec/);
-    expect(timer).toHaveTextContent(/render the 1080p final before/);
+    expect(timer).toHaveTextContent(/06\s*d\s*22\s*h\s*30\s*m\s*00\s*s/);
+    expect(timer).toHaveTextContent(/1080p final before/);
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(timer).toHaveTextContent(/06\s*days\s*22\s*hrs\s*29\s*min\s*59\s*sec/);
+    expect(timer).toHaveTextContent(/06\s*d\s*22\s*h\s*29\s*m\s*59\s*s/);
   });
 
   it("says a final is already in Results", () => {
     render(<DraftCountdown job={draftJob()} finalStatus="completed" />);
-    expect(screen.getByRole("timer")).toHaveTextContent(/A final is already in Results/);
+    expect(screen.getByRole("timer")).toHaveTextContent(/final in Results/);
   });
 
   it("shows the expired state once the window has closed", () => {
@@ -56,7 +56,7 @@ describe("draft countdown", () => {
     render(<DraftCountdown job={draftJob()} />);
     const timer = screen.getByRole("timer");
     expect(timer).toHaveAttribute("data-phase", "expired");
-    expect(timer).toHaveTextContent(/Render a new draft/);
+    expect(timer).toHaveTextContent(/render a new draft/);
   });
 
   it("fits the grid tile as a short label", () => {
