@@ -5,6 +5,7 @@ import {
   seedanceVersion,
   type SeedanceVersionId,
 } from "../features/generation/seedanceVersions";
+import { partnerModelResolutions } from "../features/generation/partnerModels";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { ModelType } from "../types";
 
@@ -99,14 +100,23 @@ export function ResolutionSelector({
     return null;
   }
 
-  const parsedValue = parseResolution(value);
-  const selectedValue = normalizeResolutionValue(value);
+  // A partner variant brings its own sizes (partnerModels.json): MiniMax's 768P and
+  // Seedream's presets are not in the generic table, and "2K" there means a 16:9
+  // 2560x1440 rather than Nano Banana's square 2048.
+  const partnerOptions = partnerModelResolutions(selectedModel.id);
+  const parsedValue = partnerOptions ? partnerSize(partnerOptions, value) : parseResolution(value);
+  const selectedValue = partnerOptions
+    ? (partnerOptions.find((option) => sameResolution(option.value, value))?.value ?? partnerOptions[0].value)
+    : normalizeResolutionValue(value);
   const supportedResolutions = selectedModel.supportedResolutions?.length
     ? selectedModel.supportedResolutions
     : defaultVideoResolutionOptions;
-  const visibleOptions = supportedResolutions
-    .map((resolution) => resolutionOptions.find((option) => option.value.toLowerCase() === resolution.toLowerCase()))
-    .filter((option): option is (typeof resolutionOptions)[number] => Boolean(option));
+  const visibleOptions: Array<{ value: string; label: string; width: number; height: number }> = partnerOptions
+    ? partnerOptions
+    : supportedResolutions
+        .map((resolution) => resolutionOptions.find((option) => option.value.toLowerCase() === resolution.toLowerCase()))
+        .filter((option): option is (typeof resolutionOptions)[number] => Boolean(option));
+  const isLandscapeSelection = parsedValue ? isLandscapeRatio(parsedValue.width, parsedValue.height) : false;
   const showOutputCount = supportsImageOutputCount(selectedModel) && imageOutputCount && onImageOutputCountChange;
   // Only one of the two ever applies: Nano Banana is an image model, Seedance a video one.
   const ratioControl = ratioControlForModel(selectedModel, {
@@ -122,7 +132,7 @@ export function ResolutionSelector({
     const messages: string[] = [];
     const shortSide = parsedValue ? Math.min(parsedValue.width, parsedValue.height) : 1080;
 
-    if (selectedModel.requiresLandscape && !isLandscapeChoice(selectedValue)) {
+    if (selectedModel.requiresLandscape && !(partnerOptions ? isLandscapeSelection : isLandscapeChoice(selectedValue))) {
       messages.push("This model requires a 16:9 landscape resolution.");
     }
 
@@ -234,7 +244,17 @@ export function ResolutionSelector({
 function usesResolutionControl(model: ModelType) {
   if (isNanoBananaModel(model)) return true;
   if (isGptImageModel(model)) return true;
+  if (partnerModelResolutions(model.id)?.length) return true;
   return model.category === "video" && model.backendCategory?.toLowerCase() !== "image_editing";
+}
+
+function sameResolution(a: string, b: string) {
+  return a.toLowerCase().replace(/\s+/g, "") === b.toLowerCase().replace(/\s+/g, "");
+}
+
+function partnerSize(options: Array<{ value: string; width: number; height: number }>, value: string) {
+  const option = options.find((candidate) => sameResolution(candidate.value, value)) ?? options[0];
+  return option ? { width: option.width, height: option.height } : null;
 }
 
 function isNanoBananaModel(model: ModelType) {

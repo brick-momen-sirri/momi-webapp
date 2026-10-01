@@ -1,6 +1,7 @@
 import { Eye } from "lucide-react";
 import { seedanceDurationGated, seedanceVersion, type SeedanceVersionId } from "../features/generation/seedanceVersions";
 import { isVideoEnhancerModel, type VideoEnhancerLongSide } from "../features/generation/videoEnhancer";
+import { partnerModelResolutions } from "../features/generation/partnerModels";
 import { isSeedanceWorkflowModel } from "../services/promptRules";
 import type { SubmissionPhase } from "../features/jobs/useJobSubmission";
 import type { ArchVizGridOptions, ModelType, Project, UploadedImage, UploadedVideo } from "../types";
@@ -131,7 +132,12 @@ export function LeftSettingsPanel({
   // the generation controls it would ignore are not shown at all.
   const videoEnhancer = isVideoEnhancerModel(selectedModel);
   const showResolution =
-    !videoEnhancer && (selectedModel.category === "video" || isNanoBananaModel(selectedModel) || isGptImageModel(selectedModel));
+    !videoEnhancer &&
+    (selectedModel.category === "video" ||
+      isNanoBananaModel(selectedModel) ||
+      isGptImageModel(selectedModel) ||
+      // Seedream 5.0's sizes come from partnerModels.json, not from its name.
+      Boolean(partnerModelResolutions(selectedModel.id)?.length));
   const showArchVizGridControls = isArchVizGridModel(selectedModel);
   const use16By9Cropping = !show16By9CropToggle || enable16By9Cropping;
   const promptImages = use16By9Cropping ? images : images.map((image) => (image ? { ...image, croppedUrl: undefined } : image));

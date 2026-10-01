@@ -193,7 +193,7 @@ export function useJobSubmission(options: JobSubmissionOptions) {
               targetFolderId: targetFolderId || null,
               modelId: selectedModel.id,
               prompt: isArchVizGridModel(selectedModel) || isVideoEnhancerModel(selectedModel) ? "" : prompt.trim(),
-              resolution: parseResolution(selectedResolution),
+              resolution: parseResolution(selectedResolution, selectedModel.id),
               durationSeconds: selectedDurationSeconds,
               inputImages,
               startFrame: selectedModel.requiresTwoImages ? inputImages[0] : undefined,
@@ -363,7 +363,7 @@ function submissionFingerprint(input: {
     targetFolderId: input.targetFolderId || null,
     modelId: input.selectedModel.id,
     prompt: isArchVizGridModel(input.selectedModel) || isVideoEnhancerModel(input.selectedModel) ? "" : input.prompt.trim(),
-    resolution: parseResolution(input.selectedResolution),
+    resolution: parseResolution(input.selectedResolution, input.selectedModel.id),
     durationSeconds: input.selectedDurationSeconds,
     images: input.images
       .slice(0, input.requiredImages)

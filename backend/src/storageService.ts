@@ -275,6 +275,9 @@ export async function saveJobMetadata(job: Job, project?: Project) {
     workflowOptions: job.workflowOptions,
     generatedPrompt: job.generatedPrompt ?? "",
     textArtifacts: job.textArtifacts ?? [],
+    // The draft a final can still be rendered from. Kept beside the files so a
+    // Seedance task id survives on the share even if the job row does not.
+    draft: job.draft ?? null,
     inputFiles: job.inputImages,
     outputFiles: job.resultUrls,
     thumbnailFiles: job.thumbnailUrls,

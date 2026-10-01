@@ -259,6 +259,7 @@ function App() {
     handleToggleFavorite,
     handleMoveJobResult,
     handleRetryJob,
+    handleRenderDraftFinal,
     handleCancelJob,
     handleArchiveJob,
     handleRestoreArchivedJob,
@@ -832,6 +833,7 @@ function App() {
               onCopyImage={handleCopyJobImage}
               onReuseSettings={handleReuseJobSettings}
               onRetry={handleRetryJob}
+              onRenderDraftFinal={handleRenderDraftFinal}
               onCancel={handleCancelJob}
               canReuseSettings={(job) => canReuseJobSettings(job, models)}
               onToggleFavorite={handleToggleFavorite}

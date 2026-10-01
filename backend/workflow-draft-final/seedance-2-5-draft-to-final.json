@@ -1,0 +1,27 @@
+{
+  "1": {
+    "inputs": {
+      "draft_task_id": "",
+      "watermark": false
+    },
+    "class_type": "ByteDance2DraftToFinalVideoNode",
+    "_meta": {
+      "title": "ByteDance Seedance 2.5 Draft to Final Video"
+    }
+  },
+  "2": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

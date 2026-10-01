@@ -186,7 +186,7 @@
     },
     {
       "id": 359,
-      "type": "ByteDance2ReferenceNode",
+      "type": "ByteDance2ReferenceNodeV2",
       "pos": [
         482.798828125,
         130
@@ -273,7 +273,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ByteDance2ReferenceNode"
+        "Node name for S&R": "ByteDance2ReferenceNodeV2"
       },
       "widgets_values": [
         "Seedance 2.0",

@@ -4,9 +4,16 @@ import { runpodVideoEnhancerEndpointId, serverlessWorkflowRoot, workflowMappings
 import { getObjectInfo } from "./comfyClient.js";
 import type { ComfyGraph, ComfyNode, ComfyPort } from "./comfyGraph.js";
 import { estimateWorkflowCredits } from "./creditEstimator.js";
+import { draftFinalWorkflowModel } from "./draftFinalModels.js";
 import { isPathWithinRoot } from "./pathContainment.js";
 import { applyKlingCameraStabilization, isKlingVideoClassType } from "./klingCameraStabilization.js";
-import { applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
+import {
+  applyPartnerModelCapabilities,
+  partnerModelRandomizesSeed,
+  partnerModelResolution,
+  seedreamMatchedSize,
+} from "./partnerModels.js";
+import { applySeedanceDraftCapture, applySeedanceModelInputs, seedanceEffectiveModel } from "./seedanceVersions.js";
 import { stillImageWorkflowModel } from "./stillImageModels.js";
 import { isLtxCqI2vModelId, ltxCqI2vWorkflowModel } from "./ltxCqImageToVideo.js";
 import { isVideoEnhancerModelId, videoEnhancerWorkflowModel } from "./videoEnhancer.js";
@@ -67,7 +74,9 @@ export function getWorkflowModel(id: string) {
     // Resolved whether or not the endpoint is configured, so a job that already
     // exists keeps its model after the setting is removed.
     (isVideoEnhancerModelId(id) ? videoEnhancerWorkflowModel() : undefined) ??
-    (isLtxCqI2vModelId(id) ? ltxCqI2vWorkflowModel() : undefined)
+    (isLtxCqI2vModelId(id) ? ltxCqI2vWorkflowModel() : undefined) ??
+    // A final is offered on its draft's card, never in the picker; see draftFinalModels.ts.
+    draftFinalWorkflowModel(id)
   );
 }
 
@@ -88,14 +97,27 @@ export async function loadWorkflowPrompt(
   injectInputs(prompt, model, request, projectName, mapping, objectInfo);
   applyTextOnlyImageWorkflowMode(prompt, model, request);
   applyImageOutputCountOptions(prompt, model, request);
+  applySeedanceDraftCapture(prompt, request.workflowOptions);
   return prompt;
 }
+
+/**
+ * What the graph builder knows about the inputs beyond their names.
+ *
+ * Only the RunPod path reads the input files, so only it can say what shape they
+ * are. Seedream's "match input" size needs the first image's aspect; everything
+ * else builds from the request alone and ignores this.
+ */
+export type WorkflowInputContext = {
+  firstImageAspect?: number;
+};
 
 export async function loadWorkflowForRunpod(
   model: WorkflowModel,
   request: CreateJobRequest,
   projectName: string,
   imageNames: string[],
+  context: WorkflowInputContext = {},
 ) {
   const workflow = JSON.parse(await fs.readFile(model.workflowPath, "utf8"));
   const requestWithImageNames = {
@@ -111,9 +133,10 @@ export async function loadWorkflowForRunpod(
   if (model.outputType === "video") {
     pruneSaveBrickSequenceNodes(prompt);
   }
-  injectInputs(prompt, model, requestWithImageNames, projectName, mapping, {});
+  injectInputs(prompt, model, requestWithImageNames, projectName, mapping, {}, context);
   applyTextOnlyImageWorkflowMode(prompt, model, requestWithImageNames);
   applyImageOutputCountOptions(prompt, model, requestWithImageNames);
+  applySeedanceDraftCapture(prompt, requestWithImageNames.workflowOptions);
   return prompt;
 }
 
@@ -192,7 +215,7 @@ async function inferWorkflowModel(workflowPath: string): Promise<WorkflowModel> 
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
-  const model: WorkflowModel = {
+  const inferred: WorkflowModel = {
     id: slug(file),
     name,
     category,
@@ -211,15 +234,20 @@ async function inferWorkflowModel(workflowPath: string): Promise<WorkflowModel> 
     estimatedCredits: outputType === "video" ? 18 : category === "image_upscaling" ? 8 : 4,
     estimatedTime: outputType === "video" ? "2-5 min" : "35-90 sec",
   };
+  // A partner model variant declares its own limits (partnerModels.json); the file
+  // name cannot, so they replace what was inferred from it before the estimate reads them.
+  const model = applyPartnerModelCapabilities(inferred);
   model.estimatedCredits = estimateWorkflowCredits(
     model,
-    defaultDurationSeconds,
-    resolutionFromLabel(model.defaultResolution ?? defaultResolution),
+    model.defaultDurationSeconds,
+    resolutionFromLabel(model.defaultResolution ?? defaultResolution, model.id),
   );
   return model;
 }
 
-function resolutionFromLabel(label: string) {
+function resolutionFromLabel(label: string, modelId?: string) {
+  const partner = partnerModelResolution(modelId, label);
+  if (partner) return { width: partner.width, height: partner.height, label: partner.value };
   const normalized = label.toLowerCase().replace(/\s+/g, "");
   const gptSize = gptImageSizeLabel(normalized);
   if (gptSize !== "auto" || normalized === "auto") {
@@ -369,6 +397,11 @@ function imageReferencePriority(key: string) {
   const lowerKey = key.toLowerCase();
   const referenceMatch = lowerKey.match(/(?:^|\.)reference_images\.image_(\d+)$/);
   if (referenceMatch) return Number(referenceMatch[1]);
+
+  // The Autogrow image slots of the V3 partner nodes (GPT Image 2.5, Seedream 5.0):
+  // "model.images.image_1". Ranked like reference images, so upload order is slot order.
+  const autogrowMatch = lowerKey.match(/(?:^|\.)images\.image_(\d+)$/);
+  if (autogrowMatch) return Number(autogrowMatch[1]);
 
   const batchMatch = lowerKey.match(/^images\.image(\d+)$/);
   if (batchMatch) return 100 + Number(batchMatch[1]);
@@ -869,6 +902,21 @@ function widgetInputSpecs(classType: string, objectInfo: ComfyNode): WidgetInput
 }
 
 function fallbackWidgetInputSpecs(classType: string): WidgetInputSpec[] {
+  // The legacy ByteDance2ReferenceNode is a subclass of V2 and their Seedance 2.0
+  // option is the same list of inputs, so a UI export saved on 2.0 lays its widgets
+  // out identically on either. The graphs moved to V2 for Seedance 2.5 Draft.
+  const seedanceReferenceWidgets: Array<[string, unknown, Record<string, unknown>?]> = [
+    ["model", "COMBO", { default: "Seedance 2.0" }],
+    ["model.prompt", "STRING", { default: "" }],
+    ["model.resolution", "COMBO", { default: "1080p" }],
+    ["model.ratio", "COMBO", { default: "16:9" }],
+    ["model.duration", "INT", { default: 5 }],
+    ["model.generate_audio", "BOOLEAN", { default: true }],
+    ["model.auto_downscale", "BOOLEAN", { default: true }],
+    ["model.auto_upscale", "BOOLEAN", { default: false }],
+    ["seed", "INT", { default: 0, control_after_generate: true }],
+    ["watermark", "BOOLEAN", { default: false }],
+  ];
   const definitions: Record<string, Array<[string, unknown, Record<string, unknown>?]>> = {
     LoadImage: [["image", "STRING"]],
     LoadVideo: [["file", "STRING"]],
@@ -884,18 +932,8 @@ function fallbackWidgetInputSpecs(classType: string): WidgetInputSpec[] {
       ["resolution", "COMBO", { default: "1080p" }],
       ["seed", "INT", { default: 0, control_after_generate: true }],
     ],
-    ByteDance2ReferenceNode: [
-      ["model", "COMBO", { default: "Seedance 2.0" }],
-      ["model.prompt", "STRING", { default: "" }],
-      ["model.resolution", "COMBO", { default: "1080p" }],
-      ["model.ratio", "COMBO", { default: "16:9" }],
-      ["model.duration", "INT", { default: 5 }],
-      ["model.generate_audio", "BOOLEAN", { default: true }],
-      ["model.auto_downscale", "BOOLEAN", { default: true }],
-      ["model.auto_upscale", "BOOLEAN", { default: false }],
-      ["seed", "INT", { default: 0, control_after_generate: true }],
-      ["watermark", "BOOLEAN", { default: false }],
-    ],
+    ByteDance2ReferenceNode: seedanceReferenceWidgets,
+    ByteDance2ReferenceNodeV2: seedanceReferenceWidgets,
   };
 
   return (definitions[classType] ?? []).map(([name, inputType, options]) => ({
@@ -1045,8 +1083,13 @@ function injectInputs(
   projectName: string,
   mapping: WorkflowInputMapping,
   objectInfo: ComfyNode,
+  context: WorkflowInputContext = {},
 ) {
   const resolution = request.resolution;
+  // A partner variant names the value its node's combo takes (MiniMax spells 768P
+  // with a capital P) and Seedream's size preset; generic labels cannot express either.
+  const partnerResolution = partnerModelResolution(model.id, resolution?.label);
+  const randomizeSeed = partnerModelRandomizesSeed(model.id);
   // Via the effective model so a 2.5 job's 16-30s duration is not clamped to the
   // 15s ceiling the workflow file was inferred to have.
   const durationSeconds = normalizeDurationSeconds(
@@ -1079,9 +1122,16 @@ function injectInputs(
       }
       if (resolution && lowerKey === "width") inputs[key] = resolution.width;
       if (resolution && lowerKey === "height") inputs[key] = resolution.height;
-      if (resolution && lowerKey === "resolution") inputs[key] = directResolutionLabel(resolution.label ?? "1080p", inputs[key]);
-      if (resolution && lowerKey === "model.resolution") inputs[key] = resolutionWidgetLabel(resolution.label ?? "1080p");
-      if (resolution && isGptImageNode(node) && lowerKey === "size") inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
+      if (resolution && lowerKey === "resolution") {
+        inputs[key] = partnerResolution?.nodeValue ?? directResolutionLabel(resolution.label ?? "1080p", inputs[key]);
+      }
+      if (resolution && lowerKey === "model.resolution") {
+        inputs[key] = partnerResolution?.nodeValue ?? resolutionWidgetLabel(resolution.label ?? "1080p");
+      }
+      // GPT Image 2 takes a flat `size`; the 2.5 node nests it under its model combo.
+      if (resolution && isGptImageNode(node) && (lowerKey === "size" || lowerKey === "model.size")) {
+        inputs[key] = gptImageSizeLabel(resolution.label ?? "auto");
+      }
       if (durationSeconds && isDurationInput(lowerKey) && isScalarInputValue(inputs[key])) {
         inputs[key] = typeof inputs[key] === "string" ? String(durationSeconds) : durationSeconds;
       }
@@ -1125,11 +1175,15 @@ function injectInputs(
       applyNanoBananaAspectRatioInput(inputs, request.workflowOptions);
     }
     if (isSeedance2ClassType(classType)) {
-      applySeedanceModelInputs(inputs, model, request.workflowOptions);
+      applySeedanceModelInputs(inputs, model, request.workflowOptions, String(node.class_type ?? ""));
     }
     if (isKlingVideoClassType(classType)) {
       applyKlingCameraStabilization(inputs, request.workflowOptions);
     }
+    if (isSeedreamClassType(classType) && partnerResolution?.sizePreset) {
+      applySeedreamSize(inputs, partnerResolution, images.length > 0 ? context.firstImageAspect : undefined);
+    }
+    if (randomizeSeed) randomizeSeedInputs(inputs);
     applySaveNumberOptions(inputs, classType, request.workflowOptions?.save);
     if (request.prompt && model.requiresPrompt && (classType.includes("text") || classType.includes("prompt"))) {
       const key = Object.keys(inputs).find(
@@ -1161,16 +1215,30 @@ function applyTextOnlyImageWorkflowMode(prompt: ComfyNode, model: WorkflowModel,
     delete inputs.reference_images;
   }
 
+  const removed = new Set<string>();
   for (const [nodeId, node] of Object.entries(prompt)) {
     const classType = String(node?.class_type ?? node?.type ?? "").toLowerCase();
     if (isLoadImageClass(classType) || isImageBatchClass(classType)) {
       delete prompt[nodeId];
+      removed.add(nodeId);
+    }
+  }
+
+  // The V3 nodes spell their image slots as nested keys ("model.images.image_1"),
+  // which the deletes above do not name. Any link left pointing at a removed loader
+  // would fail validation, so drop every one of them, whatever it is called.
+  for (const node of Object.values(prompt)) {
+    const inputs =
+      node?.inputs && typeof node.inputs === "object" && !Array.isArray(node.inputs) ? (node.inputs as ComfyNode) : undefined;
+    if (!inputs) continue;
+    for (const [key, value] of Object.entries(inputs)) {
+      if (referencesRemovedNode(value, removed)) delete inputs[key];
     }
   }
 }
 
 function isTextOnlyCapableGenerationNode(node: ComfyNode) {
-  return isNanoBananaNode(node) || isGptImageNode(node);
+  return isNanoBananaNode(node) || isGptImageNode(node) || isSeedreamClassType(String(node?.class_type ?? "").toLowerCase());
 }
 
 function applyImageOutputCountOptions(prompt: ComfyNode, model: WorkflowModel, request: CreateJobRequest) {
@@ -1220,7 +1288,13 @@ function isNanoBananaNode(node: ComfyNode) {
 }
 
 function isNanoBananaClassType(classType: string) {
-  return classType.includes("gemininanobanana") || (classType.includes("nano") && classType.includes("banana"));
+  // GeminiImage2Node is Nano Banana Pro: the same aspect ratio, resolution and seed
+  // inputs as Nano Banana 2, under a class name that says neither word.
+  return (
+    classType.includes("gemininanobanana") ||
+    classType.includes("geminiimage2node") ||
+    (classType.includes("nano") && classType.includes("banana"))
+  );
 }
 
 function normalizeNanoBananaAspectRatio(value: unknown) {
@@ -1239,7 +1313,56 @@ function applyNanoBananaAspectRatioInput(inputs: ComfyNode, workflowOptions: Cre
 }
 
 function isSeedance2ClassType(classType: string) {
-  return classType.includes("bytedance2");
+  // The Draft to Final node is a ByteDance2 node too, but it has no model combo:
+  // everything it renders comes from the draft it names.
+  return classType.includes("bytedance2") && !classType.includes("drafttofinal");
+}
+
+function isSeedreamClassType(classType: string) {
+  return classType.includes("bytedanceseedreamnode");
+}
+
+/**
+ * Point a Seedream node at the picked size.
+ *
+ * A preset is sent by its label. "Match input" has no preset -- Seedream has no
+ * adaptive size -- so it becomes a Custom request at the tier's pixel budget in the
+ * first input's shape, and falls back to a fixed preset when there is no input to
+ * match (a text-only prompt) or its size could not be read.
+ */
+function applySeedreamSize(
+  inputs: ComfyNode,
+  choice: { width: number; height: number; sizePreset?: string; matchInput?: boolean; fallbackSizePreset?: string },
+  firstImageAspect: number | undefined,
+) {
+  const presetKey = Object.keys(inputs).find((key) => key.toLowerCase().endsWith("size_preset")) ?? "model.size_preset";
+  if (!choice.matchInput) {
+    inputs[presetKey] = choice.sizePreset;
+    return;
+  }
+  if (!firstImageAspect || !Number.isFinite(firstImageAspect) || firstImageAspect <= 0) {
+    inputs[presetKey] = choice.fallbackSizePreset;
+    return;
+  }
+  const size = seedreamMatchedSize(choice.width * choice.height, firstImageAspect);
+  inputs[presetKey] = "Custom";
+  inputs[Object.keys(inputs).find((key) => key.toLowerCase() === "model.width") ?? "model.width"] = size.width;
+  inputs[Object.keys(inputs).find((key) => key.toLowerCase() === "model.height") ?? "model.height"] = size.height;
+}
+
+/**
+ * A fresh seed for a partner node whose seed is otherwise fixed by its export.
+ *
+ * Both spellings: MiniMax takes a top-level `seed`, Seedream nests it under its
+ * model combo. The draw stays under 2^31, the smallest ceiling either declares.
+ */
+function randomizeSeedInputs(inputs: ComfyNode) {
+  for (const key of Object.keys(inputs)) {
+    const lower = key.toLowerCase();
+    if ((lower === "seed" || lower === "model.seed") && typeof inputs[key] === "number") {
+      inputs[key] = randomSeed();
+    }
+  }
 }
 
 function isGptImageNode(node: ComfyNode) {
@@ -1279,10 +1402,10 @@ function randomizeApiVideoSeed(model: WorkflowModel, classType: string, inputs: 
 }
 
 function normalizeGptImageInputs(inputs: ComfyNode) {
-  if (String(inputs.size ?? "").toLowerCase() === "custom") {
-    inputs.size = "Custom";
-  }
-  inputs.size = gptImageSizeLabel(String(inputs.size ?? "auto"));
+  // GPT Image 2.5 nests size under its model combo. Writing a flat `size` there
+  // would be dropped as an undeclared input and leave the nested one unnormalized.
+  const key = "model.size" in inputs ? "model.size" : "size";
+  inputs[key] = gptImageSizeLabel(String(inputs[key] ?? "auto"));
 }
 
 function gptImageSizeLabel(label: string) {
@@ -1418,8 +1541,17 @@ function isNumberedImageInput(lowerKey: string) {
   return /^image_\d+$/.test(lowerKey) || /^model\.images\.image_\d+$/.test(lowerKey);
 }
 
+/**
+ * Which image a numbered slot link carries, zero-based.
+ *
+ * Covers both Autogrow spellings: Seedance and MiniMax reference slots
+ * ("model.reference_images.image_1") and the GPT Image 2.5 / Seedream 5.0 ones
+ * ("model.images.image_1"). A slot past the images actually sent is unlinked, or its
+ * LoadImage -- still holding the export's placeholder name -- fails validation.
+ * BatchImagesNode's zero-based "images.image0" has no underscore and is not matched.
+ */
 function numberedReferenceImageInputIndex(lowerKey: string) {
-  const match = lowerKey.match(/(?:^|\.)reference_images\.image_(\d+)$/);
+  const match = lowerKey.match(/(?:^|\.)(?:reference_)?images\.image_(\d+)$/);
   return match ? Number(match[1]) - 1 : undefined;
 }
 

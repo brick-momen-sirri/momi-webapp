@@ -14,7 +14,7 @@ import table from "../../../backend/src/data/seedanceVersions.json";
 import { isSeedanceWorkflowModel } from "../../services/promptRules";
 import type { ModelType } from "../../types";
 
-export type SeedanceVersionId = "2.0" | "2.5";
+export type SeedanceVersionId = "2.0" | "2.5" | "2.5-draft";
 
 export type SeedanceVersion = {
   id: SeedanceVersionId;
@@ -33,6 +33,8 @@ export type SeedanceVersion = {
   supportsRatioOnFirstLastFrame: boolean;
   outputFormat: string | null;
   supportsVideoEditing: boolean;
+  /** A 480p preview whose 1080p final is rendered later from the result card. */
+  draft: boolean;
 };
 
 export const SEEDANCE_VERSIONS = table.versions as unknown as readonly SeedanceVersion[];

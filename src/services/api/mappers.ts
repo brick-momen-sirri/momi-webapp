@@ -126,6 +126,7 @@ export function mapJob(job: BackendJob): Job {
     fileName: job.fileName,
     generatedPrompt: job.generatedPrompt,
     textArtifacts: job.textArtifacts,
+    draft: job.draft,
     creditsEstimated: job.creditsEstimated,
     creditsActual: job.creditsActual,
     creditsActualSource: job.creditsActualSource,

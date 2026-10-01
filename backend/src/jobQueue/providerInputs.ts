@@ -57,9 +57,21 @@ export async function materializeRunpodInputImages(job: Job, model: WorkflowMode
   };
 }
 
-export async function materializeRunpodInputVideo(job: Job, model: WorkflowModel, inputFolder: string) {
-  if (!job.inputVideo) return undefined;
-  const filePath = localMediaFilePathFromUrl(job.inputVideo);
+/**
+ * @param source a second video to send instead of `job.inputVideo`, under its own
+ *   name. A job has one inputVideo; a Draft -> Final re-render of a reference draft
+ *   needs two -- the draft's result and the draft's reference clip -- and the second
+ *   travels this way rather than through a new job field.
+ */
+export async function materializeRunpodInputVideo(
+  job: Job,
+  model: WorkflowModel,
+  inputFolder: string,
+  source?: { value: string; name: string },
+) {
+  const value = source?.value ?? job.inputVideo;
+  if (!value) return undefined;
+  const filePath = localMediaFilePathFromUrl(value);
   // Submission already rejects this shape; the dispatcher re-checks because a
   // remote URL that slipped through would reach the provider unnormalized and
   // fail there, after the request had been paid for. Checked before the workflow
@@ -67,15 +79,15 @@ export async function materializeRunpodInputVideo(job: Job, model: WorkflowModel
   if (!filePath && requiresNormalizedVideoInput(model)) {
     throw new Error(remoteVideoInputRejection(model));
   }
-  const expectedNames = await detectWorkflowLoadVideoNames(model);
-  const name = expectedNames?.[0] ?? fallbackRunpodVideoName(job.inputVideo, job.id);
+  const expectedNames = source ? undefined : await detectWorkflowLoadVideoNames(model);
+  const name = source?.name ?? expectedNames?.[0] ?? fallbackRunpodVideoName(value, job.id);
   const safeFilePath = filePath ? await requireAllowedExistingMediaPath(filePath) : undefined;
   const preparedFilePath = safeFilePath ? await prepareRunpodVideoFile(safeFilePath, inputFolder, model) : undefined;
   return {
     videos: [
       preparedFilePath
         ? await runpodFileInput(preparedFilePath, name, "video", { videoWorkFolder: inputFolder })
-        : await runpodVideoInput(job.inputVideo, name, inputFolder),
+        : await runpodVideoInput(value, name, inputFolder),
     ],
     videoName: name,
   };

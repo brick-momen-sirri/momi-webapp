@@ -1,4 +1,5 @@
 import { isLtxCqI2vModel, ltxCqI2vCredits } from "../features/generation/ltxCqImageToVideo";
+import { partnerModelUsd, partnerModelVariant } from "../features/generation/partnerModels";
 import { isVideoEnhancerModel, videoEnhancerCredits } from "../features/generation/videoEnhancer";
 import type { ModelType } from "../types";
 
@@ -26,6 +27,8 @@ export type CreditEstimateOptions = {
   upscaleMode?: string;
   /** The Video Enhancer's long side; its price follows the frame area. */
   videoEnhancerLongSide?: number;
+  /** Input images sent, for partner variants that charge per reference image. */
+  referenceImageCount?: number;
 };
 
 export function estimateModelCredits(
@@ -48,6 +51,16 @@ export function estimateModelCredits(
   if (isLtxCqI2vModel(model)) {
     return ltxCqI2vCredits(resolution, duration);
   }
+
+  // Mirrors the backend: a variant priced in partnerModels.json is quoted from its
+  // own node's rates, before "gpt_image" or "nano banana" hand it an older sibling's.
+  const partnerUsd = partnerModelUsd(model.id, {
+    resolutionLabel: resolution,
+    durationSeconds: duration,
+    referenceImageCount: options.referenceImageCount,
+    outputCount: normalizeOutputCount(outputCount),
+  });
+  if (partnerUsd != null) return roundCredits(creditsFromUsd(partnerUsd));
 
   if (key.includes("seedance")) {
     return seedanceCreditRange(key, duration, resolution, options.seedanceVersion).maxCredits;
@@ -112,6 +125,11 @@ export function estimateModelCreditLabel(
     return `${formatCredits(estimate.maxCredits)} credits`;
   }
 
+  if (partnerModelVariant(model.id)?.pricing) {
+    const credits = estimateModelCredits(model, durationSeconds, resolution, outputCount, options);
+    return normalizeOutputCount(outputCount) === 2 ? `${formatCredits(credits)} credits (2 images)` : `${formatCredits(credits)} credits`;
+  }
+
   if (
     (key.includes("openai_gpt_image") || key.includes("openai gpt image") || key.includes("gpt_image")) &&
     !key.includes("exteriorgrid") &&
@@ -125,6 +143,25 @@ export function estimateModelCreditLabel(
     return `${credits} credits (2 images)`;
   }
   return `${credits} credits`;
+}
+
+/**
+ * What rendering the final of an approved draft is expected to cost.
+ *
+ * Mirrors the draft-final branch of estimateWorkflowCredits on the backend: a
+ * Seedance final is 2.5 at 1080p for the draft's duration (with the video-input
+ * range when the draft had a reference clip), a MiniMax 2K re-render is a flat
+ * $0.0715 per second of the source.
+ */
+export function estimateDraftFinalCredits(
+  kind: string,
+  durationSeconds: number | undefined,
+  category: string | undefined,
+) {
+  const duration = durationSeconds && durationSeconds > 0 ? durationSeconds : 5;
+  if (kind === "minimax-h3-768p") return roundCredits(creditsFromUsd(0.0715 * duration));
+  const key = `seedance ${category ?? ""}`.toLowerCase();
+  return seedanceCreditRange(key, duration, "1080p", "2.5").maxCredits;
 }
 
 const CREDITS_PER_USD = 211;
@@ -226,7 +263,8 @@ function seedanceVariant(key: string) {
  * Mirrors seedanceVersionRate in backend/src/creditEstimator.ts.
  */
 function seedanceVersionRate(version: string | undefined, resolution: string) {
-  if (version !== "2.5") return 1;
+  // 2.5 Draft is 2.5 at 480p: the node's price badge has no separate draft rate.
+  if (version !== "2.5" && version !== "2.5-draft") return 1;
   // Measured against a real 5s 480p run, not extrapolated -- see the backend copy.
   if (resolution === "480p") return 1.4743;
   return resolution === "720p" ? 1.5446 : 1.5353;

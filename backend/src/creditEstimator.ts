@@ -1,3 +1,5 @@
+import { draftFinalKindFromModelId } from "./draftFinalModels.js";
+import { partnerModelOutputCount, partnerModelUsd } from "./partnerModels.js";
 import { seedanceVersionIdFromOptions } from "./seedanceVersions.js";
 import { isLtxCqI2vModelId, ltxCqI2vCredits } from "./ltxCqImageToVideo.js";
 import { DEFAULT_VIDEO_ENHANCER_LONG_SIDE, isVideoEnhancerModelId, videoEnhancerCredits } from "./videoEnhancer.js";
@@ -8,10 +10,36 @@ export function estimateWorkflowCredits(
   durationSeconds?: number,
   resolution?: Resolution,
   workflowOptions?: WorkflowOptions,
+  inputs: { imageCount?: number; hasVideo?: boolean } = {},
 ) {
   const key = `${model.id} ${model.name} ${model.category} ${model.workflowPath}`.toLowerCase();
   const resolutionLabel = resolution?.label ?? (resolution ? `${resolution.width}x${resolution.height}` : "1080p");
   const duration = durationOrDefault(durationSeconds, model.defaultDurationSeconds, key);
+
+  // A final rendered from an approved draft is priced by what it re-renders, which the
+  // draft job decides -- its duration, and for Seedance the 2.5 rate at 1080p.
+  const draftFinalKind = draftFinalKindFromModelId(model.id);
+  if (draftFinalKind === "seedance-2.5-draft") {
+    // The Draft to Final node renders 2.5 at 1080p with the draft's own references,
+    // so a final of a reference-video draft carries the video-input range too.
+    return seedanceCreditRange(key, duration, "1080p", "2.5").maxCredits;
+  }
+  if (draftFinalKind === "minimax-h3-768p") {
+    // MinimaxHailuo03RegenerateNode's badge: a flat $0.0715 per second of the source.
+    return roundCredits(creditsFromUsd(0.0715 * duration));
+  }
+
+  // Before every substring rule: a partner variant priced in partnerModels.json is
+  // quoted from its own node's rates. "gpt_image" and "nano banana" would otherwise
+  // hand GPT Image 2.5 and Nano Banana Pro their older siblings' prices.
+  const partnerUsd = partnerModelUsd(model.id, {
+    resolutionLabel,
+    durationSeconds: duration,
+    referenceImageCount: inputs.imageCount,
+    outputCount: partnerModelOutputCount(model.id, workflowOptions),
+    hasReferenceVideo: inputs.hasVideo,
+  });
+  if (partnerUsd != null) return roundCredits(creditsFromUsd(partnerUsd));
 
   // Before every substring rule: "enhance" and "upscal" match other presets.
   if (isVideoEnhancerModelId(model.id)) {
@@ -246,7 +274,8 @@ function seedanceVariant(key: string) {
  * there is no third figure to have.
  */
 function seedanceVersionRate(version: string, resolution: string) {
-  if (version !== "2.5") return 1;
+  // 2.5 Draft is 2.5 at 480p: the node's price badge has no separate draft rate.
+  if (version !== "2.5" && version !== "2.5-draft") return 1;
   // Measured, not extrapolated. The credit tracker had no 480p sample for 2.5 and
   // guessed the same ~1.54x it sees at 720p and 1080p; a 5s 480p run on 2026-08-31
   // billed $0.7411 (156.38 credits), which is $0.14822/s against 2.0's attested

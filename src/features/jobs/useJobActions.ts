@@ -5,6 +5,7 @@ import {
   archiveBackendJob,
   backendResultFileUrl,
   cancelBackendJob,
+  createBackendJob,
   moveBackendJobResult,
   permanentlyDeleteBackendJob,
   restoreBackendJob,
@@ -12,7 +13,9 @@ import {
   updateBackendJobSaveNumber,
 } from "../../services/backendApi";
 import type { Job, Project } from "../../types";
+import { createClientId } from "../../utils/id";
 import { normalizeRequiredSaveNumber, workflowOptionsWithSaveNumber } from "../generation/generationUtils";
+import { draftExpiryText, draftFinalPlan, finalsForDraft } from "./draftFinal";
 import { readFavoriteJobIds, writeFavoriteJobIds } from "../preferences/appPreferences";
 import { folderFilterScope, isInFolderScope } from "../projects/folderTree";
 import type { ConfirmDialogState } from "../projects/useProjectActions";
@@ -188,6 +191,62 @@ export function useJobActions(options: JobActionsOptions) {
     }
   }
 
+  /**
+   * Render the final of an approved draft, after saying what it costs.
+   *
+   * The request names the draft and nothing else: the server rebuilds the prompt,
+   * inputs and length from the draft job, so the final is the draft re-rendered and
+   * cannot pick up whatever happens to be in the generation form.
+   */
+  function handleRenderDraftFinal(job: Job) {
+    if (!backendAvailable) {
+      showToast("Rendering a final is only available while the backend is connected.", "error");
+      return;
+    }
+    const plan = draftFinalPlan(job);
+    if (!plan) {
+      showToast("This result is not a draft that can be finalized.", "info");
+      return;
+    }
+    if (plan.refusal) {
+      showToast(plan.refusal, "info");
+      return;
+    }
+    const existing = finalsForDraft(job, jobs).find((final) => final.status !== "failed" && final.status !== "canceled");
+    const expiry = draftExpiryText(plan.expiresAt);
+    setConfirmDialog({
+      title: `Render the ${plan.label}`,
+      message: [
+        `This re-renders the draft as its ${plan.label} with the same prompt, inputs and length, for about ` +
+          `${plan.credits.toLocaleString()} credits.`,
+        existing ? `A final of this draft is already ${existing.status === "completed" ? "in Results" : "on its way"}.` : "",
+        expiry ? `The draft ${expiry}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      confirmLabel: "Render final",
+      onConfirm: () => void performRenderDraftFinal(job, plan.modelId),
+    });
+  }
+
+  async function performRenderDraftFinal(job: Job, modelId: string) {
+    try {
+      const { job: finalJob } = await createBackendJob({
+        clientRequestId: createClientId("final_"),
+        projectId: job.projectId,
+        targetFolderId: job.folderId ?? null,
+        modelId,
+        workflowOptions: { draftFinal: { sourceJobId: job.id } },
+      });
+      setJobs((current) => mergeJobs([finalJob], current));
+      setBackendJobsTotal((current) => current + 1);
+      setBackendJobsOffset((current) => current + 1);
+      showToast("Final queued.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not start the final render.", "error");
+    }
+  }
+
   async function setArchivedState(job: Job, restore: boolean) {
     const previousJobs = jobs;
     setJobs((current) => current.filter((item) => item.id !== job.id));
@@ -269,6 +328,7 @@ export function useJobActions(options: JobActionsOptions) {
     handleToggleFavorite,
     handleMoveJobResult,
     handleRetryJob,
+    handleRenderDraftFinal,
     handleCancelJob,
     handleArchiveJob: (job: Job) => setArchivedState(job, false),
     handleRestoreArchivedJob: (job: Job) => setArchivedState(job, true),

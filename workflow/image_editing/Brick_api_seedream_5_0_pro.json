@@ -1,0 +1,100 @@
+{
+  "1": {
+    "inputs": {
+      "image": "0001.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "0002.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "0003.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "image": "0004.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "5": {
+    "inputs": {
+      "image": "0005.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "prompt": "",
+      "model": "seedream 5.0 pro",
+      "model.size_preset": "(2K) 2848x1600 (16:9)",
+      "model.width": 2048,
+      "model.height": 2048,
+      "model.images.image_1": [
+        "1",
+        0
+      ],
+      "model.images.image_2": [
+        "2",
+        0
+      ],
+      "model.images.image_3": [
+        "3",
+        0
+      ],
+      "model.images.image_4": [
+        "4",
+        0
+      ],
+      "model.images.image_5": [
+        "5",
+        0
+      ],
+      "model.prompt_optimization": "standard",
+      "model.seed": 42,
+      "model.watermark": false,
+      "model.thinking": true
+    },
+    "class_type": "ByteDanceSeedreamNodeV3",
+    "_meta": {
+      "title": "Seedream 5.0 Pro"
+    }
+  },
+  "20": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": {
+      "title": "Save Image (Advanced)"
+    }
+  }
+}

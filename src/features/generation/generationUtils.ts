@@ -4,6 +4,7 @@ import type { ArchVizGridOptions, Job, ModelType, Project, UploadedImage, Upload
 import { createClientId } from "../../utils/id";
 import { ALL_PROJECTS_ID } from "../workspace/workspaceUtils";
 import { isVideoEnhancerModel, normalizeVideoEnhancerLongSide } from "./videoEnhancer";
+import { partnerModelResolution, supportsPartnerTextOnly } from "./partnerModels";
 import {
   DEFAULT_SEEDANCE_VERSION,
   normalizeSeedanceVersion,
@@ -64,7 +65,11 @@ export function getDisabledReason({
   return undefined;
 }
 
-export function parseResolution(value: string) {
+export function parseResolution(value: string, modelId?: string) {
+  // A partner variant's own sizes first: MiniMax's "768P" and Seedream's "2K 16:9"
+  // are not in the generic vocabulary and would otherwise be read as 1080p.
+  const partner = partnerModelResolution(modelId, value);
+  if (partner) return { width: partner.width, height: partner.height, label: partner.value };
   const normalized = normalizeResolutionLabel(value);
   if (normalized === "auto") return { width: 1024, height: 1024, label: normalized };
   if (normalized === "1K") return { width: 1024, height: 1024, label: normalized };
@@ -163,6 +168,11 @@ export function normalizeResolutionForModel(value: string, model: ModelType, all
   if (isSeedanceWorkflowModel(model) && !allowSeedance4K && normalizeResolutionAlias(value) === "4K") {
     return supported.find((resolution) => resolution.toLowerCase() === "1080p") ?? supported[0] ?? "1080p";
   }
+  // A value the model offers as-is stays as-is. Without this the alias rules below
+  // read MiniMax's "768P" as 1080p, find that unsupported, and fall back to the
+  // first option -- quietly turning a 768P choice into 480P on H3 Max.
+  const direct = supported.find((resolution) => compactResolution(resolution) === compactResolution(value));
+  if (direct) return direct;
   const exact = normalizeExactResolutionValue(value);
   if (exact && supported.some((resolution) => resolution.toLowerCase() === exact.toLowerCase())) return exact;
   const alias = normalizeResolutionAlias(value);
@@ -199,8 +209,14 @@ function supportsTextOnlyImageWorkflow(model: Pick<ModelType, "id" | "label" | "
   const key = `${model.id} ${model.label ?? ""} ${model.backendCategory ?? ""} ${model.workflowPath ?? ""}`.toLowerCase();
   return (
     (key.includes("nano") && key.includes("banana")) ||
-    ((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid"))
+    ((key.includes("openai_gpt_image_2_i2i") || key.includes("gpt_image")) && !key.includes("exteriorgrid")) ||
+    // Seedream 5.0 says so in partnerModels.json rather than through its name.
+    supportsPartnerTextOnly(model.id)
   );
+}
+
+function compactResolution(value: string) {
+  return value.toLowerCase().replace(/\s+/g, "");
 }
 
 export function isArchVizGridModel(model: Pick<ModelType, "id" | "label" | "workflowPath">) {

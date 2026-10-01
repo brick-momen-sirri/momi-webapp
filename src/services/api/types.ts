@@ -71,6 +71,7 @@ export type BackendJob = {
   fileName?: string;
   generatedPrompt?: string;
   textArtifacts?: Job["textArtifacts"];
+  draft?: Job["draft"];
   source?: "backend_job" | "existing_project_media";
   missingMetadata?: string[];
   archivedAt?: string;

@@ -86,6 +86,8 @@ jobRouter.post(
     isDemoAccount,
     validateMedia: validateJobMediaReferences,
     createJob: createJobIdempotent,
+    getJob,
+    canAccessJob,
   }),
 );
 

@@ -1,0 +1,58 @@
+{
+  "1": {
+    "inputs": {
+      "image": "0001.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "file": "0001.mp4"
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "Load Video"
+    }
+  },
+  "10": {
+    "inputs": {
+      "model": "MiniMax H3",
+      "model.prompt": "",
+      "model.resolution": "768P",
+      "model.ratio": "adaptive",
+      "model.duration": 5,
+      "model.reference_images.image_1": [
+        "1",
+        0
+      ],
+      "model.reference_videos.video_1": [
+        "2",
+        0
+      ],
+      "seed": 42,
+      "watermark": false
+    },
+    "class_type": "MinimaxHailuo03ReferenceNode",
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  },
+  "20": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

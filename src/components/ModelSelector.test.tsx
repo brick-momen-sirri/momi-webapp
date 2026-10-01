@@ -65,7 +65,7 @@ describe("Seedance model version", () => {
     workflowPath: "C:\\Momi-Animation\\workflow\\i2v\\Brick_api_seedance2_0_i2v .json",
   });
 
-  it("offers 2.0 and 2.5 when a Seedance workflow is selected", () => {
+  it("offers 2.0, 2.5 and 2.5 Draft when a Seedance workflow is selected", () => {
     render(
       <ModelSelector
         models={[seedance]}
@@ -79,7 +79,8 @@ describe("Seedance model version", () => {
     const group = screen.getByRole("radiogroup", { name: "Seedance model version" });
     expect(group).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Seedance 2\.0/ })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Seedance 2\.5/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Seedance 2\.5(?! Draft)/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Seedance 2\.5 Draft/ })).not.toBeChecked();
   });
 
   it("stays out of the way for every other provider", () => {
@@ -109,8 +110,78 @@ describe("Seedance model version", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("radio", { name: /Seedance 2\.5/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /Seedance 2\.5(?! Draft)/ }));
     expect(onSeedanceVersionChange).toHaveBeenCalledWith("2.5");
+    await userEvent.click(screen.getByRole("radio", { name: /Seedance 2\.5 Draft/ }));
+    expect(onSeedanceVersionChange).toHaveBeenCalledWith("2.5-draft");
+  });
+});
+
+describe("partner model families", () => {
+  const nano2 = model({
+    id: "brick_nano_banana_2",
+    label: "Nano Banana 2",
+    backendCategory: "image_editing",
+    category: "image",
+    workflowPath: "C:/Momi-Animation/workflow/image_editing/Brick_Nano Banana 2.json",
+  });
+  const nanoPro = model({
+    id: "brick_nano_banana_pro",
+    label: "Nano Banana Pro",
+    backendCategory: "image_editing",
+    category: "image",
+    workflowPath: "C:/Momi-Animation/workflow/image_editing/Brick_Nano Banana Pro.json",
+  });
+  const seedreamPro = model({
+    id: "brick_api_seedream_5_0_pro",
+    label: "Seedream 5.0 Pro",
+    backendCategory: "image_editing",
+    category: "image",
+    workflowPath: "C:/Momi-Animation/workflow/image_editing/Brick_api_seedream_5_0_pro.json",
+  });
+  const seedreamFlash = model({
+    id: "brick_api_seedream_5_0_flash",
+    label: "Seedream 5.0 Flash",
+    backendCategory: "image_editing",
+    category: "image",
+    workflowPath: "C:/Momi-Animation/workflow/image_editing/Brick_api_seedream_5_0_flash.json",
+  });
+
+  it("shows one card per family and a labelled version picker for its members", async () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelector
+        models={[nano2, nanoPro, seedreamPro, seedreamFlash]}
+        selectedModel={seedreamPro}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+
+    // Two families, two cards -- not four identical icons.
+    expect(screen.getByRole("button", { name: "Nano Banana" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seedream 5.0" })).toHaveAttribute("aria-pressed", "true");
+    const versions = screen.getByRole("radiogroup", { name: "Seedream 5.0 version" });
+    expect(versions).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Seedream 5\.0 Pro.*Best quality/ })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: /Seedream 5\.0 Flash.*Fastest and cheapest/ }));
+    expect(onChange).toHaveBeenCalledWith("brick_api_seedream_5_0_flash");
+  });
+
+  it("opens a family on its declared default", async () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelector
+        models={[nano2, nanoPro, seedreamPro, seedreamFlash]}
+        selectedModel={seedreamFlash}
+        seedanceVersion="2.0"
+        onChange={onChange}
+        onSeedanceVersionChange={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Nano Banana" }));
+    expect(onChange).toHaveBeenCalledWith("brick_nano_banana_2");
   });
 });
 

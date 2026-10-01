@@ -4,6 +4,7 @@ import type { Job, JobStatus, Project, User } from "../types";
 import { getJobSaveNumber, getJobSaveNumberLabel } from "../utils/saveNumber";
 import { folderFilterScope, folderPathLabel, isInFolderScope } from "../features/projects/folderTree";
 import { cancellationNote } from "../features/jobs/cancellation";
+import { finalsForDraft } from "../features/jobs/draftFinal";
 import { JobCard } from "./JobCard";
 import { ResultTile } from "./ResultTile";
 import { resultCardElementId } from "../utils/resultCard";
@@ -34,6 +35,8 @@ type JobFeedProps = {
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
+  /** Render an approved draft's final. Absent where finals are not offered. */
+  onRenderDraftFinal?: (job: Job) => void;
   canReuseSettings: (job: Job) => boolean;
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
@@ -107,6 +110,7 @@ export function JobFeed({
   onReuseSettings,
   onRetry,
   onCancel,
+  onRenderDraftFinal,
   canReuseSettings,
   onToggleFavorite,
   onMove,
@@ -663,6 +667,8 @@ export function JobFeed({
                   onReuseSettings={onReuseSettings}
                   onRetry={onRetry}
                   onCancel={onCancel}
+                  onRenderDraftFinal={onRenderDraftFinal}
+                  draftFinalStatus={job.draft ? finalsForDraft(job, jobs)[0]?.status : undefined}
                   onToggleFavorite={onToggleFavorite}
                   onMove={onMove}
                   archiveView={archiveView}

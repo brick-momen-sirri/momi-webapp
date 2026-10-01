@@ -40,8 +40,8 @@ function model(overrides: Partial<ModelType> = {}): ModelType {
 }
 
 describe("seedance version table", () => {
-  it("offers exactly the two versions, defaulting to 2.0", () => {
-    expect(SEEDANCE_VERSIONS.map((version) => version.id)).toEqual(["2.0", "2.5"]);
+  it("offers exactly the three versions, defaulting to 2.0", () => {
+    expect(SEEDANCE_VERSIONS.map((version) => version.id)).toEqual(["2.0", "2.5", "2.5-draft"]);
     expect(DEFAULT_SEEDANCE_VERSION).toBe("2.0");
   });
 

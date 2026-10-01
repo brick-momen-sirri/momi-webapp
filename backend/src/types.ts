@@ -223,7 +223,10 @@ export type WorkflowOptions = {
   // seedanceVersions.ts: the version decides the resolutions, durations and nested
   // node inputs, so it has to be on the request rather than inferred from the graph.
   seedance?: {
-    /** "2.0" or "2.5". Absent on jobs from before the picker existed, which ran 2.0. */
+    /**
+     * "2.0", "2.5" or "2.5-draft". Absent on jobs from before the picker existed,
+     * which ran 2.0.
+     */
     version?: string;
     // The output aspect ratio the Seedance nodes take on their `ratio` widget.
     // "adaptive" keeps the reference frame's own aspect instead of forcing one.
@@ -255,6 +258,31 @@ export type WorkflowOptions = {
   // Present exactly on Video Enhancer jobs. Routes the job to the enhancer's own
   // endpoint, and after dispatch carries the plan the result is restored with.
   videoEnhancer?: VideoEnhancerOptions;
+  // Present exactly on a final rendered from an approved draft (draftFinal.ts). The
+  // client sends only sourceJobId; every other field is written by the server from
+  // the draft job, and anything else the client put here is discarded.
+  draftFinal?: {
+    sourceJobId: string;
+    kind?: string;
+    /** Seedance: the draft_task_id the final is rendered from. */
+    taskId?: string;
+    /** MiniMax reference drafts: the draft's own reference clip, sent again. */
+    referenceVideo?: string;
+  };
+};
+
+/**
+ * A finished job that can be rendered again as its final (draftFinal.ts).
+ *
+ * Written once, when the job completes, from what the provider actually returned.
+ */
+export type JobDraft = {
+  kind: "seedance-2.5-draft" | "minimax-h3-768p";
+  /** Seedance's draft_task_id, saved by the graph's SaveStringKJ node. */
+  taskId?: string;
+  createdAt: string;
+  /** When the provider stops accepting the draft. Absent where it does not expire. */
+  expiresAt?: string;
 };
 
 export type CreateJobRequest = {
@@ -414,6 +442,8 @@ export type Job = {
   workflowOptions?: WorkflowOptions;
   generatedPrompt?: string;
   textArtifacts?: JobTextArtifact[];
+  /** Set when this job is a draft its final can be rendered from. See draftFinal.ts. */
+  draft?: JobDraft;
   status: JobStatus;
   cancelRequested?: boolean;
   /**

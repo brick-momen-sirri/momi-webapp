@@ -1,0 +1,336 @@
+{
+  "comment": [
+    "Partner-API model families and the variants each one offers, read by both packages",
+    "the way seedanceVersions.json is: backend/src/partnerModels.ts (which lets a variant",
+    "override what workflowService would otherwise infer from the file name, prices it, and",
+    "maps its resolutions onto node values) and src/features/generation/partnerModels.ts",
+    "(which groups the variants under one Workflow card with a Model version picker).",
+    "",
+    "One variant is one workflow file under workflow/, named by `modelId` -- the slug",
+    "workflowService derives from the file name. The file carries the node and its model",
+    "value; this table carries what the file cannot say: the artist-facing label and hint,",
+    "the limits the node enforces, and the price. Adding a model version is therefore one",
+    "exported graph plus one row here. A variant with no capability fields keeps whatever",
+    "the existing inference gives it, which is how GPT Image 2 and Nano Banana 2 join a",
+    "family without their behaviour changing.",
+    "",
+    "Every limit and price below is transcribed from the ComfyUI 0.38.0 partner nodes the",
+    "Animation worker (mkxh60tw6we1t0) runs: nodes_openai.py, nodes_gemini.py,",
+    "nodes_bytedance.py, nodes_minimax.py and apis/bytedance.py. Prices are the nodes' own",
+    "price-badge rates in USD. The credit tracker records the real charge from the proxy's",
+    "X-Comfy-Credits-Used header after the run; these only drive the estimate shown before it.",
+    "",
+    "resolutions[].value is what the picker sends as resolution.label; nodeValue is what the",
+    "node's `resolution` combo takes (MiniMax spells 768P with a capital P); sizePreset is",
+    "Seedream's `size_preset` label, and matchInput sizes a Custom request to the first",
+    "input image's aspect at width*height pixels.",
+    "",
+    "pricing: perImageUsd and perSecondUsd are keyed by resolution value, with \"*\" as the",
+    "fallback. perReferenceImageUsd is added per input image. maxExtraUsd is an upper bound",
+    "added for reference videos, whose charge depends on the clip and cannot be known before",
+    "the run, so the estimate leans high rather than surprising anyone.",
+    "",
+    "draft.kind names a Draft -> Final flow in draftFinal.ts. A MiniMax H3 768P render is a",
+    "draft its Regenerate node can re-render at 2K; draft.resolution says which output counts."
+  ],
+  "families": [
+    {
+      "id": "gpt-image",
+      "label": "GPT Image",
+      "provider": "openai",
+      "variants": [
+        {
+          "modelId": "brick_api_openai_gpt_image_2_i2i",
+          "label": "GPT Image 2",
+          "hint": "The current model. Quality high.",
+          "default": true
+        },
+        {
+          "modelId": "brick_api_openai_gpt_image_2_5_flare_i2i",
+          "label": "GPT Image 2.5 Flare",
+          "hint": "Newest model, about 70% cheaper than 2 at the same quality tier.",
+          "name": "GPT Image 2.5 Flare",
+          "description": "OpenAI GPT Image 2.5 (Flare) at quality high. Each reference image is sent in its own slot, so none is cropped to match the first.",
+          "maxReferenceImages": 5,
+          "supportsTextOnly": true,
+          "pricing": {
+            "perImageUsd": {
+              "auto": 0.2544,
+              "1024x1024": 0.0753,
+              "1024x1536": 0.0589,
+              "1536x1024": 0.0589,
+              "2048x2048": 0.1531,
+              "2048x1152": 0.0606,
+              "1152x2048": 0.0606,
+              "3840x2160": 0.1431,
+              "2160x3840": 0.1431,
+              "*": 0.2544
+            },
+            "perReferenceImageUsd": 0.0176
+          }
+        },
+        {
+          "modelId": "brick_api_openai_gpt_image_2_5_sunburst_i2i",
+          "label": "GPT Image 2.5 Sunburst",
+          "hint": "Same price as Flare. Compare the two on your own work.",
+          "name": "GPT Image 2.5 Sunburst",
+          "description": "OpenAI GPT Image 2.5 (Sunburst) at quality high. Each reference image is sent in its own slot, so none is cropped to match the first.",
+          "maxReferenceImages": 5,
+          "supportsTextOnly": true,
+          "pricing": {
+            "perImageUsd": {
+              "auto": 0.2544,
+              "1024x1024": 0.0753,
+              "1024x1536": 0.0589,
+              "1536x1024": 0.0589,
+              "2048x2048": 0.1531,
+              "2048x1152": 0.0606,
+              "1152x2048": 0.0606,
+              "3840x2160": 0.1431,
+              "2160x3840": 0.1431,
+              "*": 0.2544
+            },
+            "perReferenceImageUsd": 0.0176
+          }
+        }
+      ]
+    },
+    {
+      "id": "nano-banana",
+      "label": "Nano Banana",
+      "provider": "google",
+      "variants": [
+        {
+          "modelId": "brick_nano_banana_2",
+          "label": "Nano Banana 2",
+          "hint": "Fast Gemini Flash image model.",
+          "default": true
+        },
+        {
+          "modelId": "brick_nano_banana_pro",
+          "label": "Nano Banana Pro",
+          "hint": "Gemini 3 Pro Image. Higher quality, about 2x the price.",
+          "name": "Nano Banana Pro",
+          "description": "Google Gemini 3 Pro Image (Nano Banana Pro). Up to 4K, with the same aspect ratio control as Nano Banana 2.",
+          "pricing": {
+            "perImageUsd": { "1K": 0.1608, "2K": 0.1608, "4K": 0.288, "*": 0.1608 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "seedream-5",
+      "label": "Seedream 5.0",
+      "provider": "bytedance",
+      "variants": [
+        {
+          "modelId": "brick_api_seedream_5_0_pro",
+          "label": "Seedream 5.0 Pro",
+          "hint": "Best quality. Slower. Up to 2K.",
+          "name": "Seedream 5.0 Pro",
+          "description": "ByteDance Seedream 5.0 Pro: highest-quality text-to-image and editing with up to 5 reference images here (the node takes 10). Output up to 2K.",
+          "default": true,
+          "maxReferenceImages": 5,
+          "supportsTextOnly": true,
+          "randomizeSeed": true,
+          "defaultResolution": "auto",
+          "resolutions": [
+            { "value": "auto", "label": "Auto (match input, 2K)", "width": 2048, "height": 2048, "sizePreset": "Custom", "matchInput": true, "fallbackSizePreset": "(2K) 2848x1600 (16:9)" },
+            { "value": "2K 16:9", "label": "2K 16:9 (2848x1600)", "width": 2848, "height": 1600, "sizePreset": "(2K) 2848x1600 (16:9)" },
+            { "value": "2K 9:16", "label": "2K 9:16 (1600x2848)", "width": 1600, "height": 2848, "sizePreset": "(2K) 1600x2848 (9:16)" },
+            { "value": "2K 1:1", "label": "2K 1:1 (2048x2048)", "width": 2048, "height": 2048, "sizePreset": "(2K) 2048x2048 (1:1)" },
+            { "value": "2K 4:3", "label": "2K 4:3 (2304x1728)", "width": 2304, "height": 1728, "sizePreset": "(2K) 2304x1728 (4:3)" },
+            { "value": "2K 3:4", "label": "2K 3:4 (1728x2304)", "width": 1728, "height": 2304, "sizePreset": "(2K) 1728x2304 (3:4)" },
+            { "value": "2K 3:2", "label": "2K 3:2 (2496x1664)", "width": 2496, "height": 1664, "sizePreset": "(2K) 2496x1664 (3:2)" },
+            { "value": "2K 2:3", "label": "2K 2:3 (1664x2496)", "width": 1664, "height": 2496, "sizePreset": "(2K) 1664x2496 (2:3)" },
+            { "value": "2K 21:9", "label": "2K 21:9 (3136x1344)", "width": 3136, "height": 1344, "sizePreset": "(2K) 3136x1344 (21:9)" },
+            { "value": "1K 16:9", "label": "1K 16:9 (1312x736)", "width": 1312, "height": 736, "sizePreset": "(1K) 1312x736 (16:9)" },
+            { "value": "1K 9:16", "label": "1K 9:16 (736x1312)", "width": 736, "height": 1312, "sizePreset": "(1K) 736x1312 (9:16)" },
+            { "value": "1K 1:1", "label": "1K 1:1 (1024x1024)", "width": 1024, "height": 1024, "sizePreset": "(1K) 1024x1024 (1:1)" },
+            { "value": "1K 4:3", "label": "1K 4:3 (1152x864)", "width": 1152, "height": 864, "sizePreset": "(1K) 1152x864 (4:3)" },
+            { "value": "1K 3:4", "label": "1K 3:4 (864x1152)", "width": 864, "height": 1152, "sizePreset": "(1K) 864x1152 (3:4)" },
+            { "value": "1K 3:2", "label": "1K 3:2 (1248x832)", "width": 1248, "height": 832, "sizePreset": "(1K) 1248x832 (3:2)" },
+            { "value": "1K 2:3", "label": "1K 2:3 (832x1248)", "width": 832, "height": 1248, "sizePreset": "(1K) 832x1248 (2:3)" },
+            { "value": "1K 21:9", "label": "1K 21:9 (1568x672)", "width": 1568, "height": 672, "sizePreset": "(1K) 1568x672 (21:9)" }
+          ],
+          "pricing": {
+            "perImageUsd": { "auto": 0.09, "1K 16:9": 0.045, "1K 9:16": 0.045, "1K 1:1": 0.045, "1K 4:3": 0.045, "1K 3:4": 0.045, "1K 3:2": 0.045, "1K 2:3": 0.045, "1K 21:9": 0.045, "*": 0.09 },
+            "perReferenceImageUsd": 0.003
+          }
+        },
+        {
+          "modelId": "brick_api_seedream_5_0_flash",
+          "label": "Seedream 5.0 Flash",
+          "hint": "Fastest and cheapest. Up to 2K.",
+          "name": "Seedream 5.0 Flash",
+          "description": "ByteDance Seedream 5.0 Flash: quick, low-cost text-to-image and editing with up to 5 reference images here (the node takes 10). Output up to 2K.",
+          "maxReferenceImages": 5,
+          "supportsTextOnly": true,
+          "randomizeSeed": true,
+          "defaultResolution": "auto",
+          "resolutions": [
+            { "value": "auto", "label": "Auto (match input, 2K)", "width": 2048, "height": 2048, "sizePreset": "Custom", "matchInput": true, "fallbackSizePreset": "(2K) 2816x1584 (16:9)" },
+            { "value": "2K 16:9", "label": "2K 16:9 (2816x1584)", "width": 2816, "height": 1584, "sizePreset": "(2K) 2816x1584 (16:9)" },
+            { "value": "2K 9:16", "label": "2K 9:16 (1584x2816)", "width": 1584, "height": 2816, "sizePreset": "(2K) 1584x2816 (9:16)" },
+            { "value": "2K 1:1", "label": "2K 1:1 (2048x2048)", "width": 2048, "height": 2048, "sizePreset": "(2K) 2048x2048 (1:1)" },
+            { "value": "2K 4:3", "label": "2K 4:3 (2368x1776)", "width": 2368, "height": 1776, "sizePreset": "(2K) 2368x1776 (4:3)" },
+            { "value": "2K 3:4", "label": "2K 3:4 (1776x2368)", "width": 1776, "height": 2368, "sizePreset": "(2K) 1776x2368 (3:4)" },
+            { "value": "2K 3:2", "label": "2K 3:2 (2496x1664)", "width": 2496, "height": 1664, "sizePreset": "(2K) 2496x1664 (3:2)" },
+            { "value": "2K 2:3", "label": "2K 2:3 (1664x2496)", "width": 1664, "height": 2496, "sizePreset": "(2K) 1664x2496 (2:3)" },
+            { "value": "2K 21:9", "label": "2K 21:9 (3136x1344)", "width": 3136, "height": 1344, "sizePreset": "(2K) 3136x1344 (21:9)" },
+            { "value": "1K 16:9", "label": "1K 16:9 (1424x800)", "width": 1424, "height": 800, "sizePreset": "(1K) 1424x800 (16:9)" },
+            { "value": "1K 9:16", "label": "1K 9:16 (800x1424)", "width": 800, "height": 1424, "sizePreset": "(1K) 800x1424 (9:16)" },
+            { "value": "1K 1:1", "label": "1K 1:1 (1024x1024)", "width": 1024, "height": 1024, "sizePreset": "(1K) 1024x1024 (1:1)" },
+            { "value": "1K 4:3", "label": "1K 4:3 (1152x864)", "width": 1152, "height": 864, "sizePreset": "(1K) 1152x864 (4:3)" },
+            { "value": "1K 3:4", "label": "1K 3:4 (864x1152)", "width": 864, "height": 1152, "sizePreset": "(1K) 864x1152 (3:4)" },
+            { "value": "1K 3:2", "label": "1K 3:2 (1248x832)", "width": 1248, "height": 832, "sizePreset": "(1K) 1248x832 (3:2)" },
+            { "value": "1K 2:3", "label": "1K 2:3 (832x1248)", "width": 832, "height": 1248, "sizePreset": "(1K) 832x1248 (2:3)" },
+            { "value": "1K 21:9", "label": "1K 21:9 (1568x672)", "width": 1568, "height": 672, "sizePreset": "(1K) 1568x672 (21:9)" }
+          ],
+          "pricing": {
+            "perImageUsd": { "*": 0.02574 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "minimax-h3",
+      "label": "MiniMax H3",
+      "provider": "minimax",
+      "variants": [
+        {
+          "modelId": "brick_api_minimax_h3_i2v",
+          "label": "MiniMax H3",
+          "hint": "768P or 2K, 4-15s. A 768P render can be re-rendered at 2K after review.",
+          "name": "MiniMax H3 Image to Video",
+          "description": "MiniMax H3 from a first frame. The aspect ratio follows the image. Frames must be between 2:5 and 5:2 and at least 256px.",
+          "default": true,
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" },
+            { "value": "2K", "label": "2K", "width": 2560, "height": 1440, "nodeValue": "2K" }
+          ],
+          "durations": { "min": 4, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "768P": 0.1287, "2K": 0.1859, "*": 0.1859 } },
+          "draft": { "kind": "minimax-h3-768p", "resolution": "768P" }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_max_i2v",
+          "label": "MiniMax H3 Max",
+          "hint": "480P or 768P, 5-15s. Cheaper than H3.",
+          "name": "MiniMax H3 Max Image to Video",
+          "description": "MiniMax H3 Max from a first frame, with the provider's prompt expansion. The aspect ratio follows the image.",
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "480P", "label": "480P", "width": 854, "height": 480, "nodeValue": "480P" },
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" }
+          ],
+          "durations": { "min": 5, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "480P": 0.0715, "768P": 0.1144, "*": 0.1144 } }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_max_turbo_i2v",
+          "label": "MiniMax H3 Max Turbo",
+          "hint": "Fastest and cheapest. 480P or 768P, 5-15s.",
+          "name": "MiniMax H3 Max Turbo Image to Video",
+          "description": "MiniMax H3 Max Turbo from a first frame: the quick, low-cost H3 option. The aspect ratio follows the image.",
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "480P", "label": "480P", "width": 854, "height": 480, "nodeValue": "480P" },
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" }
+          ],
+          "durations": { "min": 5, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "480P": 0.03575, "768P": 0.0572, "*": 0.0572 } }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_flf2v",
+          "label": "MiniMax H3",
+          "hint": "768P or 2K, 4-15s. A 768P render can be re-rendered at 2K after review.",
+          "name": "MiniMax H3 First-Last Frame",
+          "description": "MiniMax H3 between a first and a last frame. The aspect ratio follows the images.",
+          "default": true,
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" },
+            { "value": "2K", "label": "2K", "width": 2560, "height": 1440, "nodeValue": "2K" }
+          ],
+          "durations": { "min": 4, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "768P": 0.1287, "2K": 0.1859, "*": 0.1859 } },
+          "draft": { "kind": "minimax-h3-768p", "resolution": "768P" }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_max_flf2v",
+          "label": "MiniMax H3 Max",
+          "hint": "480P or 768P, 5-15s. Cheaper than H3.",
+          "name": "MiniMax H3 Max First-Last Frame",
+          "description": "MiniMax H3 Max between a first and a last frame, with the provider's prompt expansion.",
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "480P", "label": "480P", "width": 854, "height": 480, "nodeValue": "480P" },
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" }
+          ],
+          "durations": { "min": 5, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "480P": 0.0715, "768P": 0.1144, "*": 0.1144 } }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_max_turbo_flf2v",
+          "label": "MiniMax H3 Max Turbo",
+          "hint": "Fastest and cheapest. 480P or 768P, 5-15s.",
+          "name": "MiniMax H3 Max Turbo First-Last Frame",
+          "description": "MiniMax H3 Max Turbo between a first and a last frame: the quick, low-cost H3 option.",
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "480P", "label": "480P", "width": 854, "height": 480, "nodeValue": "480P" },
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" }
+          ],
+          "durations": { "min": 5, "max": 15, "default": 5 },
+          "pricing": { "perSecondUsd": { "480P": 0.03575, "768P": 0.0572, "*": 0.0572 } }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_r2v",
+          "label": "MiniMax H3",
+          "hint": "Reference image + 2-15s clip. 768P or 2K. A 768P render can be re-rendered at 2K.",
+          "name": "MiniMax H3 Reference to Video",
+          "description": "MiniMax H3 guided by a reference image and a reference clip (2-15s, 24-60 fps). Refer to them in the prompt as Image 1 and Video 1.",
+          "default": true,
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" },
+            { "value": "2K", "label": "2K", "width": 2560, "height": 1440, "nodeValue": "2K" }
+          ],
+          "durations": { "min": 4, "max": 15, "default": 5 },
+          "pricing": {
+            "perSecondUsd": { "768P": 0.1287, "2K": 0.1859, "*": 0.1859 },
+            "maxExtraUsd": { "768P": 1.9305, "2K": 2.7885, "*": 2.7885 }
+          },
+          "draft": { "kind": "minimax-h3-768p", "resolution": "768P" }
+        },
+        {
+          "modelId": "brick_api_minimax_h3_max_r2v",
+          "label": "MiniMax H3 Max",
+          "hint": "Reference image + 2-15s clip. 480P or 768P.",
+          "name": "MiniMax H3 Max Reference to Video",
+          "description": "MiniMax H3 Max guided by a reference image and a reference clip (2-15s, 24-60 fps), sent at standard detail. Refer to them in the prompt as Image 1 and Video 1.",
+          "randomizeSeed": true,
+          "defaultResolution": "768P",
+          "resolutions": [
+            { "value": "480P", "label": "480P", "width": 854, "height": 480, "nodeValue": "480P" },
+            { "value": "768P", "label": "768P", "width": 1366, "height": 768, "nodeValue": "768P" }
+          ],
+          "durations": { "min": 5, "max": 15, "default": 5 },
+          "pricing": {
+            "perSecondUsd": { "480P": 0.0715, "768P": 0.1144, "*": 0.1144 },
+            "maxExtraUsd": { "480P": 1.1932, "768P": 3.0848, "*": 3.0848 }
+          }
+        }
+      ]
+    }
+  ]
+}

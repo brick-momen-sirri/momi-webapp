@@ -39,6 +39,9 @@ type JobCardProps = {
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
+  onRenderDraftFinal?: (job: Job) => void;
+  /** The status of the newest final rendered from this draft, when there is one. */
+  draftFinalStatus?: Job["status"];
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
@@ -62,6 +65,8 @@ export function JobCard({
   onReuseSettings,
   onRetry,
   onCancel,
+  onRenderDraftFinal,
+  draftFinalStatus,
   onToggleFavorite,
   onMove,
   onArchive,
@@ -242,6 +247,8 @@ export function JobCard({
           onReuseSettings={onReuseSettings}
           onRetry={onRetry}
           onCancel={onCancel}
+          onRenderDraftFinal={onRenderDraftFinal}
+          draftFinalStatus={draftFinalStatus}
           onToggleFavorite={onToggleFavorite}
           onMove={onMove}
           onArchive={onArchive}

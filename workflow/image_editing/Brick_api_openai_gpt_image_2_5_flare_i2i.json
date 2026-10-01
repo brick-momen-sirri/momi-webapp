@@ -1,0 +1,100 @@
+{
+  "1": {
+    "inputs": {
+      "image": "0001.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "0002.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "0003.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "image": "0004.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "5": {
+    "inputs": {
+      "image": "0005.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "prompt": "",
+      "model": "gpt-image-2.5-flare",
+      "model.size": "auto",
+      "model.custom_width": 1024,
+      "model.custom_height": 1024,
+      "model.background": "auto",
+      "model.quality": "high",
+      "model.images.image_1": [
+        "1",
+        0
+      ],
+      "model.images.image_2": [
+        "2",
+        0
+      ],
+      "model.images.image_3": [
+        "3",
+        0
+      ],
+      "model.images.image_4": [
+        "4",
+        0
+      ],
+      "model.images.image_5": [
+        "5",
+        0
+      ],
+      "n": 1,
+      "seed": 0
+    },
+    "class_type": "OpenAIGPTImageNodeV2",
+    "_meta": {
+      "title": "OpenAI GPT Image 2.5 Flare"
+    }
+  },
+  "20": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": {
+      "title": "Save Image (Advanced)"
+    }
+  }
+}

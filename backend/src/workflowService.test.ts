@@ -533,12 +533,15 @@ test("Seedance 2.5 rewrites the model combo and the inputs that version's node d
   )) as Record<string, any>;
 
   const referenceInputs = referenceWorkflow["359"].inputs;
+  assert.equal(referenceWorkflow["359"].class_type, "ByteDance2ReferenceNodeV2");
   assert.equal(referenceInputs.model, "Seedance 2.5");
   assert.equal(referenceInputs["model.ratio"], "21:9");
   // Both are required inputs of the 2.5 option, so a prompt without them is
-  // rejected by ComfyUI before the job runs.
+  // rejected by ComfyUI before the job runs. On V2 the edit switch is task_type:
+  // "edit" is what the legacy node's video_editing=true meant.
   assert.equal(referenceInputs["model.output_format"], "mp4");
-  assert.equal(referenceInputs["model.video_editing"], true);
+  assert.equal(referenceInputs["model.task_type"], "edit");
+  assert.ok(!("model.video_editing" in referenceInputs));
   // 24s is inside 2.5's 4-30 range and outside 2.0's 4-15, so this also proves the
   // duration is clamped against the picked version rather than the workflow file.
   assert.equal(referenceInputs["model.duration"], 24);

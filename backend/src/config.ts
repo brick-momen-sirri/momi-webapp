@@ -65,6 +65,9 @@ export const videoEnhancerWorkflowRoot =
   process.env.VIDEO_ENHANCER_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-video-enhancer");
 // And the LTX 2.5 CQ image-to-video graph, for the same reason.
 export const ltxCqI2vWorkflowRoot = process.env.LTX_CQ_I2V_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-ltx-cq-i2v");
+// The Draft -> Final graphs (draftFinal.ts) are never picked directly: a final is
+// offered on an approved draft's card, so a scanned copy would be a model with no inputs.
+export const draftFinalWorkflowRoot = process.env.DRAFT_FINAL_WORKFLOW_ROOT ?? path.join(backendRoot, "workflow-draft-final");
 
 export const brickProjectsRoot = process.env.BRICK_PROJECTS_ROOT ?? path.join(comfyRoot, "output", "projects");
 export const localProjectsRoot = process.env.LOCAL_PROJECTS_ROOT ?? path.join(backendRoot, "data", "projects");

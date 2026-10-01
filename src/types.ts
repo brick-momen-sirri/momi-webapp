@@ -279,6 +279,8 @@ export type Job = {
   fileName?: string;
   generatedPrompt?: string;
   textArtifacts?: JobTextArtifact[];
+  /** Set when this finished job is a draft its final can still be rendered from. */
+  draft?: JobDraft;
   source?: "backend_job" | "existing_project_media";
   missingMetadata?: string[];
   hasUnsavedRemoteMedia?: boolean;
@@ -319,6 +321,14 @@ export type Job = {
   generationTime?: string;
 };
 
+/** A finished job its final can be rendered from. Mirrors JobDraft in backend/src/types.ts. */
+export type JobDraft = {
+  kind: "seedance-2.5-draft" | "minimax-h3-768p";
+  taskId?: string;
+  createdAt: string;
+  expiresAt?: string;
+};
+
 export type ArchVizGridOptions = {
   slotCount: "1" | "2" | "4" | "6" | "8" | "9";
   useSmartDefaults: boolean;
@@ -338,7 +348,7 @@ export type WorkflowOptions = {
   // decides the resolutions, durations and node inputs -- see
   // features/generation/seedanceVersions.ts -- so it travels with the job.
   seedance?: {
-    /** "2.0" or "2.5". Absent on jobs from before the picker existed, which ran 2.0. */
+    /** "2.0", "2.5" or "2.5-draft". Absent on jobs from before the picker existed, which ran 2.0. */
     version?: string;
     // Output aspect ratio for the Seedance video nodes. "adaptive" lets the model
     // keep the reference frame's own aspect instead of forcing a grid ratio. Absent
@@ -375,6 +385,14 @@ export type WorkflowOptions = {
     settings: Record<string, string | number | boolean>;
     /** Present only for the crop/layer based Image Editing preset. */
     edit?: StillImageEditWorkflow;
+  };
+  // Present exactly on a final rendered from an approved draft. The client sends only
+  // sourceJobId; the server fills in the rest from the draft job.
+  draftFinal?: {
+    sourceJobId: string;
+    kind?: string;
+    taskId?: string;
+    referenceVideo?: string;
   };
   // Present exactly on Video Enhancer jobs; routes them to the LTX 2.5 CQ pod. The
   // plan is written by the backend at dispatch, once it has probed the source.

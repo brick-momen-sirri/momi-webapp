@@ -18,7 +18,7 @@ import type { WorkflowModel, WorkflowOptions } from "./types.js";
  * UI does the mirror-image thing with the same table.
  */
 
-export type SeedanceVersionId = "2.0" | "2.5";
+export type SeedanceVersionId = "2.0" | "2.5" | "2.5-draft";
 
 export type SeedanceVersion = {
   id: SeedanceVersionId;
@@ -43,9 +43,20 @@ export type SeedanceVersion = {
   /** `model.output_format`, which exists only from 2.5. Null means the input is absent. */
   outputFormat: string | null;
   supportsVideoEditing: boolean;
+  /**
+   * A preview whose task id renders the final (2.5 Draft). The graph builder saves
+   * that id as a text artifact, and draftFinal.ts offers the 1080p render from it.
+   */
+  draft: boolean;
 };
 
-export const SEEDANCE_VERSION_IDS: readonly SeedanceVersionId[] = ["2.0", "2.5"];
+export const SEEDANCE_VERSION_IDS: readonly SeedanceVersionId[] = ["2.0", "2.5", "2.5-draft"];
+
+/**
+ * The filename prefix the draft task id is saved under. draftFinal.ts finds the id
+ * among the job's text artifacts by it, so the two must agree.
+ */
+export const SEEDANCE_DRAFT_TASK_FILENAME_PREFIX = "momi_seedance_draft_task_id";
 
 /**
  * Validated at load, like the still image preset table: this drives both what the
@@ -90,6 +101,9 @@ function assertVersionTableShape(versions: SeedanceVersion[]) {
     // A default nobody but an admin could pick would gate the version by default.
     if (defaultDurationSeconds > nonAdminMax) {
       throw new Error(`seedanceVersions.json gives ${version.id} a default duration above its non-admin ceiling.`);
+    }
+    if (typeof version.draft !== "boolean") {
+      throw new Error(`seedanceVersions.json must say whether ${version.id} is a draft.`);
     }
   }
   const missing = SEEDANCE_VERSION_IDS.filter((id) => !seen.has(id));
@@ -215,6 +229,7 @@ export function applySeedanceModelInputs(
   inputs: ComfyNode,
   model: Pick<WorkflowModel, "id" | "name" | "category" | "workflowPath">,
   workflowOptions: WorkflowOptions | undefined,
+  classType = "",
 ) {
   const requested = workflowOptions?.seedance;
   // No Seedance block at all is a submission from before the picker existed, or one
@@ -242,10 +257,23 @@ export function applySeedanceModelInputs(
     deleteSeedanceInput(inputs, ["model.output_format", "output_format"]);
   }
 
+  // The same switch, spelled per node. The legacy reference node takes a boolean
+  // `video_editing`; ByteDance2ReferenceNodeV2 replaced it with `task_type`, where
+  // "edit" is the old true and "auto" the old false -- the legacy node sent no task
+  // type at all when the switch was off, which the provider reads as auto.
   if (hasVideoEditingInput(model, version)) {
-    setSeedanceInput(inputs, "model.video_editing", requested.videoEditing === true, ["model.video_editing", "video_editing"]);
+    if (usesTaskType(classType)) {
+      deleteSeedanceInput(inputs, ["model.video_editing", "video_editing"]);
+      setSeedanceInput(inputs, "model.task_type", requested.videoEditing === true ? "edit" : "auto", [
+        "model.task_type",
+        "task_type",
+      ]);
+    } else {
+      deleteSeedanceInput(inputs, ["model.task_type", "task_type"]);
+      setSeedanceInput(inputs, "model.video_editing", requested.videoEditing === true, ["model.video_editing", "video_editing"]);
+    }
   } else {
-    deleteSeedanceInput(inputs, ["model.video_editing", "video_editing"]);
+    deleteSeedanceInput(inputs, ["model.video_editing", "video_editing", "model.task_type", "task_type"]);
   }
 
   // Written unconditionally, and never deleted. `generate_audio` is a required
@@ -261,6 +289,72 @@ export function applySeedanceModelInputs(
     "model.generate_audio",
     "generate_audio",
   ]);
+}
+
+function usesTaskType(classType: string) {
+  return classType.toLowerCase() === "bytedance2referencenodev2";
+}
+
+/** The Seedance nodes whose 2.5 Draft option returns a draft_task_id on output 1. */
+const DRAFT_CAPABLE_CLASS_TYPES = new Set([
+  "bytedance2firstlastframenode",
+  "bytedance2referencenodev2",
+  "bytedance2texttovideonode",
+]);
+
+/**
+ * Save a 2.5 Draft's task id where the job can read it back.
+ *
+ * The id is the Seedance node's second output. ComfyUI's history does not carry a
+ * STRING output, so a SaveStringKJ node (KJNodes, in the worker image and checked by
+ * its verify_required_nodes.py) writes it to a .txt file the worker handler already
+ * returns as a text artifact -- the same channel the prompt-generation workflows use.
+ *
+ * Added only for a draft, and never left over from a graph that had one: the node
+ * refuses to run any other model with that output connected ("Only the Seedance 2.5
+ * Draft model produces a draft_task_id"), so a stray capture node would fail every
+ * 2.0 and 2.5 render before it started.
+ */
+export function applySeedanceDraftCapture(prompt: ComfyNode, workflowOptions: WorkflowOptions | undefined) {
+  for (const [nodeId, node] of Object.entries(prompt)) {
+    if (isDraftCaptureNode(node)) delete prompt[nodeId];
+  }
+  if (!workflowOptions?.seedance) return;
+  const version = seedanceVersion(seedanceVersionIdFromOptions(workflowOptions));
+  if (!version.draft) return;
+
+  const sourceId = Object.entries(prompt).find(([, node]) =>
+    DRAFT_CAPABLE_CLASS_TYPES.has(String(node?.class_type ?? "").toLowerCase()),
+  )?.[0];
+  if (!sourceId) {
+    throw new Error("This Seedance workflow has no node that offers Seedance 2.5 Draft. Pick Seedance 2.0 or 2.5 instead.");
+  }
+
+  prompt[nextNodeId(prompt)] = {
+    class_type: "SaveStringKJ",
+    inputs: {
+      string: [sourceId, 1],
+      filename_prefix: SEEDANCE_DRAFT_TASK_FILENAME_PREFIX,
+      output_folder: "output",
+      file_extension: ".txt",
+    },
+    _meta: { title: DRAFT_CAPTURE_TITLE },
+  };
+}
+
+const DRAFT_CAPTURE_TITLE = "Momi: Seedance draft task id";
+
+function isDraftCaptureNode(node: ComfyNode) {
+  return node?.class_type === "SaveStringKJ" && node?._meta?.title === DRAFT_CAPTURE_TITLE;
+}
+
+function nextNodeId(prompt: ComfyNode) {
+  const numeric = Object.keys(prompt)
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+  let next = Math.max(0, ...numeric) + 1;
+  while (prompt[String(next)]) next += 1;
+  return String(next);
 }
 
 /**

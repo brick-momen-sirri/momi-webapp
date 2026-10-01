@@ -42,11 +42,17 @@ import { persistServerlessArtifacts } from "../serverlessArtifactService.js";
 import { validateRunpodImageRequirements } from "../runpodImagePreflight.js";
 import { ensureJobFolders, saveJobMetadata } from "../storageService.js";
 import type { CreditBalanceSnapshot, Job, WorkflowModel } from "../types.js";
+import { buildDraftFinalWorkflow, detectJobDraft, isDraftTaskIdText } from "../draftFinal.js";
+import { isDraftFinalModelId } from "../draftFinalModels.js";
+import { detectMediaResolution } from "../mediaResolutionService.js";
+import { resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
+import { partnerModelResolution } from "../partnerModels.js";
 import { isLtxCqI2vModelId } from "../ltxCqImageToVideo.js";
 import { videoEnhancerRunpodPolicy } from "../videoEnhancer.js";
 import { getWorkflowModel, loadWorkflowForRunpod, saveWorkflowSnapshot } from "../workflowService.js";
 import type { ExecutionClaim } from "./executionRegistry.js";
 import { jobRemoteMediaEntries, materializeRunpodInputImages, materializeRunpodInputVideo } from "./index.js";
+import { localMediaFilePathFromUrl } from "./providerInputs.js";
 import { markJobCompleted } from "./lifecycleState.js";
 import { prepareLtxCqI2vSubmission } from "./ltxCqImageToVideoSubmission.js";
 import { prepareVideoEnhancerSubmission } from "./videoEnhancerSubmission.js";
@@ -236,6 +242,11 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     job.runpodStatus = result.status;
     job.generatedPrompt = result.generatedText;
     job.textArtifacts = result.textArtifacts;
+    // A Seedance 2.5 Draft's task id comes back as a text artifact, which is also
+    // how prompt-generation workflows return their text -- so it would otherwise be
+    // shown on the card as this job's "generated prompt".
+    job.draft = detectJobDraft(job);
+    if (isDraftTaskIdText(job, job.generatedPrompt)) delete job.generatedPrompt;
     await captureRunpodPostBalance(job, activityBaseline);
 
     const selectedMedia = preferredResultMedia(result.media);
@@ -498,7 +509,57 @@ export async function prepareRunpodSubmission(
   const videoEnhancer = job.workflowOptions?.videoEnhancer;
   if (videoEnhancer) return prepareVideoEnhancerSubmission(job, videoEnhancer, inputFolder);
   if (isLtxCqI2vModelId(job.modelId)) return prepareLtxCqI2vSubmission(job, inputFolder);
+  if (isDraftFinalModelId(job.modelId)) return prepareDraftFinalSubmission(job, model, inputFolder);
   return prepareAnimationSubmission(job, model, projectFolder, inputFolder);
+}
+
+/**
+ * A final rendered from an approved draft (draftFinal.ts).
+ *
+ * The same materializers as any Animation job -- the draft's images, and the draft's
+ * result video as the input video -- plus the draft's reference clip under its own
+ * name, which a MiniMax reference draft needs sent again.
+ */
+async function prepareDraftFinalSubmission(job: Job, model: WorkflowModel, inputFolder: string): Promise<PreparedSubmission> {
+  const runpodImages = await materializeRunpodInputImages(job, model);
+  const baseVideo = await materializeRunpodInputVideo(job, model, inputFolder);
+  const referenceSource = job.workflowOptions?.draftFinal?.referenceVideo;
+  const referenceVideo = referenceSource
+    ? await materializeRunpodInputVideo(job, model, inputFolder, { value: referenceSource, name: `${job.id}_reference.mp4` })
+    : undefined;
+
+  const workflow = await buildDraftFinalWorkflow(job, {
+    imageNames: runpodImages.imageNames,
+    baseVideoName: baseVideo?.videoName,
+    referenceVideoName: referenceVideo?.videoName,
+  });
+  const videos = [...(baseVideo?.videos ?? []), ...(referenceVideo?.videos ?? [])];
+  return {
+    workflow,
+    runpodImages,
+    runpodVideo: videos.length ? { videos, videoName: baseVideo?.videoName ?? videos[0].name } : undefined,
+  };
+}
+
+/**
+ * The first input image's aspect, when the graph needs it and nothing else can say.
+ *
+ * Only Seedream's "match input" size reads it, so every other job skips the file
+ * read. A failed measurement is not an error: the builder falls back to the
+ * variant's fixed preset, which is what a text-only prompt gets anyway.
+ */
+async function firstImageAspectForGraph(job: Job) {
+  if (!partnerModelResolution(job.modelId, job.resolution?.label)?.matchInput) return undefined;
+  const source = job.inputImages[0];
+  const filePath = source ? localMediaFilePathFromUrl(source) : undefined;
+  if (!filePath) return undefined;
+  try {
+    const safePath = await resolveAllowedExistingMediaPath(filePath);
+    const size = safePath ? await detectMediaResolution(safePath, "image") : undefined;
+    return size && size.width > 0 && size.height > 0 ? size.width / size.height : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The existing path, moved verbatim so the still image branch sits beside it. */
@@ -527,6 +588,7 @@ async function prepareAnimationSubmission(
     },
     projectFolder,
     runpodImages.imageNames,
+    { firstImageAspect: await firstImageAspectForGraph(job) },
   );
   return { workflow, runpodImages, runpodVideo };
 }

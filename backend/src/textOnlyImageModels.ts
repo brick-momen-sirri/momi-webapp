@@ -11,10 +11,13 @@
 // graph rewrite did not recognise, the job would reach ComfyUI still wired to a
 // LoadImage pointing at a placeholder filename, and fail there instead.
 
+import { supportsPartnerTextOnly } from "./partnerModels.js";
 import type { WorkflowModel } from "./types.js";
 
 export function supportsTextOnlyImageWorkflow(model: WorkflowModel) {
-  return isNanoBananaModel(model) || isGptImageModel(model);
+  // Seedream 5.0 generates from a prompt alone too; its variant says so in
+  // partnerModels.json rather than through another name match here.
+  return isNanoBananaModel(model) || isGptImageModel(model) || supportsPartnerTextOnly(model.id);
 }
 
 export function isNanoBananaModel(model: WorkflowModel) {

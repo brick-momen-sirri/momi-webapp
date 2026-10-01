@@ -76,6 +76,9 @@ export async function buildQueuedJob(request: CreateJobRequest, deps: JobFactory
       durationSeconds,
       preparedRequest.resolution ?? estimateResolution,
       preparedRequest.workflowOptions,
+      // Partner variants that charge per reference image, or add a range for a
+      // reference clip, are quoted from what was actually sent.
+      { imageCount: preparedRequest.inputImages?.length ?? 0, hasVideo: Boolean(preparedRequest.inputVideo) },
     ),
     source: "backend_job",
     createdAt: deps.now?.() ?? new Date().toISOString(),

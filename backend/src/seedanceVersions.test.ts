@@ -44,12 +44,23 @@ function model(category: ModelCategory, id = "brick_api_seedance2_0_i2v"): Workf
   };
 }
 
-test("the shipped table describes exactly the two versions the picker offers", () => {
+test("the shipped table describes exactly the three versions the picker offers", () => {
   assert.deepEqual(
     seedanceVersions.map((version) => version.id),
-    ["2.0", "2.5"],
+    ["2.0", "2.5", "2.5-draft"],
   );
   assert.equal(DEFAULT_SEEDANCE_VERSION, "2.0");
+});
+
+test("2.5 Draft is a 480p-only 2.5 whose task id the graph saves", () => {
+  const draft = seedanceVersion("2.5-draft");
+  assert.equal(draft.comfyModelValue, "Seedance 2.5 Draft");
+  assert.deepEqual(draft.resolutions, ["480p"]);
+  assert.equal(draft.maxDurationSeconds, 30);
+  assert.equal(draft.nonAdminMaxDurationSeconds, 15);
+  assert.equal(draft.draft, true);
+  assert.equal(seedanceVersion("2.5").draft, false);
+  assert.equal(seedanceVersion("2.0").draft, false);
 });
 
 test("2.5 raises the duration ceiling and gives up 4K", () => {

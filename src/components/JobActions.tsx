@@ -1,6 +1,7 @@
-import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Star, Trash2, XCircle } from "lucide-react";
+import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Sparkles, Star, Trash2, XCircle } from "lucide-react";
 import type { Job, Project, User } from "../types";
 import { canCancelJob } from "../features/jobs/cancellation";
+import { draftExpiryText, draftFinalPlan } from "../features/jobs/draftFinal";
 import { MoveResultMenu } from "./MoveResultMenu";
 
 type JobActionsProps = {
@@ -16,6 +17,10 @@ type JobActionsProps = {
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
+  /** Render an approved draft's final. Absent where finals are not offered. */
+  onRenderDraftFinal?: (job: Job) => void;
+  /** The newest final of this draft, if one has been started. */
+  draftFinalStatus?: Job["status"];
   onToggleFavorite: (job: Job) => void;
   onMove: (job: Job, destinationFolderId: string | null) => Promise<boolean>;
   onArchive: (job: Job) => void;
@@ -35,6 +40,8 @@ export function JobActions({
   onReuseSettings,
   onRetry,
   onCancel,
+  onRenderDraftFinal,
+  draftFinalStatus,
   onToggleFavorite,
   onMove,
   onArchive,
@@ -42,6 +49,21 @@ export function JobActions({
   onDeletePermanently,
 }: JobActionsProps) {
   const result = job.resultUrl ?? job.thumbnailUrl;
+  // Draft -> Review -> Final: an approved preview offers its expensive render here.
+  // An expired or id-less draft still shows the button, disabled, so the reason is
+  // visible on hover instead of the option silently disappearing.
+  const finalPlan = !archiveView && onRenderDraftFinal ? draftFinalPlan(job) : undefined;
+  const finalInFlight = draftFinalStatus === "queued" || draftFinalStatus === "sending" || draftFinalStatus === "running";
+  const finalTitle = finalPlan
+    ? (finalPlan.refusal ??
+      [
+        `Render the ${finalPlan.label} from this draft (~${finalPlan.credits.toLocaleString()} credits)`,
+        draftFinalStatus === "completed" ? "a final is already in Results" : finalInFlight ? "a final is already on its way" : "",
+        draftExpiryText(finalPlan.expiresAt) ?? "",
+      ]
+        .filter(Boolean)
+        .join(" · "))
+    : undefined;
   const canRetry = !archiveView && (job.status === "failed" || job.status === "canceled");
   // Still working, so there is still GPU time left to save by stopping it -- and
   // only by whoever submitted it or an admin. The server refuses anyone else;
@@ -83,6 +105,22 @@ export function JobActions({
         >
           <RotateCw className="h-3.5 w-3.5" />
           Retry
+        </button>
+      ) : null}
+      {finalPlan && onRenderDraftFinal ? (
+        <button
+          type="button"
+          onClick={() => onRenderDraftFinal(job)}
+          disabled={Boolean(finalPlan.refusal)}
+          className={`flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition ${
+            finalPlan.refusal
+              ? "cursor-not-allowed border-line bg-stone-50 text-stone-400"
+              : "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100"
+          }`}
+          title={finalTitle}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {draftFinalStatus === "completed" ? `Render ${finalPlan.label} again` : `Render ${finalPlan.label}`}
         </button>
       ) : null}
       <button

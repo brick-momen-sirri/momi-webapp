@@ -112,6 +112,8 @@ export function useGenerationForm(options: GenerationFormOptions) {
     () => seedanceEffectiveModel(selectedModelBase, selectedSeedanceVersion, allowSeedance4K),
     [allowSeedance4K, selectedModelBase, selectedSeedanceVersion],
   );
+  // GPT Image 2.5 and Seedream 5.0 charge per reference image as well as per output.
+  const referenceImageCount = images.filter(Boolean).length;
   const selectedModel = useMemo(
     () => ({
       ...versionedModelBase,
@@ -122,14 +124,17 @@ export function useGenerationForm(options: GenerationFormOptions) {
       cost: estimateModelCredits(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
         seedanceVersion: selectedSeedanceVersion,
         videoEnhancerLongSide,
+        referenceImageCount,
       }),
       costLabel: estimateModelCreditLabel(versionedModelBase, selectedDurationSeconds, selectedResolution, imageOutputCount, {
         seedanceVersion: selectedSeedanceVersion,
         videoEnhancerLongSide,
+        referenceImageCount,
       }),
     }),
     [
       imageOutputCount,
+      referenceImageCount,
       selectedDurationSeconds,
       selectedResolution,
       selectedSeedanceVersion,

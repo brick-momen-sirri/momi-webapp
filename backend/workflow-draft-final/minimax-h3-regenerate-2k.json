@@ -1,0 +1,77 @@
+{
+  "1": {
+    "inputs": {
+      "file": "draft_base.mp4"
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "Approved 768P draft"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "0001.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "First Frame / Reference Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": "0002.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Last Frame"
+    }
+  },
+  "4": {
+    "inputs": {
+      "file": "draft_reference.mp4"
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "Reference Video"
+    }
+  },
+  "10": {
+    "inputs": {
+      "model": "MiniMax H3",
+      "model.prompt": "",
+      "model.resolution": "2K",
+      "video": [
+        "1",
+        0
+      ],
+      "first_frame": [
+        "2",
+        0
+      ],
+      "last_frame": [
+        "3",
+        0
+      ],
+      "watermark": false
+    },
+    "class_type": "MinimaxHailuo03RegenerateNode",
+    "_meta": {
+      "title": "MiniMax H3 Regenerate to 2K"
+    }
+  },
+  "20": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

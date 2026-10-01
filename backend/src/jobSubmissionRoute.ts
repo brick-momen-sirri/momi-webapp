@@ -16,6 +16,8 @@ import { stillImageCategoryIdFromModelId, stillImageModelId } from "./stillImage
 import { assertStillImageInputs, normalizeStillImageOptions } from "./stillImageRequest.js";
 import { supportsTextOnlyImageWorkflow } from "./textOnlyImageModels.js";
 import type { CreateJobRequest, Job, Project, Resolution, User, WorkflowModel, WorkflowOptions } from "./types.js";
+import { DraftFinalError, draftFinalRequest } from "./draftFinal.js";
+import { isDraftFinalModelId } from "./draftFinalModels.js";
 import { isLtxCqI2vModelId, LTX_CQ_I2V_PROMPT_MAX_LENGTH } from "./ltxCqImageToVideo.js";
 import { readMaintenanceState, type MaintenanceState } from "./maintenanceMode.js";
 import { isVideoEnhancerModelId, normalizeVideoEnhancerOptions } from "./videoEnhancer.js";
@@ -30,6 +32,9 @@ export type JobSubmissionDependencies = {
   createJob: (request: CreateJobRequest) => Promise<Job | { job: Job; replayed: boolean }>;
   /** Injected for tests; production reads the switch file. */
   readMaintenance?: () => MaintenanceState;
+  /** Looks up the draft a final is rendered from. Absent means finals are refused. */
+  getJob?: (id: string) => Job | undefined;
+  canAccessJob?: (user: User, job: Job) => boolean;
 };
 
 const KLING_PROMPT_CHARACTER_LIMIT = 2500;
@@ -65,6 +70,17 @@ export function createJobSubmissionHandler(deps: JobSubmissionDependencies): Req
       const model = deps.getWorkflowModel(modelId);
       if (!model) throw new JobSubmissionError(`Unknown workflow model: ${modelId}`);
 
+      // A final is not validated as a request of its own: it has no prompt, media,
+      // resolution or duration to check, because every one of them is the draft's.
+      // The draft already passed these gates when it was submitted.
+      if (isDraftFinalModelId(modelId)) {
+        const request = draftFinalSubmissionRequest(body, modelId, project, user, deps);
+        await deps.validateMedia(request, project, user);
+        const creation = await deps.createJob(request);
+        const result = "job" in creation ? creation : { job: creation, replayed: false };
+        return res.status(result.replayed ? 200 : 201).json(result);
+      }
+
       const request = validatedRequest(body, model, user.id);
       if (user.role !== "admin" && isSeedanceModel(model) && is4KResolution(request.resolution)) {
         return res.status(403).json({ error: "Seedance 4K generation is available to administrators only." });
@@ -92,10 +108,42 @@ export function createJobSubmissionHandler(deps: JobSubmissionDependencies): Req
       const result = "job" in creation ? creation : { job: creation, replayed: false };
       res.status(result.replayed ? 200 : 201).json(result);
     } catch (error) {
-      const status = error instanceof JobSubmissionError ? error.status : errorStatus(error, 400);
+      const status =
+        error instanceof JobSubmissionError || error instanceof DraftFinalError ? error.status : errorStatus(error, 400);
       res.status(status).json({ error: error instanceof Error ? error.message : "Could not create job" });
     }
   };
+}
+
+/**
+ * The request for a final, built from the draft it names.
+ *
+ * The client's own prompt, media, size and length are ignored rather than checked:
+ * the final re-renders the draft, and the one thing that could make it do anything
+ * else -- a different source -- is resolved here against the requester's access.
+ */
+function draftFinalSubmissionRequest(
+  body: Record<string, unknown>,
+  modelId: string,
+  project: Project,
+  user: User,
+  deps: JobSubmissionDependencies,
+): CreateJobRequest {
+  if (!deps.getJob) throw new JobSubmissionError("Draft finals are not available on this server.", 501);
+  const options = body.workflowOptions == null ? {} : plainRecord(body.workflowOptions, "workflowOptions");
+  const draftFinal = options.draftFinal == null ? {} : plainRecord(options.draftFinal, "Draft final options");
+  const sourceJobId = requiredIdentifier(draftFinal.sourceJobId, "workflowOptions.draftFinal.sourceJobId");
+
+  const source = deps.getJob(sourceJobId);
+  // Not found and not yours read the same, like every other job lookup.
+  if (!source || source.projectId !== project.id || (deps.canAccessJob && !deps.canAccessJob(user, source))) {
+    throw new JobSubmissionError("Draft not found.", 404);
+  }
+
+  return draftFinalRequest(source, modelId, user.id, {
+    clientRequestId: optionalClientRequestId(body.clientRequestId),
+    targetFolderId: body.targetFolderId === undefined ? undefined : optionalFolderId(body.targetFolderId),
+  });
 }
 
 export function validatedRequest(body: Record<string, unknown>, model: WorkflowModel, userId: string): CreateJobRequest {
