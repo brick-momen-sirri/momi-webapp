@@ -29,7 +29,7 @@ import {
   startOfDay,
   stringField,
 } from "../creditDashboardService.js";
-import { getCredits } from "../creditService.js";
+import { getCachedCredits } from "../creditService.js";
 import { creditAccountingSource, isCountedCreditUsage, jobSpendSplit } from "../creditUsageAccounting.js";
 import { currentMonthRange } from "../httpQuery.js";
 import { canAccessJob } from "../jobPermissions.js";
@@ -39,7 +39,7 @@ import { getProject } from "../projectService.js";
 export const creditRouter = express.Router();
 
 creditRouter.get("/api/credits", async (_req, res) => {
-  res.json(await getCredits());
+  res.json(await getCachedCredits());
 });
 
 creditRouter.get("/api/usage/monthly", (req, res) => {

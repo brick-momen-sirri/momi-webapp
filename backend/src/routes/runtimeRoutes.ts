@@ -6,7 +6,7 @@ import { generationBackend, localComfyEnabled, runpodPollIntervalMs, runpodSubmi
 import { getRequestUser } from "../authMiddleware.js";
 import { readWindowsClipboardImage } from "../clipboardService.js";
 import { monthlyUsageForUser } from "../creditDashboardService.js";
-import { getCredits } from "../creditService.js";
+import { getCachedCredits } from "../creditService.js";
 
 import { readMaintenanceState } from "../maintenanceMode.js";
 import { getPodStatus } from "../podStatusService.js";
@@ -33,7 +33,7 @@ runtimeRouter.get("/api/runtime", (_req, res) => {
 // endpoint (pagination/filtering + heavier payload).
 runtimeRouter.get("/api/snapshot", async (req, res) => {
   const currentUser = getRequestUser(req);
-  const [credits, podStatus] = await Promise.all([getCredits().catch(() => null), getPodStatus().catch(() => null)]);
+  const [credits, podStatus] = await Promise.all([getCachedCredits().catch(() => null), getPodStatus().catch(() => null)]);
   res.json({
     credits,
     monthlyUsage: monthlyUsageForUser(currentUser),
