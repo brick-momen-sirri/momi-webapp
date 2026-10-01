@@ -38,6 +38,12 @@ type WorkspaceDataOptions = {
   selectedFolderId: string;
   /** Whose jobs to load, or ALL_JOB_OWNERS. Narrows the fetch, like the project does. */
   jobOwnerId: string;
+  /**
+   * Hold the load while a shared result link is still deciding which project and
+   * folder to open, so the workspace is loaded once, for those, rather than for the
+   * remembered project and then again.
+   */
+  holdLoad?: boolean;
   showToast: ShowToast;
 };
 
@@ -50,6 +56,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     setSelectedProjectId,
     selectedFolderId,
     jobOwnerId,
+    holdLoad = false,
     showToast,
   } = options;
   const [projects, setProjects] = useState<Project[]>(emptyProjects);
@@ -79,7 +86,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
   });
 
   useEffect(() => {
-    if (!account) return;
+    if (!account || holdLoad) return;
     const accountId = account.id;
     let mounted = true;
 
@@ -204,6 +211,7 @@ export function useWorkspaceData(options: WorkspaceDataOptions) {
     // "load more" above, or those would merge unfiltered pages back into a filtered list.
   }, [
     account,
+    holdLoad,
     jobOwnerId,
     selectedFolderId,
     selectedProjectId,

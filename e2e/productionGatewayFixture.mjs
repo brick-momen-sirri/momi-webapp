@@ -52,6 +52,77 @@ const model = {
 };
 
 const state = { uploads: [], submissions: [], jobs: [] };
+
+// A second project with a realistic history, for the result-link tests: 80 results,
+// the newest 50 of them in SHOT0002 above an older one that a link points at, so
+// the linked result is on no first page and has to be fetched by id. A third
+// project the artist is not a member of holds a result they must not be shown.
+const marina = {
+  ...project,
+  id: "proj_marina",
+  name: "E2E Marina",
+  shortName: "MAR",
+  folders: [
+    { folderId: "fld_shot1", parentId: null, name: "SHOT0001", archived: false },
+    { folderId: "fld_shot2", parentId: null, name: "SHOT0002", archived: false },
+  ],
+};
+const library = [
+  ...Array.from({ length: 80 }, (_, index) =>
+    libraryJob(`job_marina_${String(index).padStart(2, "0")}`, {
+      folderId: index < 50 ? "fld_shot2" : "fld_shot1",
+      prompt: `Marina pass ${index}`,
+      createdAt: new Date(Date.UTC(2026, 8, 30, 12) - index * 3_600_000).toISOString(),
+    }),
+  ),
+  libraryJob("job_link_target", {
+    folderId: "fld_shot2",
+    prompt: "Shared marina flythrough",
+    createdAt: "2026-07-01T10:00:00.000Z",
+  }),
+  libraryJob("job_private", { projectId: "proj_private", prompt: "Not yours", createdAt: "2026-09-01T10:00:00.000Z" }),
+];
+const visibleProjectIds = new Set([project.id, marina.id]);
+// Per-path response delays, set by a test to production's measured medians.
+let latencyMs = {};
+const requestLog = [];
+
+function libraryJob(id, overrides) {
+  return {
+    id,
+    projectId: marina.id,
+    userId: user.id,
+    modelId: model.id,
+    modelName: model.name,
+    category: model.category,
+    workflowPath: model.workflowPath,
+    inputType: "single_image",
+    resolution: { width: 1024, height: 1024, label: "1K" },
+    status: "completed",
+    inputImages: [],
+    resultUrls: [`/api/media?path=${id}.png`],
+    thumbnailUrls: [`/api/media?path=${id}.png`],
+    outputType: "image",
+    creditsEstimated: 3,
+    ...overrides,
+    folderName: overrides.folderId === "fld_shot1" ? "SHOT0001" : overrides.folderId === "fld_shot2" ? "SHOT0002" : undefined,
+    completedAt: overrides.createdAt,
+  };
+}
+
+function jobsPage(url) {
+  const projectId = url.searchParams.get("projectId");
+  const folderId = url.searchParams.get("folderId");
+  const limit = Number(url.searchParams.get("limit") ?? 30);
+  const offset = Number(url.searchParams.get("offset") ?? 0);
+  const matching = [...state.jobs, ...library]
+    .filter((job) => visibleProjectIds.has(job.projectId))
+    .filter((job) => !projectId || job.projectId === projectId)
+    .filter((job) => !folderId || job.folderId === folderId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const jobs = matching.slice(offset, offset + limit);
+  return { jobs, total: matching.length, limit, offset, hasMore: offset + jobs.length < matching.length };
+}
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -65,6 +136,18 @@ const apiServer = http.createServer(async (request, response) => {
   if (method === "GET" && url.pathname === "/api/e2e/state") {
     return json(response, 200, state);
   }
+  if (method === "POST" && url.pathname === "/api/e2e/latency") {
+    latencyMs = JSON.parse(body.toString("utf8") || "{}");
+    return json(response, 200, { latencyMs });
+  }
+  if (method === "GET" && url.pathname === "/api/e2e/requests") return json(response, 200, { requests: requestLog });
+  if (method === "POST" && url.pathname === "/api/e2e/requests/reset") {
+    requestLog.length = 0;
+    return json(response, 200, { ok: true });
+  }
+  requestLog.push({ method, path: url.pathname, search: url.search, at: Date.now() });
+  const delay = latencyMs[url.pathname] ?? (/^\/api\/jobs\/[^/]+$/.test(url.pathname) ? latencyMs["/api/jobs/:id"] : undefined);
+  if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
   if (method === "POST" && url.pathname === "/api/auth/login") {
     return json(response, 200, {
       token: "e2e-session-token",
@@ -77,7 +160,7 @@ const apiServer = http.createServer(async (request, response) => {
     return json(response, 200, { user, mediaAccess: { token: "e2e-media-token", expiresAt: futureIso() } });
   }
   if (method === "GET" && url.pathname === "/api/models") return json(response, 200, { models: [model] });
-  if (method === "GET" && url.pathname === "/api/projects") return json(response, 200, { projects: [project] });
+  if (method === "GET" && url.pathname === "/api/projects") return json(response, 200, { projects: [project, marina] });
   if (method === "GET" && url.pathname === "/api/users") return json(response, 200, { users: [user] });
   if (method === "GET" && url.pathname === "/api/credits") {
     return json(response, 200, { creditsLeft: 500, source: "e2e" });
@@ -95,8 +178,16 @@ const apiServer = http.createServer(async (request, response) => {
     });
   }
   if (method === "GET" && url.pathname === "/api/pods/status") return json(response, 200, { status: podStatus() });
-  if (method === "GET" && url.pathname === "/api/jobs") {
-    return json(response, 200, { jobs: state.jobs, total: state.jobs.length, limit: 80, offset: 0, hasMore: false });
+  if (method === "GET" && url.pathname === "/api/jobs") return json(response, 200, jobsPage(url));
+  if (method === "GET" && /^\/api\/jobs\/[^/]+\/result-(media|file)$/.test(url.pathname)) {
+    response.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(onePixelPng.length) });
+    response.end(onePixelPng);
+    return;
+  }
+  if (method === "GET" && /^\/api\/jobs\/[^/]+$/.test(url.pathname)) {
+    const jobId = decodeURIComponent(url.pathname.slice("/api/jobs/".length));
+    const job = [...state.jobs, ...library].find((item) => item.id === jobId && visibleProjectIds.has(item.projectId));
+    return job ? json(response, 200, { job }) : json(response, 404, { error: "Job not found" });
   }
   if (method === "GET" && (url.pathname === "/api/media" || url.pathname === "/api/media/thumbnail")) {
     response.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(onePixelPng.length) });

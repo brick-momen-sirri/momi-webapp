@@ -393,7 +393,7 @@ describe("shared result links", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
-  it("open a result from another project that is not on the loaded page, in its folder", async () => {
+  it("open a result from another project that is not on the loaded page, loading its folder once", async () => {
     window.history.replaceState(null, "", "/?result=job_old");
     await bootSignedIn((state) => {
       state.projects = [
@@ -421,15 +421,18 @@ describe("shared result links", () => {
 
     await waitFor(() => expect(screen.getByText(/the shared marina flythrough/)).toBeInTheDocument());
     expect(screen.getByText(/the shared marina flythrough/).closest("article")).toHaveAttribute("data-linked", "true");
-    expect(screen.getByText("Opened the shared result in Marina.")).toBeInTheDocument();
-    // The project's own newest page replaced the old one, and the linked result stayed.
-    await waitFor(() =>
-      expect(harness.calls.some((call) => call.path === "/api/jobs" && call.search.includes("folderId=fld_shot"))).toBe(true),
-    );
-    expect(screen.getByText(/the shared marina flythrough/)).toBeInTheDocument();
     expect(screen.queryByText(/the newest result on page one/)).toBeNull();
     expect(harness.callsTo("/api/jobs/job_old")).toHaveLength(1);
     expect(window.location.search).toBe("");
+    // One workspace load, already for the result's project and folder -- not the
+    // remembered project first and everything again after.
+    const jobPages = harness.calls.filter((call) => call.path === "/api/jobs");
+    expect(jobPages).toHaveLength(1);
+    expect(jobPages[0].search).toContain("projectId=proj_2");
+    expect(jobPages[0].search).toContain("folderId=fld_shot");
+    for (const path of ["/api/models", "/api/projects", "/api/credits", "/api/users", "/api/runtime"]) {
+      expect(harness.calls.filter((call) => call.path === path)).toHaveLength(1);
+    }
   });
 
   it("say so when the result cannot be opened, and drop the link", async () => {
@@ -454,7 +457,7 @@ describe("shared result links", () => {
     expect(window.location.search).toBe("?result=job_1");
   });
 
-  it("open a still image result in Still Images, without refetching one already loaded", async () => {
+  it("open a still image result in Still Images", async () => {
     window.history.replaceState(null, "", "/?result=job_still");
     await bootSignedIn((state) => {
       state.jobs = [
@@ -468,7 +471,7 @@ describe("shared result links", () => {
 
     await waitFor(() => expect(screen.getByText("Still image results")).toBeInTheDocument());
     await waitFor(() => expect(document.querySelector("[data-linked]")?.id).toBe("result-card-job_still"));
-    expect(harness.callsTo("/api/jobs/job_still")).toHaveLength(0);
+    expect(harness.callsTo("/api/jobs/job_still")).toHaveLength(1);
   });
 
   it("copy a link that names the result", async () => {

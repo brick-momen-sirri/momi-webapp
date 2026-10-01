@@ -131,6 +131,30 @@ function App() {
   useEffect(() => {
     setLegacyStillImagesTargetFolderId(targetFolderId);
   }, [setLegacyStillImagesTargetFolderId, targetFolderId]);
+  // A result opened from a shared link (see features/jobs/resultLink.ts), resolved
+  // before the workspace loads so that load is for its project and folder. Kept
+  // apart from `jobs` because the page of that project's newest results need not
+  // include an older one; it is merged back in below.
+  const [linkedResult, setLinkedResult] = useState<{ job: Job; request: number }>();
+  const [highlightedJobId, setHighlightedJobId] = useState<string>();
+  const { opening: openingLinkedResult } = useLinkedResult({
+    ready: Boolean(account),
+    onOpen: (job) => {
+      setMainSection(isStillImageJob(job) ? "still-images" : "animation");
+      // An admin's owner filter decides what is fetched, so it could hide the result.
+      setJobOwnerId(ALL_JOB_OWNERS);
+      setSelectedProjectId(job.projectId);
+      if (Boolean(job.archivedAt) !== showArchivedJobs) handleToggleArchivedView();
+      setLinkedResult((current) => ({ job, request: (current?.request ?? 0) + 1 }));
+      setHighlightedJobId(job.id);
+      window.setTimeout(() => setHighlightedJobId((current) => (current === job.id ? undefined : current)), 8000);
+    },
+    onUnavailable: () =>
+      showToast(
+        "That result link can't be opened. The result may have been deleted, or you may not have access to its project.",
+        "error",
+      ),
+  });
   const {
     projects,
     setProjects,
@@ -164,6 +188,7 @@ function App() {
     setSelectedProjectId,
     selectedFolderId,
     jobOwnerId,
+    holdLoad: openingLinkedResult,
     showToast,
   });
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -277,32 +302,6 @@ function App() {
     setBackendJobsOffset,
     setConfirmDialog,
     showToast,
-  });
-  // A result opened from a shared link (see features/jobs/resultLink.ts). Kept apart
-  // from `jobs` because switching to its project resets the page to that project's
-  // newest results, which an older one is not among; it is merged back in below.
-  const [linkedResult, setLinkedResult] = useState<{ job: Job; request: number }>();
-  const [highlightedJobId, setHighlightedJobId] = useState<string>();
-  const { opening: openingLinkedResult } = useLinkedResult({
-    ready: Boolean(account) && loadedWorkspaceAccountId === account?.id,
-    jobs,
-    onOpen: (job) => {
-      setMainSection(isStillImageJob(job) ? "still-images" : "animation");
-      // An admin's owner filter decides what is fetched, so it could hide the result.
-      setJobOwnerId(ALL_JOB_OWNERS);
-      setSelectedProjectId(job.projectId);
-      if (Boolean(job.archivedAt) !== showArchivedJobs) handleToggleArchivedView();
-      setLinkedResult((current) => ({ job, request: (current?.request ?? 0) + 1 }));
-      setHighlightedJobId(job.id);
-      window.setTimeout(() => setHighlightedJobId((current) => (current === job.id ? undefined : current)), 8000);
-      const projectName = projects.find((project) => project.id === job.projectId)?.name;
-      showToast(projectName ? `Opened the shared result in ${projectName}.` : "Opened the shared result.", "info");
-    },
-    onUnavailable: () =>
-      showToast(
-        "That result link can't be opened. The result may have been deleted, or you may not have access to its project.",
-        "error",
-      ),
   });
   const linkedResultTarget = useMemo(
     () => (linkedResult ? { jobId: linkedResult.job.id, request: linkedResult.request } : undefined),
@@ -471,6 +470,9 @@ function App() {
   useResetWhenChanged(
     `${activeFolderIdSignature}|${selectedFolderId}|${targetFolderId}`,
     () => {
+      // Until the project's folders have loaded there is nothing to judge a folder
+      // against, and a shared link sets its folder before they have.
+      if (!selectedProject) return;
       const folderIds = new Set(activeFolderIdSignature ? activeFolderIdSignature.split(",") : []);
       if (targetFolderId && !folderIds.has(targetFolderId)) {
         // Only clear the value checked here. On a project switch this runs in the
@@ -487,9 +489,13 @@ function App() {
   // A shared link lands in the result's own folder, for the context around it.
   // After the two resets above on purpose: in the render where the link switches
   // project they both set the folder back to "all", and this has to win.
+  // Usually set before the folders have loaded; the prune above then drops it if
+  // the folder has since been archived.
   useResetWhenChanged(linkedResult?.request, () => {
     const folderId = linkedResult?.job.folderId;
-    const live = folderId && selectedProject?.folders?.some((folder) => folder.folderId === folderId && !folder.archived);
+    const live =
+      folderId &&
+      (!selectedProject || selectedProject.folders?.some((folder) => folder.folderId === folderId && !folder.archived));
     setSelectedFolderId(live ? folderId : "all");
   });
 
@@ -746,7 +752,7 @@ function App() {
   if (loadedWorkspaceAccountId !== account.id) {
     return (
       <WorkspaceLoadingScreen
-        title="Loading your workspace"
+        title={openingLinkedResult || linkedResult ? "Opening the shared result" : "Loading your workspace"}
         message="Fetching projects, jobs, models, and credit usage..."
         accountName={account.name}
       />
