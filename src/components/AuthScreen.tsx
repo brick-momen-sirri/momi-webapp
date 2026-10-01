@@ -7,9 +7,11 @@ type AuthScreenProps = {
   onSignIn: (email: string, password: string) => Promise<AuthResult>;
   theme: ThemeMode;
   onThemeToggle: () => void;
+  /** Why the sign-in is being asked for, when it is more than opening the app. */
+  notice?: string;
 };
 
-export function AuthScreen({ onSignIn, theme, onThemeToggle }: AuthScreenProps) {
+export function AuthScreen({ onSignIn, theme, onThemeToggle, notice }: AuthScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -63,7 +65,7 @@ export function AuthScreen({ onSignIn, theme, onThemeToggle }: AuthScreenProps) 
           <div className="login-form-item login-delay-3 mb-6 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-xl font-bold">Sign in</h2>
-              <p className="mt-1 text-sm text-stone-500">Use the account created by an administrator.</p>
+              <p className="mt-1 text-sm text-stone-500">{notice ?? "Use the account created by an administrator."}</p>
             </div>
             <ThemeToggle theme={theme} onToggle={onThemeToggle} />
           </div>

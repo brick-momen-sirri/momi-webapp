@@ -8,6 +8,8 @@ import { finalsForDraft } from "../features/jobs/draftFinal";
 import { JobCard } from "./JobCard";
 import { ResultTile } from "./ResultTile";
 import { resultCardElementId } from "../utils/resultCard";
+import { useLinkedResultScroll, type LinkedResult } from "../features/jobs/useLinkedResultScroll";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { ArchiveViewToggle, ResultLayoutToggle, type ResultLayout } from "./ResultViewControls";
 
 type JobFeedProps = {
@@ -32,6 +34,11 @@ type JobFeedProps = {
   favoriteJobIds: Set<string>;
   onDownload: (job: Job) => void;
   onCopyImage: (job: Job) => void;
+  onCopyLink?: (job: Job) => void;
+  /** The result a shared link opened: shown in the list, scrolled to and ringed. */
+  linkedResult?: LinkedResult;
+  /** Ringed while set; cleared by the host a few seconds after the link opened. */
+  highlightedJobId?: string;
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
@@ -107,6 +114,9 @@ export function JobFeed({
   favoriteJobIds,
   onDownload,
   onCopyImage,
+  onCopyLink,
+  linkedResult,
+  highlightedJobId,
   onReuseSettings,
   onRetry,
   onCancel,
@@ -225,6 +235,24 @@ export function JobFeed({
     userFilter,
     users,
   ]);
+
+  // A shared link opened a result here: show the list with it in, and clear the
+  // local filters if they would hide it -- the artist never chose to filter it out.
+  useResetWhenChanged(linkedResult?.request, () => {
+    if (!linkedResult) return;
+    setLayout("list");
+    setFocusJobId(linkedResult.jobId);
+    if (!visibleJobs.some((job) => job.id === linkedResult.jobId)) {
+      setStatusFilter("all");
+      setQuery("");
+      setModelFilter("all");
+      setScopeFilter("all");
+      setDateFilter("all");
+      setSaveNumberFilter("");
+      setOutputFilter("all");
+    }
+  });
+  useLinkedResultScroll(linkedResult, layout, visibleJobs);
 
   useEffect(() => {
     const scrollContainer = headerRef.current?.closest("main") as HTMLElement | null;
@@ -664,6 +692,8 @@ export function JobFeed({
                   canReuseSettings={canReuseSettings(job)}
                   onDownload={onDownload}
                   onCopyImage={onCopyImage}
+                  onCopyLink={onCopyLink}
+                  highlighted={highlightedJobId === job.id}
                   onReuseSettings={onReuseSettings}
                   onRetry={onRetry}
                   onCancel={onCancel}

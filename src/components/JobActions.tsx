@@ -1,4 +1,4 @@
-import { Archive, Copy, Download, RefreshCw, RotateCcw, RotateCw, Sparkles, Star, Trash2, XCircle } from "lucide-react";
+import { Archive, Copy, Download, Link2, RefreshCw, RotateCcw, RotateCw, Sparkles, Star, Trash2, XCircle } from "lucide-react";
 import type { Job, Project, User } from "../types";
 import { canCancelJob } from "../features/jobs/cancellation";
 import { draftExpiryText, draftFinalPlan } from "../features/jobs/draftFinal";
@@ -15,6 +15,8 @@ type JobActionsProps = {
   archiveView: boolean;
   onDownload: (job: Job) => void;
   onCopyImage: (job: Job) => void;
+  /** Copy a link that opens this result in Momi. Absent where links are not offered. */
+  onCopyLink?: (job: Job) => void;
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
@@ -38,6 +40,7 @@ export function JobActions({
   archiveView,
   onDownload,
   onCopyImage,
+  onCopyLink,
   onReuseSettings,
   onRetry,
   onCancel,
@@ -150,6 +153,19 @@ export function JobActions({
       >
         <Copy className="h-3.5 w-3.5" />
       </button>
+      {/* Any status: a link to a render still running is as useful to a colleague
+          as one to a finished result, and it opens on whatever state it is in. */}
+      {onCopyLink ? (
+        <button
+          type="button"
+          onClick={() => onCopyLink(job)}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-line text-stone-600 transition hover:bg-stone-50"
+          title="Copy link to this result"
+          aria-label="Copy link"
+        >
+          <Link2 className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => onReuseSettings(job)}

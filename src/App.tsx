@@ -87,6 +87,7 @@ import { STILL_IMAGE_CATEGORIES, type StillImageCategoryId } from "./features/st
 import { useStillImagesForm } from "./features/still-images/useStillImagesForm";
 import { useStillImagesSubmission } from "./features/still-images/useStillImagesSubmission";
 import { mergeJobs } from "./features/workspace/workspaceUtils";
+import { useLinkedResult } from "./features/jobs/useLinkedResult";
 
 function App() {
   const [initialSettings] = useState(readPersistedGenerationSettings);
@@ -256,6 +257,7 @@ function App() {
     handleDownloadChoice,
     handleDownloadJobResult,
     handleCopyJobImage,
+    handleCopyJobLink,
     handleToggleFavorite,
     handleMoveJobResult,
     handleRetryJob,
@@ -276,6 +278,40 @@ function App() {
     setConfirmDialog,
     showToast,
   });
+  // A result opened from a shared link (see features/jobs/resultLink.ts). Kept apart
+  // from `jobs` because switching to its project resets the page to that project's
+  // newest results, which an older one is not among; it is merged back in below.
+  const [linkedResult, setLinkedResult] = useState<{ job: Job; request: number }>();
+  const [highlightedJobId, setHighlightedJobId] = useState<string>();
+  const { opening: openingLinkedResult } = useLinkedResult({
+    ready: Boolean(account) && loadedWorkspaceAccountId === account?.id,
+    jobs,
+    onOpen: (job) => {
+      setMainSection(isStillImageJob(job) ? "still-images" : "animation");
+      // An admin's owner filter decides what is fetched, so it could hide the result.
+      setJobOwnerId(ALL_JOB_OWNERS);
+      setSelectedProjectId(job.projectId);
+      if (Boolean(job.archivedAt) !== showArchivedJobs) handleToggleArchivedView();
+      setLinkedResult((current) => ({ job, request: (current?.request ?? 0) + 1 }));
+      setHighlightedJobId(job.id);
+      window.setTimeout(() => setHighlightedJobId((current) => (current === job.id ? undefined : current)), 8000);
+      const projectName = projects.find((project) => project.id === job.projectId)?.name;
+      showToast(projectName ? `Opened the shared result in ${projectName}.` : "Opened the shared result.", "info");
+    },
+    onUnavailable: () =>
+      showToast(
+        "That result link can't be opened. The result may have been deleted, or you may not have access to its project.",
+        "error",
+      ),
+  });
+  const linkedResultTarget = useMemo(
+    () => (linkedResult ? { jobId: linkedResult.job.id, request: linkedResult.request } : undefined),
+    [linkedResult],
+  );
+  const jobsWithLinkedResult = useMemo(() => {
+    const linked = linkedResult?.job;
+    return linked && !jobs.some((job) => job.id === linked.id) ? mergeJobs([linked], jobs) : jobs;
+  }, [jobs, linkedResult]);
   const { isSubmitting, submissionPhase, hasRecoverableSubmission, handleGenerate, cancelSubmission } = useJobSubmission({
     account,
     backendAvailable,
@@ -389,16 +425,19 @@ function App() {
   // The two workspaces list different jobs from the same loaded set. Without this
   // split, still image jobs would also appear in the Animation feed -- they share
   // the job store, and only workflowOptions.stillImage tells them apart.
-  const animationJobs = useMemo(() => jobs.filter((job) => !isStillImageJob(job)), [jobs]);
+  const animationJobs = useMemo(
+    () => jobsWithLinkedResult.filter((job) => !isStillImageJob(job)),
+    [jobsWithLinkedResult],
+  );
   const stillImageJobs = useMemo(
     () =>
-      jobs.filter(
+      jobsWithLinkedResult.filter(
         (job) =>
           isStillImageJob(job) &&
           !job.workflowOptions?.stillImage?.edit &&
           (!selectedProjectId || selectedProjectId === ALL_PROJECTS_ID || job.projectId === selectedProjectId),
       ),
-    [jobs, selectedProjectId],
+    [jobsWithLinkedResult, selectedProjectId],
   );
   const currentMonthUsage = account
     ? (monthlyUsageByUser[account.id] ?? getMonthlyUsageForUser(jobs, account.id))
@@ -444,6 +483,15 @@ function App() {
       }
     },
   );
+
+  // A shared link lands in the result's own folder, for the context around it.
+  // After the two resets above on purpose: in the render where the link switches
+  // project they both set the folder back to "all", and this has to win.
+  useResetWhenChanged(linkedResult?.request, () => {
+    const folderId = linkedResult?.job.folderId;
+    const live = folderId && selectedProject?.folders?.some((folder) => folder.folderId === folderId && !folder.archived);
+    setSelectedFolderId(live ? folderId : "all");
+  });
 
   /**
    * Put a still image result's preset back into the Still Images form.
@@ -685,7 +733,14 @@ function App() {
   }
 
   if (!account) {
-    return <AuthScreen onSignIn={handleSignIn} theme={theme} onThemeToggle={handleThemeToggle} />;
+    return (
+      <AuthScreen
+        onSignIn={handleSignIn}
+        theme={theme}
+        onThemeToggle={handleThemeToggle}
+        notice={openingLinkedResult ? "Sign in to open the result that was shared with you." : undefined}
+      />
+    );
   }
 
   if (loadedWorkspaceAccountId !== account.id) {
@@ -831,6 +886,9 @@ function App() {
               favoriteJobIds={favoriteJobIds}
               onDownload={handleDownloadJobResult}
               onCopyImage={handleCopyJobImage}
+              onCopyLink={(job) => void handleCopyJobLink(job)}
+              linkedResult={linkedResultTarget}
+              highlightedJobId={highlightedJobId}
               onReuseSettings={handleReuseJobSettings}
               onRetry={handleRetryJob}
               onRenderDraftFinal={handleRenderDraftFinal}
@@ -875,6 +933,9 @@ function App() {
               reopeningEditDocument={reopeningEditDocument}
               onDownload={handleDownloadJobResult}
               onCopyImage={handleCopyJobImage}
+              onCopyLink={(job) => void handleCopyJobLink(job)}
+              linkedResult={linkedResultTarget}
+              highlightedJobId={highlightedJobId}
               onReuseSettings={handleReuseJobSettings}
               onRetry={handleRetryJob}
               onCancel={handleCancelJob}

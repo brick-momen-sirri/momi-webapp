@@ -38,6 +38,9 @@ type JobCardProps = {
   archiveView: boolean;
   onDownload: (job: Job) => void;
   onCopyImage: (job: Job) => void;
+  onCopyLink?: (job: Job) => void;
+  /** Ringed for a moment when a shared link opened this card. */
+  highlighted?: boolean;
   onReuseSettings: (job: Job) => void;
   onRetry: (job: Job) => void;
   onCancel: (job: Job) => void;
@@ -64,6 +67,8 @@ export function JobCard({
   archiveView,
   onDownload,
   onCopyImage,
+  onCopyLink,
+  highlighted = false,
   onReuseSettings,
   onRetry,
   onCancel,
@@ -106,7 +111,9 @@ export function JobCard({
       className={cn(
         "job-card-cv rounded-lg border bg-white p-4 shadow-card",
         job.status === "completed" ? "border-teal-200" : "border-line",
+        highlighted && "ring-2 ring-accent",
       )}
+      data-linked={highlighted || undefined}
     >
       <div className="flex flex-col gap-3 border-b border-line pb-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
@@ -246,6 +253,7 @@ export function JobCard({
           archiveView={archiveView}
           onDownload={onDownload}
           onCopyImage={onCopyImage}
+          onCopyLink={onCopyLink}
           onReuseSettings={onReuseSettings}
           onRetry={onRetry}
           onCancel={onCancel}

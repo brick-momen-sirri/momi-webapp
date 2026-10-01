@@ -6,8 +6,8 @@
 // The harness stubs fetch rather than the backendApi module; see
 // src/test/appHarness.tsx for why.
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { backendJob, backendProject, backendUser, defaultState, installBackend, type Harness } from "./test/appHarness";
@@ -383,5 +383,102 @@ describe("role-gated surfaces", () => {
     expect(screen.queryByText(/View-only access/i)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Generation prompt" })).toBeEnabled();
     expect(screen.getByLabelText("Upload Input image")).toBeEnabled();
+  });
+});
+
+describe("shared result links", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+    Reflect.deleteProperty(window, "isSecureContext");
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("open a result from another project that is not on the loaded page, in its folder", async () => {
+    window.history.replaceState(null, "", "/?result=job_old");
+    await bootSignedIn((state) => {
+      state.projects = [
+        backendProject(),
+        backendProject({
+          id: "proj_2",
+          name: "Marina",
+          shortName: "MAR",
+          folders: [{ folderId: "fld_shot", parentId: null, name: "SHOT0002", archived: false }],
+        }),
+      ];
+      state.jobs = [backendJob({ id: "job_new", prompt: "the newest result on page one" })];
+      state.overrides["/api/jobs/job_old"] = {
+        body: {
+          job: backendJob({
+            id: "job_old",
+            projectId: "proj_2",
+            folderId: "fld_shot",
+            prompt: "the shared marina flythrough",
+            createdAt: "2026-07-01T10:00:00.000Z",
+          }),
+        },
+      };
+    });
+
+    await waitFor(() => expect(screen.getByText(/the shared marina flythrough/)).toBeInTheDocument());
+    expect(screen.getByText(/the shared marina flythrough/).closest("article")).toHaveAttribute("data-linked", "true");
+    expect(screen.getByText("Opened the shared result in Marina.")).toBeInTheDocument();
+    // The project's own newest page replaced the old one, and the linked result stayed.
+    await waitFor(() =>
+      expect(harness.calls.some((call) => call.path === "/api/jobs" && call.search.includes("folderId=fld_shot"))).toBe(true),
+    );
+    expect(screen.getByText(/the shared marina flythrough/)).toBeInTheDocument();
+    expect(screen.queryByText(/the newest result on page one/)).toBeNull();
+    expect(harness.callsTo("/api/jobs/job_old")).toHaveLength(1);
+    expect(window.location.search).toBe("");
+  });
+
+  it("say so when the result cannot be opened, and drop the link", async () => {
+    window.history.replaceState(null, "", "/?result=job_gone");
+    await bootSignedIn((state) => {
+      state.overrides["/api/jobs/job_gone"] = { status: 404, body: { error: "Job not found" } };
+    });
+
+    await waitFor(() => expect(screen.getByText(/That result link can't be opened/)).toBeInTheDocument());
+    expect(document.querySelector("[data-linked]")).toBeNull();
+    expect(window.location.search).toBe("");
+  });
+
+  it("ask a signed-out colleague to sign in, and keep the link for after", async () => {
+    window.history.replaceState(null, "", "/?result=job_1");
+    boot((state) => {
+      state.user = null;
+    });
+
+    await waitFor(() => expect(screen.getByText("Sign in to open the result that was shared with you.")).toBeInTheDocument());
+    expect(harness.callsTo("/api/jobs/job_1")).toHaveLength(0);
+    expect(window.location.search).toBe("?result=job_1");
+  });
+
+  it("open a still image result in Still Images, without refetching one already loaded", async () => {
+    window.history.replaceState(null, "", "/?result=job_still");
+    await bootSignedIn((state) => {
+      state.jobs = [
+        backendJob({
+          id: "job_still",
+          modelId: "still_general-enhancement",
+          workflowOptions: { stillImage: { categoryId: "general-enhancement", settings: {} } },
+        }),
+      ];
+    });
+
+    await waitFor(() => expect(screen.getByText("Still image results")).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector("[data-linked]")?.id).toBe("result-card-job_still"));
+    expect(harness.callsTo("/api/jobs/job_still")).toHaveLength(0);
+  });
+
+  it("copy a link that names the result", async () => {
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await bootSignedIn();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/?result=job_1`));
+    expect(screen.getByText("Link copied. Anyone with access to this project can open it.")).toBeInTheDocument();
   });
 });

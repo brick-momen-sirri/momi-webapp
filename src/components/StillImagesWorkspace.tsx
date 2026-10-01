@@ -56,6 +56,8 @@ import { ResultTile } from "./ResultTile";
 import { finalizedSessionSpend } from "../features/still-images/editDocument";
 import { cn } from "../utils/classNames";
 import { resultCardElementId } from "../utils/resultCard";
+import { useLinkedResultScroll, type LinkedResult } from "../features/jobs/useLinkedResultScroll";
+import { useResetWhenChanged } from "../utils/useResetWhenChanged";
 import { ArchiveViewToggle, JobStatusBadge, ResultLayoutToggle } from "./ResultViewControls";
 import { UseAsInputMenu } from "./UseAsInputMenu";
 
@@ -98,6 +100,11 @@ type StillImagesWorkspaceProps = {
   reopeningEditDocument?: string;
   onDownload?: (job: Job) => void;
   onCopyImage?: (job: Job) => void;
+  onCopyLink?: (job: Job) => void;
+  /** The result a shared link opened: shown in the list, scrolled to and ringed. */
+  linkedResult?: LinkedResult;
+  /** Ringed while set; cleared by the host a few seconds after the link opened. */
+  highlightedJobId?: string;
   onReuseSettings?: (job: Job) => void;
   onRetry?: (job: Job) => void;
   /** Stop a queued or running job before it finishes paying for its pod time. */
@@ -122,6 +129,8 @@ export function StillImagesWorkspace({
   currentUserId,
   currentUserRole = "user",
   favoriteJobIds,
+  linkedResult,
+  highlightedJobId,
   ...actions
 }: StillImagesWorkspaceProps) {
   const CategoryIcon = category.icon;
@@ -143,6 +152,17 @@ export function StillImagesWorkspace({
     [jobs, filters, favoriteJobIds, currentUserId, projectFolders],
   );
   const filtering = hasActiveStillImageFilters(filters);
+
+  // A shared link opened a result here. These filters are remembered across visits,
+  // so one set last week can hide the very result the link is for: they are reset
+  // only in that case, and the list is shown with the card in it.
+  useResetWhenChanged(linkedResult?.request, () => {
+    if (!linkedResult) return;
+    setLayout("list");
+    setFocusJobId(linkedResult.jobId);
+    if (!visibleJobs.some((job) => job.id === linkedResult.jobId)) setFilters(DEFAULT_STILL_IMAGE_RESULT_FILTERS);
+  });
+  useLinkedResultScroll(linkedResult, layout, visibleJobs);
 
   useEffect(() => {
     if (layout !== "list" || !focusJobId) return;
@@ -239,6 +259,7 @@ export function StillImagesWorkspace({
                 viewer={viewer}
                 cancellationNote={cancellationNote(job, users)}
                 isFavorite={favoriteJobIds?.has(job.id) ?? false}
+                highlighted={highlightedJobId === job.id}
                 actions={actions}
               />
             ))}
@@ -449,6 +470,8 @@ type StillImageActions = Omit<
   | "currentUserId"
   | "currentUserRole"
   | "favoriteJobIds"
+  | "linkedResult"
+  | "highlightedJobId"
 >;
 
 function StillImageJobCard({
@@ -459,6 +482,7 @@ function StillImageJobCard({
   viewer,
   cancellationNote,
   isFavorite,
+  highlighted = false,
   actions,
 }: {
   job: Job;
@@ -470,6 +494,8 @@ function StillImageJobCard({
   /** "Canceled by admin …" -- see features/jobs/cancellation. */
   cancellationNote?: string;
   isFavorite: boolean;
+  /** Ringed for a moment when a shared link opened this card. */
+  highlighted?: boolean;
   actions: StillImageActions;
 }) {
   const preset = STILL_IMAGE_CATEGORIES.find((entry) => entry.id === job.workflowOptions?.stillImage?.categoryId);
@@ -489,7 +515,11 @@ function StillImageJobCard({
   const resultBytes = formatResultBytes(job.outputBytes);
 
   return (
-    <article id={resultCardElementId(job.id)} className="job-card-cv rounded-lg border border-line bg-white p-4 shadow-card">
+    <article
+      id={resultCardElementId(job.id)}
+      className={cn("job-card-cv rounded-lg border border-line bg-white p-4 shadow-card", highlighted && "ring-2 ring-accent")}
+      data-linked={highlighted || undefined}
+    >
       {/* Always a row, so the actions stay in the top-right corner. This used to
           become one only at xl, which put the toolbar underneath the title on
           any window narrower than 1280px -- which is most of them. */}
@@ -551,6 +581,7 @@ function StillImageJobCard({
               archiveView={actions.archiveView ?? false}
               onDownload={actions.onDownload}
               onCopyImage={actions.onCopyImage ?? noop}
+              onCopyLink={actions.onCopyLink}
               onReuseSettings={actions.onReuseSettings ?? noop}
               onRetry={actions.onRetry ?? noop}
               onCancel={actions.onCancel ?? noop}

@@ -13,6 +13,7 @@ import {
   updateBackendJobSaveNumber,
 } from "../../services/backendApi";
 import type { Job, Project } from "../../types";
+import { copyText } from "../../utils/copyText";
 import { createClientId } from "../../utils/id";
 import { normalizeRequiredSaveNumber, workflowOptionsWithSaveNumber } from "../generation/generationUtils";
 import { draftExpiryText, draftFinalPlan, finalsForDraft } from "./draftFinal";
@@ -21,6 +22,7 @@ import { folderFilterScope, isInFolderScope } from "../projects/folderTree";
 import type { ConfirmDialogState } from "../projects/useProjectActions";
 import { mergeJobs } from "../workspace/workspaceUtils";
 import { clipboardCompatibleImageBlob, downloadFromUrl, fetchResultBlob, isImageResult } from "./resultMedia";
+import { resultLinkUrl } from "./resultLink";
 
 type ShowToast = (message: string, type?: "success" | "error" | "info") => void;
 
@@ -88,6 +90,21 @@ export function useJobActions(options: JobActionsOptions) {
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not copy image.", "error");
     }
+  }
+
+  /**
+   * Copy a link that opens this result in Momi (see resultLink.ts). The toast says
+   * who can open it, because that is the question the person sharing it has: the
+   * link carries no access of its own. Where no clipboard route works, the link is
+   * shown for copying by hand rather than lost.
+   */
+  async function handleCopyJobLink(job: Job) {
+    const link = resultLinkUrl(job.id);
+    if (await copyText(link)) {
+      showToast("Link copied. Anyone with access to this project can open it.");
+      return;
+    }
+    window.prompt("Copy this link to share the result:", link);
   }
 
   function handleToggleFavorite(job: Job) {
@@ -325,6 +342,7 @@ export function useJobActions(options: JobActionsOptions) {
     handleDownloadChoice,
     handleDownloadJobResult,
     handleCopyJobImage,
+    handleCopyJobLink,
     handleToggleFavorite,
     handleMoveJobResult,
     handleRetryJob,
