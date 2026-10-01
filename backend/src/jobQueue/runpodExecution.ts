@@ -46,6 +46,7 @@ import { buildDraftFinalWorkflow, detectJobDraft, isDraftTaskIdText } from "../d
 import { isDraftFinalModelId } from "../draftFinalModels.js";
 import { detectMediaResolution } from "../mediaResolutionService.js";
 import { resolveAllowedExistingMediaPath } from "../mediaPathPolicy.js";
+import { partnerRateCreditUsage } from "../partnerCreditFallback.js";
 import { partnerModelResolution } from "../partnerModels.js";
 import { isLtxCqI2vModelId } from "../ltxCqImageToVideo.js";
 import { videoEnhancerRunpodPolicy } from "../videoEnhancer.js";
@@ -249,10 +250,16 @@ export async function executeRunpodJob(job: Job, execution: ExecutionClaim, deps
     if (isDraftTaskIdText(job, job.generatedPrompt)) delete job.generatedPrompt;
     await captureRunpodPostBalance(job, activityBaseline);
 
-    const selectedMedia = preferredResultMedia(result.media);
+    const selectedMedia = preferredResultMedia(result.media, [
+      ...runpodImages.imageNames,
+      ...(runpodVideo?.videos ?? []).map((video) => video.name),
+    ]);
     if (!selectedMedia.length) throw new Error("RunPod completed without returning any output media.");
 
-    const creditUsage = result.creditUsage ?? estimateFallbackCreditUsage(model, workflow, job.durationSeconds, job.resolution);
+    const trackedUsage = result.creditUsage ?? estimateFallbackCreditUsage(model, workflow, job.durationSeconds, job.resolution);
+    // MiniMax H3 and Seedream 5.0 come back unpriced from the tracker on ComfyUI 0.38;
+    // their published rate is charged rather than nothing. See partnerCreditFallback.ts.
+    const creditUsage = partnerRateCreditUsage(job, trackedUsage) ?? trackedUsage;
     job.creditUsage = creditUsage;
     applyPodRuntimeCostToJob(job);
     applyAccountingCreditsToJob(job);
@@ -478,9 +485,22 @@ function applyAccountingCreditsToJob(job: Job) {
   else delete job.creditsUsed;
 }
 
-export function preferredResultMedia(media: RunpodMediaResult[]) {
-  const videos = media.filter((item) => item.isVideo);
-  return videos.length ? videos : media;
+/**
+ * The results to keep, in preference order: videos when there are any.
+ *
+ * @param inputNames the names this job's own inputs were sent under. On ComfyUI 0.38
+ *   LoadVideo reports the file it loaded as an output of its own, so a graph with a
+ *   video input returns that input beside the render -- a MiniMax 2K re-render came
+ *   back with its 768P source "draft_base.mp4" first. A generated file is never named
+ *   after an input, so anything that is gets dropped; if that would drop everything,
+ *   the list is kept as it was rather than failing a finished render.
+ */
+export function preferredResultMedia(media: RunpodMediaResult[], inputNames: string[] = []) {
+  const inputs = new Set(inputNames.map((name) => name.toLowerCase()));
+  const generated = media.filter((item) => !inputs.has((item.filename ?? "").toLowerCase()));
+  const candidates = generated.length ? generated : media;
+  const videos = candidates.filter((item) => item.isVideo);
+  return videos.length ? videos : candidates;
 }
 
 export type PreparedSubmission = {
