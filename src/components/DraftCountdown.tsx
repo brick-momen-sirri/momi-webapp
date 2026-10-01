@@ -70,7 +70,7 @@ export function DraftCountdown({ job, finalStatus }: DraftCountdownProps) {
       />
       <div className="min-w-0 flex-1">
         <p className="draft-clock-eyebrow">
-          {phase === "expired" ? <TimerOff className="h-3.5 w-3.5" /> : <Hourglass className="h-3.5 w-3.5" />}
+          {phase === "expired" ? <TimerOff className="h-2.5 w-2.5" /> : <Hourglass className="h-2.5 w-2.5" />}
           {PHASE_EYEBROW[phase]}
         </p>
         {phase === "expired" ? (
@@ -84,7 +84,7 @@ export function DraftCountdown({ job, finalStatus }: DraftCountdownProps) {
           </div>
         )}
         <p className="draft-clock-note">
-          {finalDone && phase !== "expired" ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : null}
+          {finalDone && phase !== "expired" ? <CheckCircle2 className="h-2.5 w-2.5 shrink-0" /> : null}
           {note}
         </p>
       </div>
@@ -132,7 +132,7 @@ function DraftRing({
           : [`${Math.max(1, minutes)}`, "min"];
   return (
     <span className="draft-clock-ring" aria-hidden="true">
-      <svg viewBox="0 0 64 64" width="64" height="64">
+      <svg viewBox="0 0 64 64" width="48" height="48">
         <circle className="draft-clock-ring-track" cx="32" cy="32" r={RING_RADIUS} />
         <circle
           className="draft-clock-ring-arc"
